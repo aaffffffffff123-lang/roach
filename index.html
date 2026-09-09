@@ -313,8 +313,8 @@ class FloorPaint{
   flush(){ if(this.dirty){ this.tex.needsUpdate=true; this.dirty=false; } }
   // level 0~1: 소스색 → 진짜 색
   gooColors(L){
-    const h=lerp(74,62,L), s=lerp(52,44,L), l=lerp(31,19,L); // 올리브색 진물, 단계 오를수록 어둡고 탁하게
-    return { core:`hsl(${h},${s}%,${l}%)`, coreA:(a)=>`hsla(${h},${s}%,${l}%,${a})`, rim:`hsl(${h+4},${s}%,${l+14}%)`, goo:(a)=>`hsla(66,82%,56%,${a})`, white:(a)=>`hsla(70,55%,90%,${a})`, red:(a)=>`hsla(8,50%,20%,${a})` };
+    const h=lerp(47,42,L), s=lerp(42,48,L), l=lerp(86,80,L); // 희끄무레한 크림색 곤죽(지방체). 단계가 올라도 색은 조금 누레질 뿐
+    return { core:`hsl(${h},${s}%,${l}%)`, coreA:(a)=>`hsla(${h},${s}%,${l}%,${a})`, rim:`hsl(${h},${s-10}%,${l+6}%)`, goo:(a)=>`hsla(49,46%,93%,${a})`, white:(a)=>`hsla(45,30%,97%,${a})`, gut:(a)=>`hsla(24,52%,15%,${a})`, red:(a)=>`hsla(20,55%,18%,${a})` };
   }
   splat(x,z,dx,dz,size,L,kind='slipper'){
     const g=this.g, [cx,cy]=this.px(x,z), C=this.gooColors(L), S=size*this.ppm;
@@ -324,15 +324,17 @@ class FloorPaint{
     let gr=g.createRadialGradient(cx,cy,S*0.1,cx,cy,S);
     gr.addColorStop(0,C.coreA(0.95)); gr.addColorStop(0.55,C.coreA(0.8)); gr.addColorStop(1,C.coreA(0));
     g.fillStyle=gr; g.beginPath(); g.ellipse(cx+dx*S*0.25,cy+dz*S*0.25,S*1.15,S*0.85,Math.atan2(dz,dx),0,TAU); g.fill();
-    // 노란 진물
-    g.fillStyle=C.goo(0.25+0.45*L); for(let i=0;i<3+L*5;i++){ const a=rand(TAU), r=rand(S*0.5); g.beginPath(); g.ellipse(cx+Math.cos(a)*r,cy+Math.sin(a)*r,S*rand(0.12,0.3),S*rand(0.08,0.2),rand(TAU),0,TAU); g.fill(); }
+    // 소화관 내용물: 짙은 갈색 줄 한두 개가 튄 방향으로
+    { const k=1+Math.floor(rand(2)+L*2); for(let i=0;i<k;i++){ const a=Math.atan2(dz,dx)+rand(-0.7,0.7), off=rand(-0.15,0.3)*S, w=S*rand(0.05,0.11), ln=S*rand(0.35,0.9); const px=cx+Math.cos(a)*off, py=cy+Math.sin(a)*off; g.strokeStyle=C.gut(rand(0.55,0.85)); g.lineWidth=w; g.lineCap='round'; g.beginPath(); g.moveTo(px-Math.cos(a)*ln*0.3,py-Math.sin(a)*ln*0.3); g.quadraticCurveTo(px+Math.sin(a)*w,py-Math.cos(a)*w,px+Math.cos(a)*ln*0.7,py+Math.sin(a)*ln*0.7); g.stroke(); } }
+    // 하얀 곤죽 덩어리
+    g.fillStyle=C.goo(0.55+0.35*L); for(let i=0;i<3+L*5;i++){ const a=rand(TAU), r=rand(S*0.5); g.beginPath(); g.ellipse(cx+Math.cos(a)*r,cy+Math.sin(a)*r,S*rand(0.12,0.3),S*rand(0.08,0.2),rand(TAU),0,TAU); g.fill(); }
     // 부채꼴 튐
     const n=8+Math.floor(L*14)+(kind==='pan'?10:kind==='book'?6:0);
     const base=Math.atan2(dz,dx);
     for(let i=0;i<n;i++){
       const a=base+rand(-0.9,0.9), d=S*rand(0.8,3.2+L*2)*(kind==='pan'?1.4:1), r=Math.max(S*0.02,S*rand(0.05,0.22)*(1-d/(S*9)));
       const px=cx+Math.cos(a)*d, py=cy+Math.sin(a)*d;
-      g.fillStyle=Math.random()<0.25?C.goo(0.7):C.coreA(0.85);
+      const gut=Math.random()<0.18; g.fillStyle=gut?C.gut(0.8):Math.random()<0.35?C.goo(0.9):C.coreA(0.9);
       g.beginPath(); g.ellipse(px,py,r*rand(1,2.6),r,a,0,TAU); g.fill();
       if(Math.random()<0.5){ g.strokeStyle=C.coreA(0.5); g.lineWidth=r*0.6; g.beginPath(); g.moveTo(px-Math.cos(a)*d*0.35,py-Math.sin(a)*d*0.35); g.lineTo(px,py); g.stroke(); }
     }
@@ -367,11 +369,11 @@ class FloorPaint{
     g.fillStyle=pro; g.beginPath(); { const [ex,ey]=P(0,0.33); g.ellipse(ex,ey,0.17*S*sq,0.13*S,0,0,TAU); } g.fill();
     // 머리 끝
     g.fillStyle=pro; g.beginPath(); { const [ex,ey]=P(0,0.47); g.ellipse(ex,ey,0.07*S,0.05*S,0,0,TAU); } g.fill();
-    if(mode==='crushed'){ const C=this.gooColors(L); g.fillStyle=C.goo(0.85); g.beginPath(); g.ellipse(rand(-0.08,0.08)*S,rand(-0.1,0.2)*S,0.16*S,0.10*S,rand(TAU),0,TAU); g.fill(); g.strokeStyle='rgba(240,225,180,0.55)'; g.lineWidth=S*0.03; g.beginPath(); g.moveTo(-0.08*S,-0.2*S); g.lineTo(0.05*S,0.35*S); g.stroke(); }
+    if(mode==='crushed'){ const C=this.gooColors(L); g.fillStyle=C.goo(0.9); g.beginPath(); g.ellipse(rand(-0.08,0.08)*S,rand(-0.1,0.2)*S,0.17*S,0.11*S,rand(TAU),0,TAU); g.fill(); g.strokeStyle=C.gut(0.8); g.lineWidth=S*0.045; g.lineCap='round'; g.beginPath(); g.moveTo(-0.06*S,-0.15*S); g.quadraticCurveTo(0.06*S,0.05*S,0.03*S,0.3*S); g.stroke(); }
     if(mode==='belly'){ g.fillStyle='#7A4A22'; g.beginPath(); g.ellipse(0,0.06*S,0.15*S,0.40*S,0,0,TAU); g.fill(); g.strokeStyle='#4A2A12'; g.lineWidth=S*0.02; for(let i=-2;i<=3;i++){ g.beginPath(); g.moveTo(-0.14*S,i*0.1*S); g.lineTo(0.14*S,i*0.1*S); g.stroke(); } }
     g.restore(); this.dirty=true;
   }
-  drop(x,z,r,L,yellow=false){ const g=this.g,[cx,cy]=this.px(x,z),C=this.gooColors(L); g.fillStyle=yellow?C.goo(0.7):C.coreA(0.8); g.beginPath(); g.ellipse(cx,cy,r*this.ppm*rand(1,1.8),r*this.ppm,rand(TAU),0,TAU); g.fill(); this.dirty=true; }
+  drop(x,z,r,L,yellow=false,gut=false){ const g=this.g,[cx,cy]=this.px(x,z),C=this.gooColors(L); g.fillStyle=gut?C.gut(0.8):yellow?C.goo(0.85):C.coreA(0.85); g.beginPath(); g.ellipse(cx,cy,r*this.ppm*rand(1,1.8),r*this.ppm,rand(TAU),0,TAU); g.fill(); this.dirty=true; }
   scorch(x,z,r){ const g=this.g,[cx,cy]=this.px(x,z),S=r*this.ppm; const gr=g.createRadialGradient(cx,cy,0,cx,cy,S); gr.addColorStop(0,'rgba(20,12,6,0.55)'); gr.addColorStop(0.6,'rgba(30,18,8,0.25)'); gr.addColorStop(1,'rgba(30,18,8,0)'); g.fillStyle=gr; g.beginPath(); g.arc(cx,cy,S,0,TAU); g.fill(); this.dirty=true; }
   bait(kind,x,z){
     const g=this.g,[cx,cy]=this.px(x,z),S=this.ppm; g.save(); g.translate(cx,cy);
@@ -749,21 +751,22 @@ class Input{
 class Splatter{
   constructor(scene,paint){
     this.n=320; this.paint=paint; const geo=new THREE.SphereGeometry(1,6,5);
-    this.mesh=new THREE.InstancedMesh(geo,M.gloss(0x5a3416,{roughness:0.3}),this.n); this.mesh.castShadow=false; this.mesh.frustumCulled=false; scene.add(this.mesh);
+    this.mesh=new THREE.InstancedMesh(geo,M.gloss(0xffffff,{roughness:0.3}),this.n); this.mesh.castShadow=false; this.mesh.frustumCulled=false; scene.add(this.mesh); this.cream=new THREE.Color(); this.gutCol=new THREE.Color(0x3a2210); for(let i=0;i<this.n;i++) this.mesh.setColorAt(i,this.gutCol);
     this.p=[]; for(let i=0;i<this.n;i++) this.p.push({on:false,x:0,y:0,z:0,vx:0,vy:0,vz:0,r:0.01,yel:false});
     this.dummy=new THREE.Object3D(); this.next=0; this.color=new THREE.Color(); this.L=0; this.hideAll();
   }
   hideAll(){ for(let i=0;i<this.n;i++){ this.dummy.position.set(0,-10,0); this.dummy.scale.setScalar(0.0001); this.dummy.updateMatrix(); this.mesh.setMatrixAt(i,this.dummy.matrix); } this.mesh.instanceMatrix.needsUpdate=true; }
-  setLevel(L){ this.L=L; const h=lerp(74,62,L)/360, s=lerp(0.55,0.45,L), l=lerp(0.34,0.22,L); this.mesh.material.color.setHSL(h,s,l); }
+  setLevel(L){ this.L=L; this.cream.setHSL(lerp(47,42,L)/360,lerp(0.42,0.48,L),lerp(0.86,0.8,L)); }
   burst(x,z,dx,dz,count,power=1){
     const base=Math.atan2(dz,dx);
-    for(let i=0;i<count;i++){ const q=this.p[this.next]; this.next=(this.next+1)%this.n; const a=base+rand(-0.9,0.9), sp=rand(0.3,1.5)*power; q.on=true; q.x=x; q.z=z; q.y=0.02; q.vx=Math.cos(a)*sp; q.vz=Math.sin(a)*sp; q.vy=rand(0.5,1.8)*power; q.r=rand(0.004,0.012); q.yel=Math.random()<0.25; }
+    for(let i=0;i<count;i++){ const q=this.p[this.next]; this.next=(this.next+1)%this.n; const a=base+rand(-0.9,0.9), sp=rand(0.3,1.5)*power; q.on=true; q.x=x; q.z=z; q.y=0.02; q.vx=Math.cos(a)*sp; q.vz=Math.sin(a)*sp; q.vy=rand(0.5,1.8)*power; q.r=rand(0.004,0.012); q.yel=Math.random()<0.25; q.gut=Math.random()<0.2; this.mesh.setColorAt(this.next===0?this.n-1:this.next-1,q.gut?this.gutCol:this.cream); }
+    if(this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate=true;
   }
   update(dt){
     let any=false;
     for(let i=0;i<this.n;i++){ const q=this.p[i]; if(!q.on) continue; any=true;
       q.vy-=9.8*dt; q.x+=q.vx*dt; q.y+=q.vy*dt; q.z+=q.vz*dt;
-      if(q.y<=0){ q.on=false; if(q.x>ROOM.x1&&q.x<ROOM.x2&&q.z>ROOM.z1&&q.z<ROOM.z2) this.paint.drop(q.x,q.z,q.r*1.6,this.L,q.yel); this.dummy.position.set(0,-10,0); this.dummy.scale.setScalar(0.0001); }
+      if(q.y<=0){ q.on=false; if(q.x>ROOM.x1&&q.x<ROOM.x2&&q.z>ROOM.z1&&q.z<ROOM.z2) this.paint.drop(q.x,q.z,q.r*1.6,this.L,q.yel,q.gut); this.dummy.position.set(0,-10,0); this.dummy.scale.setScalar(0.0001); }
       else { this.dummy.position.set(q.x,q.y,q.z); this.dummy.scale.set(q.r,q.r*0.7,q.r); }
       this.dummy.updateMatrix(); this.mesh.setMatrixAt(i,this.dummy.matrix);
     }
