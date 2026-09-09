@@ -496,6 +496,12 @@ const MAT={
   corpse:M.std(0xffffff,{roughness:0.92}),
   corpseWing:M.std(0xffffff,{roughness:0.8}),
   roachLeg:M.std(0x2c1809,{roughness:0.75}),
+
+  nymphBody:M.gloss(0xeee6d2,{roughness:0.6,clearcoat:0.2,clearcoatRoughness:0.5}),
+  nymphPlate:M.std(0xd8c7a9,{roughness:0.72}),
+  nymphMark:M.std(0x9a7b5b,{roughness:0.82}),
+  nymphLeg:M.std(0x9b8064,{roughness:0.8}),
+
   skin:M.std(0xe9b994,{roughness:0.65}),
   hair:M.std(0x2a1b12,{roughness:0.8}),
   pjTop:M.std(0xa8cbe6,{roughness:0.85}),
@@ -665,6 +671,30 @@ function makeRoach(){
   pose(0,0);
   return {g,parts,pose,st};
 }
+
+
+const NYMPH_SCALE=0.46;
+function makeNymph(){
+  const m=makeRoach();
+  m.parts.wing.visible=false;
+  m.g.traverse(o=>{
+    if(!o.isMesh) return;
+    if(o.material===MAT.roachBody||o.material===MAT.roachWing) o.material=MAT.nymphBody;
+    else if(o.material===MAT.roachRim||o.material===MAT.roachPro) o.material=MAT.nymphPlate;
+    else if(o.material===MAT.roachSeam) o.material=MAT.nymphMark;
+    else if(o.material===MAT.roachLeg) o.material=MAT.nymphLeg;
+  });
+  const adultPose=m.pose;
+  m.pose=(speedNorm,dt,dead=0)=>{
+    adultPose(speedNorm,dt,dead);
+    m.g.scale.multiplyScalar(NYMPH_SCALE);
+  };
+  m.pose(0,0,0);
+  return m;
+}
+
+
+
 
 // ───────── 사람 ─────────
 function makeHuman(){
@@ -886,17 +916,20 @@ class Round1{
   constructor(G){
     this.G=G; const {scene}=G;
     this.grp=new THREE.Group(); scene.add(this.grp);
-    this.roaches=[]; this.baits=[]; this.baitMeshes=[]; this.kills=0; this.combo=0; this.lastKill=-9; this.lastAction=0; this.time=0; this.spawnT=0; this.boost=0;
+    this.roaches=[]; this.nymphs=[]; this.oothecae=[]; this.baits=[]; this.baitMeshes=[]; this.kills=0; this.combo=0; this.lastKill=-9; this.lastAction=0; this.time=0; this.spawnT=0; this.boost=0;
     this.item='hand'; this.used=new Set(); this.killedWith=new Set(); this.baitsUsed=new Set(); this.strike=null; this.hold=null; this.cam={x:0,z:0.15};
     this.splat=new Splatter(this.grp,G.paint); this.puffs=new Puffs(this.grp);
     this.itemMeshes={}; for(const k of [...SLOT_ORDER,...BAIT_SLOTS]){ const m=makeItem(k); m.visible=false; this.grp.add(m); this.itemMeshes[k]=m; }
     this.quitShown=false; this.active=false; this.ray=new THREE.Raycaster(); this.plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
-    this.scorchT=0; this.crackleT=0; this.hoverT=0; this.intro=null; this.introK=1;
+    this.scorchT=0; this.crackleT=0; this.hoverT=0; this.intro=null; this.introK=1; this.eggSpawnT=0;
   }
   floorPoint(sx,sy){ const v=new THREE.Vector2((sx/innerWidth)*2-1,-(sy/innerHeight)*2+1); this.ray.setFromCamera(v,this.G.camera); const p=new THREE.Vector3(); return this.ray.ray.intersectPlane(this.plane,p)?p:null; }
   start(){
     this.active=true; this.G.input.mode='r1'; document.getElementById('r1ui').style.display='block';
     this.kills=0; this.combo=0; this.lastKill=-9; this.time=0; this.spawnT=0; this.boost=0; this.used=new Set(); this.killedWith=new Set(); this.baitsUsed=new Set(); this.strike=null; this.hold=null; this.cam={x:0,z:0.15}; this.quitShown=false; this.G.ui.showQuit(false); this.G.ui.setKills(0);
+
+  this.clearNymphs(); this.clearOothecae(); this.eggSpawnT=3.5;
+
     this.G.setLighting('day'); this.G.paint.clear(); this.G.corpses.clear(); this.splat.setLevel(0);
     // 인트로: 방 전체가 보이는 높이에서 손에 잡히는 크기까지 내려온다
     this.intro={t:0,k0:Math.max(1,6/this.G.view.h)}; this.introK=this.intro.k0; this.G.setTopCam(this.cam.x,this.cam.z,this.introK);
@@ -929,7 +962,7 @@ class Round1{
   flipCushion(x,z){ const f=this.cushionF; if(f.flipped) return; let dx=CUSHION.x-x, dz=CUSHION.z-z; const d=Math.hypot(dx,dz); if(d<0.05){ dx=this.G.camUp.x; dz=this.G.camUp.z; } else { dx/=d; dz/=d; } f.flipped=true; f.t=0; f.dx=dx; f.dz=dz; SFX.cushionFlip(); this.G.shake(0.2);
     for(const r of this.roaches){ if(r.state==='dead'||r.gone) continue; if(dist2(r.x,r.z,CUSHION.x,CUSHION.z)<CUSHION.r*CUSHION.r){ r.startle={t:rand(0.15,0.55),ax:CUSHION.x,az:CUSHION.z}; } } }
   updateCushion(dt){ const f=this.cushionF, c=this.G.room.cushion; if(!f.flipped&&f.k<=0) return; f.t+=dt; let k; if(f.flipped){ k=Math.min(1,f.t/0.35); if(f.t>4.2){ f.flipped=false; f.t=0; } } else { k=Math.max(0,1-f.t/0.35); } f.k=k; const e=k<0.5?2*k*k:1-Math.pow(-2*k+2,2)/2; c.position.set(CUSHION.x+f.dx*0.5*e,0.022+Math.sin(e*Math.PI)*0.22,CUSHION.z+f.dz*0.5*e); c.quaternion.setFromAxisAngle(new THREE.Vector3(f.dz,0,-f.dx).normalize(),e*Math.PI); }
-  stop(){ this.active=false; document.getElementById('r1ui').style.display='none'; this.stopHold(); this.strike=null; this.resetCushion(); for(const r of this.roaches) this.grp.remove(r.m.g); this.roaches.length=0; for(const b of this.baitMeshes) this.grp.remove(b); this.baitMeshes.length=0; this.baits.length=0; for(const k in this.itemMeshes) this.itemMeshes[k].visible=false; this.puffs.clear(); this.splat.hideAll(); this.G.ui.setKills(null); }
+  stop(){ this.active=false; document.getElementById('r1ui').style.display='none'; this.stopHold(); this.strike=null; this.resetCushion(); for(const r of this.roaches) this.grp.remove(r.m.g); this.roaches.length=0; this.clearNymphs(); this.clearOothecae(); for(const b of this.baitMeshes) this.grp.remove(b); this.baitMeshes.length=0; this.baits.length=0; for(const k in this.itemMeshes) this.itemMeshes[k].visible=false; this.puffs.clear(); this.splat.hideAll(); this.G.ui.setKills(null); }
   selectItem(k){ if(this.hold) this.stopHold(); this.item=k; this.G.ui.selectSlot(k); this.touch(); }
   level(){ return clamp(this.kills/80,0,1); }
   touch(){ this.lastAction=this.time; }
@@ -952,6 +985,145 @@ class Round1{
     const r={x,z,h,spd:rand(0.15,0.3),state:'wander',t:rand(0.8,2.2),m,poison:0,dead:0,turn:rand(-0.6,0.6),hole:null,bait:null,twitch:0,bakeMode:'crushed',startle:null,offT:0,fleeT:0,fleeSpd:0.7};
     m.g.position.set(r.x,0,r.z); m.g.rotation.y=r.h; this.roaches.push(r); return r;
   }
+
+
+ tryLayOotheca(){
+    const liveNymphs=this.nymphs.filter(n=>n.state!=='dead').length;
+    if(this.oothecae.length>=2||liveNymphs>=18) return false;
+    const pool=this.roaches.filter(r=>
+      r.state==='wander'&&!r.startle&&!r.gone&&!r.layEgg&&
+      this.inView(r.x,r.z,0.1)&&!this.underCushion(r.x,r.z)
+    );
+    if(!pool.length) return false;
+    const r=pool[Math.floor(rand(pool.length))];
+    r.layEgg={t:0,laid:false};
+    r.spd=0;
+    return true;
+  }
+  spawnOotheca(x,z,h){
+    const mesh=makeItem('egg');
+    mesh.scale.setScalar(0.9);
+    mesh.position.set(x,0,z);
+    mesh.rotation.y=h+Math.PI/2;
+    this.grp.add(mesh);
+    this.oothecae.push({x,z,h,mesh,t:0,hatchAt:rand(4.8,7),spray:0});
+  }
+  removeOotheca(o){
+    const i=this.oothecae.indexOf(o);
+    if(i>=0) this.oothecae.splice(i,1);
+    this.grp.remove(o.mesh);
+    o.mesh.traverse(m=>{
+      if(!m.isMesh) return;
+      if(m.geometry) m.geometry.dispose();
+      if(Array.isArray(m.material)) m.material.forEach(x=>x&&x.dispose&&x.dispose());
+      else if(m.material&&m.material.dispose) m.material.dispose();
+    });
+  }
+  clearOothecae(){
+    for(const o of [...this.oothecae]) this.removeOotheca(o);
+  }
+  spawnNymph(x,z,h,delay=0){
+    const m=makeNymph();
+    const a=h+rand(-1.2,1.2), d=rand(0.015,0.045);
+    const n={
+      x:x+Math.sin(a)*d,z:z+Math.cos(a)*d,h:a,m,
+      spd:rand(0.35,0.7),turn:rand(-2.2,2.2),turnT:rand(0.15,0.45),
+      delay,state:'live',dead:0,poisonT:0,spray:0,offT:0
+    };
+    m.g.visible=delay<=0;
+    m.g.position.set(n.x,0,n.z); m.g.rotation.y=n.h;
+    this.grp.add(m.g); this.nymphs.push(n);
+    return n;
+  }
+  removeNymph(n){
+    const i=this.nymphs.indexOf(n);
+    if(i>=0) this.nymphs.splice(i,1);
+    this.grp.remove(n.m.g);
+  }
+  clearNymphs(){
+    for(const n of [...this.nymphs]) this.removeNymph(n);
+  }
+  killNymph(n,weapon,idx=0){
+    if(!this.nymphs.includes(n)||n.state==='dead') return;
+    const pan=clamp((n.x-this.cam.x)/2,-0.8,0.8);
+    if(weapon==='vacuum'){
+      SFX.kill('vacuum',0,0.32,0,pan,1);
+      this.removeNymph(n);
+      return;
+    }
+    n.state='dead'; n.dead=0;
+    SFX.kill(weapon,0,weapon==='flame'?0.24:0.32,idx*0.015,pan,1);
+    this.G.paint.drop(n.x,n.z,0.008,this.level(),true,false);
+    this.touch();
+  }
+  hatchOotheca(o){
+    const room=Math.max(0,18-this.nymphs.filter(n=>n.state!=='dead').length);
+    const count=Math.min(8+Math.floor(rand(3)),room);
+    SFX.eggHatch();
+    
+    for(let i=0;i<count;i++) this.spawnNymph(o.x,o.z,o.h,i*0.08+rand(0,0.05));
+    this.removeOotheca(o);
+  }
+  destroyOotheca(o){
+    if(!this.oothecae.includes(o)) return;
+    SFX.eggCrush();
+    this.G.paint.drop(o.x,o.z,0.018,this.level(),true,false);
+    this.removeOotheca(o);
+    this.touch();
+  }
+  updateOothecae(dt){
+    for(const o of [...this.oothecae]){
+      o.t+=dt;
+      o.spray=Math.max(0,o.spray-dt*0.35);
+      const near=Math.max(0,o.t-(o.hatchAt-1.2));
+      const pulse=near>0?Math.sin(near*18)*0.06:0;
+      o.mesh.scale.set(0.9*(1+pulse),0.9*(1-pulse*0.45),0.9*(1+pulse*0.3));
+      if(o.t>=o.hatchAt) this.hatchOotheca(o);
+    }
+  }
+  updateNymphs(dt){
+    for(let i=this.nymphs.length-1;i>=0;i--){
+      const n=this.nymphs[i], m=n.m;
+      if(n.delay>0){ n.delay-=dt; m.g.visible=false; if(n.delay>0) continue; m.g.visible=true; }
+      if(n.state==='dead'){
+        n.dead=Math.min(1,n.dead+dt/0.24);
+        m.pose(0,dt,n.dead);
+        if(n.dead>=1){ this.removeNymph(n); continue; }
+        m.g.position.set(n.x,0,n.z); m.g.rotation.y=n.h;
+        continue;
+      }
+      if(n.state==='poison'){
+        n.poisonT-=dt;
+        m.pose(0.7+0.3*Math.sin(this.time*35+i),dt*1.8,0.12);
+        m.g.rotation.z=Math.PI;
+        m.g.position.set(n.x,ROACH_L*NYMPH_SCALE*0.22,n.z);
+        if(n.poisonT<=0) this.killNymph(n,'spray');
+        continue;
+      }
+      n.spray=Math.max(0,n.spray-dt*0.45);
+      n.turnT-=dt;
+      if(n.turnT<=0){
+        n.turnT=rand(0.12,0.42);
+        n.turn=rand(-2.8,2.8);
+        n.spd=Math.random()<0.28?0:rand(0.35,0.82);
+      }
+      n.h+=n.turn*dt+Math.sin(this.time*21+i*1.7)*dt*0.65;
+      if(n.spd>0){
+        const nx=n.x+Math.sin(n.h)*n.spd*dt, nz=n.z+Math.cos(n.h)*n.spd*dt;
+        const [px,pz]=roachMove(n.x,n.z,nx,nz);
+        if(px===n.x&&pz===n.z) n.h+=rand(1.8,2.8)*(Math.random()<0.5?1:-1);
+        n.x=px; n.z=pz;
+      }
+      if(this.inView(n.x,n.z,0.2)) n.offT=0;
+      else if(!this.inView(n.x,n.z,0.6)){ n.offT+=dt; if(n.offT>3){ this.removeNymph(n); continue; } }
+      m.g.position.set(n.x,0,n.z); m.g.rotation.set(0,n.h,0);
+      m.pose(clamp(n.spd/0.8,0,1),dt,0);
+    }
+  }
+
+
+
+
   scare(x,z,rad){ for(const r of this.roaches){ if(r.state==='dead'||r.state==='poison'||r.gone||r.startle||r.state==='flee') continue; const d=Math.hypot(r.x-x,r.z-z); if(d>rad) continue; if(r.state==='feed'&&(d>rad*0.55||Math.random()<0.5)) continue; r.startle={t:rand(0.14,0.3),ax:x,az:z}; } }
   flee(r,ax,az){ r.state='flee'; r.t=0; r.bait=null; r.fleeT=rand(0.7,1.5); r.fleeSpd=lerp(0.7,1.2,this.level())*rand(0.9,1.1); const d=Math.hypot(r.x-ax,r.z-az); r.h=(d<0.01?rand(TAU):Math.atan2(r.x-ax,r.z-az))+rand(-0.6,0.6); const hole=nearHole(r.x,r.z,0.6); r.hole=(hole&&(hole.cushion?!this.cushionF.flipped&&Math.random()<0.6:Math.random()<0.35))?hole:null; }
   killRoach(r,weapon,cx,cz,idx=0){
@@ -969,12 +1141,16 @@ class Round1{
     }
     if(weapon==='vacuum'){ this.grp.remove(r.m.g); r.gone=true; SFX.kill('vacuum',this.combo,1,0,pan,1); }
   }
-  impact(x,z,item){
+    impact(x,z,item){
     const it=ITEMS[item]; const R=it.r+ROACH_R; const hit=[];
     if(!this.cushionF.flipped&&this.cushionF.k<=0&&dist2(x,z,CUSHION.x,CUSHION.z)<(CUSHION.r+0.03)*(CUSHION.r+0.03)){ this.flipCushion(x,z); this.touch(); return 0; }
     for(const q of this.roaches){ if(q.state==='dead'||q.gone) continue; if(this.underCushion(q.x,q.z)) continue; if(dist2(q.x,q.z,x,z)<R*R) hit.push(q); }
     hit.sort((a,b)=>dist2(a.x,a.z,x,z)-dist2(b.x,b.z,x,z));
     let n=0; for(const q of hit){ this.killRoach(q,item,x,z,n); n++; }
+    const nr=it.r+ROACH_R*NYMPH_SCALE;
+    for(const q of [...this.nymphs]){ if(q.delay>0||q.state==='dead') continue; if(dist2(q.x,q.z,x,z)<nr*nr){ this.killNymph(q,item,n); n++; } }
+    const er=it.r+0.04;
+    for(const o of [...this.oothecae]){ if(dist2(o.x,o.z,x,z)<er*er){ this.destroyOotheca(o); n++; } }
     if(!n) SFX.miss(item,clamp((x-this.cam.x)/2,-0.8,0.8));
     this.G.shake(item==='pan'||item==='book'?0.55:item==='hand'?0.18:0.3);
     this.scare(x,z,R+0.18); this.touch(); return n;
@@ -1013,9 +1189,18 @@ class Round1{
     if(this.intro){ this.intro.t+=dt; const k=Math.min(1,this.intro.t/2.2); const e=1-Math.pow(1-k,3); this.introK=lerp(this.intro.k0,1,e); if(k>=1){ this.intro=null; this.introK=1; } G.setTopCam(this.cam.x,this.cam.z,this.introK); }
     else {
       const [kx,ky]=inp.keyVec(); if(kx||ky){ const R=G.camRight, U=G.camUp, mv=2.6*dt; this.cam.x+=(R.x*kx-U.x*ky)*mv; this.cam.z+=(R.z*kx-U.z*ky)*mv; this.clampCam(); this.touch(); }
-      G.setTopCam(this.cam.x,this.cam.z,1);
+    
+    
+        G.setTopCam(this.cam.x,this.cam.z,1);
     }
+    if(!this.intro){
+      this.eggSpawnT-=dt;
+      if(this.eggSpawnT<=0) this.eggSpawnT=this.tryLayOotheca()?rand(8,13):1;
+    }
+    this.updateOothecae(dt);
     const it=ITEMS[this.item];
+
+
     const hoverOn=inp.lastType==='mouse'&&inp.mouse.live&&!this.strike&&!this.hold&&!this.intro;
     for(const k in this.itemMeshes){ if(this.strike&&this.strike.item===k) continue; if(this.hold&&this.hold.item===k) continue; this.itemMeshes[k].visible=(hoverOn&&k===this.item); }
     if(hoverOn){ if(inp.mouse.x!==this.lastMx||inp.mouse.y!==this.lastMy){ this.lastMx=inp.mouse.x; this.lastMy=inp.mouse.y; this.touch(); } const p=this.floorPoint(inp.mouse.x,inp.mouse.y); if(p){ const m=this.itemMeshes[this.item]; this.hoverT+=dt; if(m.userData.yawFor!==this.item){ m.userData.yawFor=this.item; m.userData.yaw=this.itemYaw(this.item); } m.position.set(p.x,(it.hover||0.15)+Math.sin(this.hoverT*3)*0.01,p.z); m.rotation.set(0,it.cone?Math.atan2(G.camUp.x,G.camUp.z):m.userData.yaw,0); } }
@@ -1025,20 +1210,80 @@ class Round1{
       else if(s.phase==='rest'){ if(s.t>=sit.rest){ s.phase='up'; s.t=0; } }
       else { const k=Math.min(1,s.t/0.16); m.position.y=lerp(0.006,(sit.hover||0.2)+0.22,k*k); if(k>=1){ m.visible=false; this.strike=null; } }
     }
-    if(this.hold){ const h=this.hold, hit=ITEMS[h.item], m=this.itemMeshes[h.item], c=hit.cone; h.t+=dt; this.touch(); m.visible=true;
+
+
+
+   if(this.hold){ const h=this.hold, hit=ITEMS[h.item], m=this.itemMeshes[h.item], c=hit.cone; h.t+=dt; this.touch(); m.visible=true;
       const yaw=Math.atan2(h.dx,h.dz); m.position.set(h.x,hit.hover,h.z); m.rotation.set(0,yaw,0);
       const nx=h.x+h.dx*0.06, nz=h.z+h.dz*0.06;
-      if(h.item==='spray'){ this.puffs.emit('spray',nx,0.1,nz,h.dx,h.dz,3,2.2); for(const q of this.roaches){ if(q.state==='dead'||q.state==='poison'||q.gone||this.underCushion(q.x,q.z)) continue; if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){ q.poison+=dt*1.3; if(q.poison>=1){ q.state='poison'; q.startle=null; q.t=rand(2.5,5); q.m.g.rotation.z=Math.PI; q.m.g.position.y=ROACH_L*0.22; } else if(q.state!=='flee'&&!q.startle){ q.startle={t:0.1,ax:h.x,az:h.z}; } } } }
-      if(h.item==='flame'){ this.puffs.emit('flame',nx,0.06,nz,h.dx,h.dz,4,2.6); this.crackleT-=dt; if(this.crackleT<0){ this.crackleT=rand(0.05,0.15); SFX.flameCrackle(); } this.scorchT-=dt; if(this.scorchT<0){ this.scorchT=0.12; const d=rand(0.1,c.len), a=yaw+rand(-c.ang*0.7,c.ang*0.7); G.paint.scorch(h.x+Math.sin(a)*d,h.z+Math.cos(a)*d,rand(0.03,0.07)); }
-        let n=0; for(const q of this.roaches){ if(q.state==='dead'||q.gone||this.underCushion(q.x,q.z)) continue; if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){ this.killRoach(q,'flame',h.x,h.z,n++); } } }
-      if(h.item==='vacuum'){ this.puffs.emit('spray',h.x+h.dx*c.len*rand(0.4,1),0.03,h.z+h.dz*c.len*rand(0.4,1),-h.dx,-h.dz,1,1.4); let n=0; for(const q of this.roaches){ if(q.state==='dead'||q.gone||this.underCushion(q.x,q.z)) continue; if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){ const ddx=h.x-q.x, ddz=h.z-q.z, d=Math.hypot(ddx,ddz); if(d<0.08){ this.killRoach(q,'vacuum',h.x,h.z,n++); SFX.vacuumSuck(); } else { q.x+=ddx/d*dt*1.9; q.z+=ddz/d*dt*1.9; q.h=Math.atan2(-ddx,-ddz); q.startle=null; } } } }
+      if(h.item==='spray'){
+        this.puffs.emit('spray',nx,0.1,nz,h.dx,h.dz,3,2.2);
+        for(const q of this.roaches){
+          if(q.state==='dead'||q.state==='poison'||q.gone||this.underCushion(q.x,q.z)) continue;
+          if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
+            q.poison+=dt*1.3;
+            if(q.poison>=1){ q.state='poison'; q.startle=null; q.t=rand(2.5,5); q.m.g.rotation.z=Math.PI; q.m.g.position.y=ROACH_L*0.22; }
+            else if(q.state!=='flee'&&!q.startle){ q.startle={t:0.1,ax:h.x,az:h.z}; }
+          }
+        }
+        for(const q of this.nymphs){
+          if(q.delay>0||q.state!=='live') continue;
+          if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
+            q.spray+=dt;
+            if(q.spray>=0.55){ q.state='poison'; q.poisonT=rand(1.1,1.8); }
+          }
+        }
+        for(const o of [...this.oothecae]){
+          if(this.inCone(o,h.x,h.z,yaw,c.len,c.ang)){
+            o.spray+=dt;
+            if(o.spray>=0.55) this.destroyOotheca(o);
+          }
+        }
+      }
+      if(h.item==='flame'){
+        this.puffs.emit('flame',nx,0.06,nz,h.dx,h.dz,4,2.6);
+        this.crackleT-=dt; if(this.crackleT<0){ this.crackleT=rand(0.05,0.15); SFX.flameCrackle(); }
+        this.scorchT-=dt; if(this.scorchT<0){ this.scorchT=0.12; const d=rand(0.1,c.len), a=yaw+rand(-c.ang*0.7,c.ang*0.7); G.paint.scorch(h.x+Math.sin(a)*d,h.z+Math.cos(a)*d,rand(0.03,0.07)); }
+        let n=0;
+        for(const q of this.roaches){ if(q.state==='dead'||q.gone||this.underCushion(q.x,q.z)) continue; if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)) this.killRoach(q,'flame',h.x,h.z,n++); }
+        for(const q of [...this.nymphs]){ if(q.delay>0||q.state==='dead') continue; if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)) this.killNymph(q,'flame',n++); }
+        for(const o of [...this.oothecae]){ if(this.inCone(o,h.x,h.z,yaw,c.len,c.ang)) this.destroyOotheca(o); }
+      }
+      if(h.item==='vacuum'){
+        this.puffs.emit('spray',h.x+h.dx*c.len*rand(0.4,1),0.03,h.z+h.dz*c.len*rand(0.4,1),-h.dx,-h.dz,1,1.4);
+        let n=0;
+        for(const q of this.roaches){
+          if(q.state==='dead'||q.gone||this.underCushion(q.x,q.z)) continue;
+          if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
+            const ddx=h.x-q.x, ddz=h.z-q.z, d=Math.hypot(ddx,ddz);
+            if(d<0.08){ this.killRoach(q,'vacuum',h.x,h.z,n++); SFX.vacuumSuck(); }
+            else { q.x+=ddx/d*dt*1.9; q.z+=ddz/d*dt*1.9; q.h=Math.atan2(-ddx,-ddz); q.startle=null; }
+          }
+        }
+        for(const q of [...this.nymphs]){
+          if(q.delay>0||q.state==='dead') continue;
+          if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
+            const ddx=h.x-q.x, ddz=h.z-q.z, d=Math.hypot(ddx,ddz);
+            if(d<0.07){ this.killNymph(q,'vacuum'); SFX.vacuumSuck(); }
+            else { q.x+=ddx/d*dt*2.2; q.z+=ddz/d*dt*2.2; q.h=Math.atan2(-ddx,-ddz); }
+          }
+        }
+        for(const o of [...this.oothecae]){
+          if(this.inCone(o,h.x,h.z,yaw,c.len,c.ang)&&Math.hypot(h.x-o.x,h.z-o.z)<0.11) this.destroyOotheca(o);
+        }
+      }
     }
+
+
     for(let i=this.baits.length-1;i>=0;i--){ const b=this.baits[i]; b.t+=dt; if(b.amount<=0){ if(b.mesh){ this.grp.remove(b.mesh); this.baitMeshes.splice(this.baitMeshes.indexOf(b.mesh),1);} this.baits.splice(i,1); for(const q of this.roaches) if(q.bait===b){ q.bait=null; if(q.state==='feed'){ q.state='wander'; q.t=0.1; } } } }
     this.boost=Math.max(0,this.boost-dt*1.2);
     let vis=0, alive=0; for(const r of this.roaches){ if(r.state==='dead'||r.gone) continue; alive++; if(this.inView(r.x,r.z,0.15)){ vis++; r.offT=0; } else if(!this.inView(r.x,r.z,0.6)&&r.state!=='feed'){ r.offT+=dt; if(r.offT>3) r.remove=true; } }
     const target=Math.min(24,12+this.time/60*4+this.boost*0.5);
     this.spawnT-=dt; if(vis<target&&alive<40&&this.spawnT<=0){ this.spawn(); const deficit=target-vis; this.spawnT=(this.boost>0?rand(0.2,0.45):rand(0.35,0.9))*(deficit>6?0.35:deficit>3?0.6:1); }
     for(let i=this.roaches.length-1;i>=0;i--){ const r=this.roaches[i]; if(r.gone){ this.roaches.splice(i,1); continue; } this.updateRoach(r,dt); if(r.remove){ this.grp.remove(r.m.g); this.roaches.splice(i,1); } }
+
+
+      this.updateNymphs(dt);
     this.splat.update(dt); this.puffs.update(dt); this.updateCushion(dt);
 
 
@@ -1065,8 +1310,24 @@ class Round1{
     const m=r.m;
     if(r.state==='dead'){ r.dead=Math.min(1,r.dead+dt/0.3); m.pose(0,dt,r.bakeMode==='belly'?0.15:r.dead); if(r.dead>=1&&!r.baked){ r.baked=true; r.t=0; this.G.paint.corpse(r.x,r.z,r.h,this.level(),r.bakeMode); this.G.corpses.add(r.x,r.z,r.h,r.bakeMode); } if(r.baked){ r.t+=dt; if(r.t>0.05) r.remove=true; } m.g.position.set(r.x,r.bakeMode==='belly'?ROACH_L*0.22*(1-r.dead):0,r.z); return; }
     if(r.state==='poison'){ r.t-=dt; r.twitch+=dt*rand(10,30); m.pose(0.6+0.4*Math.sin(r.twitch),dt*rand(0.5,3),0.15); if(Math.random()<dt*3) SFX.poisonTwitch(); if(r.t<=0){ this.killRoach(r,'spray',r.x,r.z); } return; }
-    if(r.startle){ r.startle.t-=dt; m.pose(0,dt,0); m.g.position.set(r.x,0,r.z); m.g.rotation.y=r.h; if(r.startle.t<=0){ const s=r.startle; r.startle=null; this.flee(r,s.ax,s.az); } return; }
+  
+    if(r.startle){ r.layEgg=null; r.startle.t-=dt; m.pose(0,dt,0); m.g.position.set(r.x,0,r.z); m.g.rotation.y=r.h; if(r.startle.t<=0){ const s=r.startle; r.startle=null; this.flee(r,s.ax,s.az); } return; }
+    if(r.layEgg){
+      const L=r.layEgg; L.t+=dt; r.spd=0;
+      if(!L.laid&&L.t>=0.55){
+        L.laid=true;
+        const ex=r.x-Math.sin(r.h)*0.055, ez=r.z-Math.cos(r.h)*0.055;
+        const [px,pz]=roachMove(r.x,r.z,ex,ez);
+        this.spawnOotheca(px,pz,r.h);
+      }
+      m.pose(0,dt,0); m.g.position.set(r.x,0,r.z); m.g.rotation.y=r.h;
+      if(L.t>=0.9){ r.layEgg=null; r.t=rand(0.4,1); }
+      return;
+    }
     let spd=0;
+
+
+
     if(r.state==='wander'){ if(r.underGoal&&dist2(r.x,r.z,CUSHION.x,CUSHION.z)>0.8*0.8) r.underGoal=false; r.t-=dt; if(r.t<0){ if(r.spd>0){ r.spd=0; r.t=rand(0.4,1.8); } else if(Math.random()<0.15){ r.spd=rand(0.6,0.9); r.t=rand(0.25,0.5); r.turn=rand(-0.5,0.5); } else { r.spd=rand(0.12,0.32); r.t=rand(0.6,2.2); r.turn=rand(-1.2,1.2); } }
       if(r.spd>0){ r.h+=r.turn*dt; spd=r.spd; }
       if(!r.bait){ for(const b of this.baits){ if(b.amount>0&&dist2(r.x,r.z,b.x,b.z)<b.radius*b.radius&&Math.random()<dt*1.5){ r.bait=b; r.state='feed'; r.tx=b.x+rand(-b.spread,b.spread); r.tz=b.z+rand(-b.spread,b.spread); break; } } }
@@ -1112,7 +1373,7 @@ const eggTimeForGen=gen=>
 const SPD_MUL=[0.55,0.63,0.7,0.76,0.82,0.87,0.92,0.96];
 
 const HINTS={
-  goal:'알집을 낳고 지켜라. 내가 죽어도 알집이 살아 있으면 다음 대가 나온다.',
+  goal:'바퀴벌레가 죽어도 알집이 남아 있으면 다음 세대로 이어진다.',
 
   moveTouch:
     '왼쪽 드래그: 이동 · 오른쪽 드래그: 시점 · 오른쪽 톡: 질주',
@@ -1124,14 +1385,13 @@ const HINTS={
     '구멍이나 가구 밑에서는 사람의 시야를 피한다. 화면 가장자리가 어두워지면 숨은 상태다.',
 
   watch:
-    '알집은 아직 살아 있다.',
+    '알집은 남아 있다.',
 
   trap:
-    '아까 놓은 먹이다. 이번에는 닿으면 죽는다.',
+    '사람이 둔 먹이다. 오래 머물면 죽는다.',
 
-  gen:(n)=>`${n}대째`,
+  gen:(n)=>`${n}세대`,
 };
-
 
 
 
@@ -1173,7 +1433,12 @@ class Round2{
     this.ringC=document.createElement('canvas'); this.ringC.width=this.ringC.height=96; this.ringTex=new THREE.CanvasTexture(this.ringC);
     this.ring=new THREE.Mesh(new THREE.CircleGeometry(0.085,28),new THREE.MeshBasicMaterial({map:this.ringTex,transparent:true,depthWrite:false})); this.ring.rotation.x=-Math.PI/2; this.ring.visible=false; this.ring.renderOrder=4; this.grp.add(this.ring);
     this.suitcase=makeItem('suitcase'); this.suitcase.visible=false; this.grp.add(this.suitcase);
-    this.npcs=[]; this.traps=[]; this.swarm=null; this.active=false; this.camYaw=0; this.tmp=new THREE.Vector3(); this.tmp2=new THREE.Vector3(); this.tmp3=new THREE.Vector3();
+    
+    
+  this.npcs=[]; this.hatchNymphs=[]; this.traps=[]; this.swarm=null; this.active=false; this.camYaw=0; this.tmp=new THREE.Vector3(); this.tmp2=new THREE.Vector3(); this.tmp3=new THREE.Vector3();
+
+
+
     this.cushion=this.G.room.cushion; this.cushionBase={x:this.cushion.position.x,y:this.cushion.position.y,z:this.cushion.position.z};
   }
   start(weapons,baits){ this.weapons=weapons; this.baitKinds=baits||[]; this.gen=0; this.active=true; this.grp.visible=true; this.lastEgg=null; this.finished=false; this.hinted={}; this.G.input.mode='r2'; document.getElementById('r2ui').style.display='block'; this.G.ui.eggState('none'); this.G.ui.miniOn(true); this.camPitch=0.05; this.startGen(); }
@@ -1206,9 +1471,15 @@ class Round2{
     }
 
     this.clearNpcs();
+ this.clearHatchNymphs();
+
     this.clearTraps();
     this.puffs.clear();
     this.resetCushion();
+
+this.G.room.blanket.visible=true;
+
+        this.G.room.blanket.visible=true;
 
     this.G.ui.vignette(false);
     this.G.ui.tox(0);
@@ -1233,6 +1504,9 @@ class Round2{
     G.setLighting('dim');
     this.G.room.door.rotation.y=0;
     this.resetCushion();
+
+ this.clearHatchNymphs();
+
     G.ui.hintClear();
 
     this.phase='play';
@@ -1310,6 +1584,7 @@ class Round2{
       this.hatchMesh.position.set(sx,0,sz);
       this.hatchMesh.rotation.y=sh+Math.PI/2;
       SFX.eggHatch();
+      this.spawnHatchNymphs(sx,sz,sh);
     }
 
     // '사람이 든 것 — 슬리퍼' 대신
@@ -1324,9 +1599,10 @@ class Round2{
 
     G.ui.eggState('none');
 
-    // 긴 힌트가 사라져도 핵심 규칙은 계속 화면에 남는다.
-    G.ui.eggBar(
-      `알 버튼 2초 · 알집 ${this.eggT}초`,
+     G.ui.eggBar(
+      G.isTouch
+        ? `알집 형성 2초 · 부화까지 ${this.eggT}초`
+        : `E키 2초 · 부화까지 ${this.eggT}초`,
       false
     );
 
@@ -1383,8 +1659,10 @@ class Round2{
     const w=this.ai.weapon; if(w==='hand') return; const m=makeItem(w); this.weaponMesh=m; this.human.hold.add(m);
     if(w==='slipper'){ m.rotation.set(Math.PI/2,0,0); m.position.set(0,-0.02,0.06); } else if(w==='book'){ m.rotation.set(Math.PI/2,0,0.2); m.position.set(0,-0.1,0.05); } else if(w==='pan'){ m.rotation.set(0.3,Math.PI,0); m.position.set(0,-0.06,0.2); } else if(w==='tissue'){ m.rotation.set(Math.PI/2,0,0); m.position.set(0,-0.06,0.04); } else if(w==='spray'||w==='flame'){ m.rotation.set(Math.PI/2,0,0); m.position.set(0,-0.02,0.02); } else if(w==='vacuum'){ this.human.hold.remove(m); this.grp.add(m); this.vac=m; m.children[2].visible=false; const tube=cyl(0.02,0.02,1,M.std(0xa5a5ad)); this.grp.add(tube); this.vacTube=tube; }
   }
-  // ── 사람이 놓아둔 먹이 (1라운드에서 내가 쓴 그 미끼) ──
-  clearTraps(){ for(const t of this.traps) this.grp.remove(t.mesh); this.traps.length=0; }
+clearTraps(){
+  for(const t of this.traps) this.grp.remove(t.mesh);
+  this.traps.length=0;
+}
   spawnTraps(){
     this.clearTraps(); if(!this.baitKinds.length) return;
     const spots=[[-0.6,1.4],[0.5,0.9],[-0.35,-1.2],[1.1,1.9],[-1.0,0.2],[0.75,-0.55]];
@@ -1394,7 +1672,7 @@ class Round2{
       const kind=this.baitKinds[i%this.baitKinds.length];
       const s=pool.splice(Math.floor(rand(pool.length)),1)[0]; if(!s) break;
       const mesh=makeItem(kind); mesh.position.set(s[0],0,s[1]); mesh.rotation.y=rand(TAU); this.grp.add(mesh);
-      this.G.paint.bait(kind,s[0],s[1]);
+    
       this.traps.push({kind,x:s[0],z:s[1],mesh});
     }
 
@@ -1414,6 +1692,47 @@ class Round2{
 
 
   }
+
+ // ── 부화 직후 주변에 보이는 흰 약충. 사람 AI의 공격 대상에는 넣지 않는다. ──
+  clearHatchNymphs(){
+    for(const n of this.hatchNymphs) this.grp.remove(n.m.g);
+    this.hatchNymphs.length=0;
+  }
+  spawnHatchNymphs(x,z,h){
+    this.clearHatchNymphs();
+    for(let i=0;i<5;i++){
+      const a=h+rand(-1.4,1.4), d=rand(0.015,0.04);
+      const m=makeNymph();
+      m.g.visible=false;
+      this.grp.add(m.g);
+      this.hatchNymphs.push({
+        x:x+Math.sin(a)*d,z:z+Math.cos(a)*d,h:a,
+        ox:x,oz:z,sp:rand(0.38,0.62),turn:rand(-2.2,2.2),
+        delay:i*0.12+rand(0,0.06),t:0,life:rand(7,10),m
+      });
+    }
+  }
+  updateHatchNymphs(dt){
+    for(let i=this.hatchNymphs.length-1;i>=0;i--){
+      const n=this.hatchNymphs[i];
+      if(n.delay>0){ n.delay-=dt; if(n.delay>0) continue; n.m.g.visible=true; }
+      n.t+=dt;
+      if(n.t>=n.life){ this.grp.remove(n.m.g); this.hatchNymphs.splice(i,1); continue; }
+      if(Math.random()<dt*2.2) n.turn=rand(-2.5,2.5);
+      const homeD=Math.hypot(n.x-n.ox,n.z-n.oz);
+      if(homeD>0.34) n.h=angleDamp(n.h,Math.atan2(n.ox-n.x,n.oz-n.z),5,dt);
+      else n.h+=n.turn*dt;
+      const sp=n.sp*(0.72+0.28*Math.sin(n.t*13+i));
+      const nx=n.x+Math.sin(n.h)*sp*dt, nz=n.z+Math.cos(n.h)*sp*dt;
+      const [px,pz]=roachMove(n.x,n.z,nx,nz);
+      if(px===n.x&&pz===n.z) n.h+=rand(1.8,2.8)*(Math.random()<0.5?1:-1);
+      n.x=px; n.z=pz;
+      n.m.g.position.set(n.x,0,n.z); n.m.g.rotation.y=n.h;
+      n.m.pose(clamp(sp/0.7,0,1),dt,0);
+    }
+  }
+
+
   // ── 다른 바퀴들 ──
   npcTarget(){ return Math.min(30,16+this.gen*2); }
   spawnNpcs(){ this.clearNpcs(); const n=this.npcTarget(); for(let i=0;i<n;i++) this.addNpc(rand(0.3,6)); this.npcT=2; }
@@ -1621,8 +1940,8 @@ class Round2{
 
     this.G.ui.eggProgress(0);
     this.G.ui.eggState('laid');
-    this.G.ui.eggBar(
-      `알집 · ${this.eggT}초`,
+      this.G.ui.eggBar(
+      `부화까지 ${this.eggT}초`,
       false
     );
 
@@ -1688,8 +2007,8 @@ class Round2{
         A.eggKnown
       );
 
-    this.G.ui.eggBar(
-      `알집 · ${left}초`,
+     this.G.ui.eggBar(
+      `부화까지 ${left}초`,
       danger
     );
 
@@ -1776,12 +2095,18 @@ class Round2{
 
 
 
-
-  lineEnd(){ if(this.phase==='over') return; this.phase='over'; this.overT=0; }
+ lineEnd(){
+    if(this.phase==='over') return;
+    this.phase='over'; this.overT=0;
+    this.G.ui.eggState('none');
+    this.G.ui.eggBar(null);
+    this.G.ui.hintClear();
+    this.G.ui.vignette(false);
+  }
   nextGen(){ if(this.finished) return; this.finished=true; this.G.blackout(true,false);
     setTimeout(()=>{ if(!this.active) return; this.finished=false; this.gen++; if(this.gen>=this.weapons.length){ this.gen=this.weapons.length; this.beginLeave(); } else this.startGen(); },1500); }
   // ── 엔딩: 사람이 떠난다 ──
-  beginLeave(){ const A=this.ai, H=this.human; this.phase='leave'; this.G.blackout(false); this.G.setLighting('on'); A.lightsOn=true; A.state='leave'; A.leaveT=0; A.leaveStep=0; A.done=false; A.doorShut=false; this.eggMesh.visible=false; this.ring.visible=false; this.hatchMesh.visible=false; this.hideWarn(); this.clearNpcs(); this.clearTraps(); this.resetCushion(); this.G.ui.vignette(false); this.G.ui.tox(0); this.G.ui.eggState('none'); this.G.ui.eggBar(null); this.G.ui.hintClear(); this.G.ui.genLabel(null); this.G.ui.miniOn(false);
+  beginLeave(){ const A=this.ai, H=this.human; this.phase='leave'; this.G.blackout(false); this.G.setLighting('on'); A.lightsOn=true; A.state='leave'; A.leaveT=0; A.leaveStep=0; A.done=false; A.doorShut=false; this.eggMesh.visible=false; this.ring.visible=false; this.hatchMesh.visible=false; this.hideWarn(); this.clearNpcs(); this.clearHatchNymphs(); this.clearTraps(); this.resetCushion(); this.G.ui.vignette(false); this.G.ui.tox(0); this.G.ui.eggState('none'); this.G.ui.eggBar(null); this.G.ui.hintClear(); this.G.ui.genLabel(null); this.G.ui.miniOn(false);
     if(this.weaponMesh){ H.hold.remove(this.weaponMesh); this.weaponMesh=null; } if(this.strikeMesh){ this.grp.remove(this.strikeMesh); this.strikeMesh=null; }
     if(this.vac){ this.grp.remove(this.vac); this.grp.remove(this.vacTube); this.vac=null; this.vacTube=null; }
     H.root.visible=true; H.root.rotation.set(0,0,0); H.hips.rotation.x=0; H.crouch=0; H.headPitch=0.2; H.strikeAnim=false; A.x=BEDSIDE.x; A.z=BEDSIDE.z; A.h=0; this.G.room.blanket.visible=true;
@@ -1811,8 +2136,13 @@ class Round2{
     S.mesh.instanceMatrix.needsUpdate=true; S.legs.instanceMatrix.needsUpdate=true; S.heads.instanceMatrix.needsUpdate=true; }
   miniData(){ if(!this.active||!this.ai) return null; const A=this.ai; return {me:this.phase==='play'?[this.p.x,this.p.z,this.p.h]:null,human:(A.awake||A.state==='sit')?[A.x,A.z]:null,egg:this.egg?[this.egg.x,this.egg.z]:null,traps:this.traps.map(t=>[t.x,t.z]),ready:this.ready}; }
   // ── 매 프레임 ──
+
+
   update(dt){
-    if(!this.active) return; const G=this.G, inp=G.input, P=this.p, A=this.ai;
+    if(!this.active) return;
+    this.updateHatchNymphs(dt);
+    const G=this.G, inp=G.input, P=this.p, A=this.ai;
+
     if(this.phase==='leave'){ this.updateLeave(dt); this.puffs.update(dt); this.leaveCamera(dt); return; }
     if(this.phase==='over'){ this.overT+=dt; this.updateHuman(dt); this.updateNpcs(dt); this.puffs.update(dt); this.updateVac(); if(this.overT>1.3&&!this.finished){ this.finished=true; G.blackout(true); setTimeout(()=>{ if(this.active) G.lineEnded(this.gen); },900); } this.watchCamera(dt); return; }
     if(this.phase==='dying'){ this.updateDeath(dt); this.deathCamera(dt); this.updateHuman(dt); this.updateNpcs(dt); this.puffs.update(dt); this.updateVac(); return; }
@@ -2032,102 +2362,21 @@ G.toRound2=function(){
   G.input.reset();
   G.blackout(true,false);
 
-  /*
-   * 단순히 버튼을 선택한 도구가 아니라
-   * 실제로 한 번이라도 작동시킨 살상 도구만 가져간다.
-   *
-   * 헛손질도 '사용'으로 친다.
-   * 도구를 고르기만 하고 휘두르지 않았다면 제외된다.
-   */
-  const used=[
-    ...G.r1.used
-  ].filter(
-    k=>LETHAL_ORDER.includes(k)
+  const used=[...G.r1.used].filter(k=>LETHAL_ORDER.includes(k));
+
+  G.savedWeapons=(used.length?used:['hand']).sort(
+    (a,b)=>LETHAL_ORDER.indexOf(a)-LETHAL_ORDER.indexOf(b)
   );
 
-  /*
-   * 기존처럼 맨손을 무조건 끼워 넣지 않는다.
-   * 빈 배열 방지용 fallback만 남긴다.
-   *
-   * 정상 플레이는 최소 한 마리를 잡고 종료하므로
-   * 실제로는 used가 비어 있을 일이 없다.
-   */
-  G.savedWeapons=(
-    used.length
-      ? used
-      : ['hand']
-  ).sort(
-    (a,b)=>
-      LETHAL_ORDER.indexOf(a)-
-      LETHAL_ORDER.indexOf(b)
+  G.savedBaits=[...G.r1.baitsUsed].sort(
+    (a,b)=>BAIT_SLOTS.indexOf(a)-BAIT_SLOTS.indexOf(b)
   );
 
-  G.savedBaits=[
-    ...G.r1.baitsUsed
-  ].sort(
-    (a,b)=>
-      BAIT_SLOTS.indexOf(a)-
-      BAIT_SLOTS.indexOf(b)
-  );
-
-  const e=
-    document.getElementById(
-      'endtext'
-    );
-
-  const tools=
-    G.savedWeapons
-      .map(
-        k=>`<span>${LABEL[k]}</span>`
-      )
-      .join('');
-
-  const baits=
-    G.savedBaits.length
-      ? `
-        <div class="baitline">
-          남겨 둔 먹이 ·
-          ${G.savedBaits
-            .map(k=>LABEL[k])
-            .join(' · ')}
-        </div>
-      `
-      : '';
-
-  // 화면이 검게 전환된 다음 목록을 보여준다.
+  // 사용한 도구는 2라운드 구성에만 반영하고 따로 설명하지 않는다.
   setTimeout(()=>{
-    if(G.state!=='to_r2'){
-      return;
-    }
-
-    e.innerHTML=`
-      <div>
-        <span class="eyebrow">
-          사용한 도구
-        </span>
-
-        <div class="tools">
-          ${tools}
-        </div>
-
-        ${baits}
-      </div>
-    `;
-
-    e.style.display='grid';
-
-    setTimeout(()=>{
-      if(G.state!=='to_r2'){
-        return;
-      }
-
-      e.style.display='none';
-      G.startRound2();
-    },1900);
-
-  },600);
+    if(G.state==='to_r2') G.startRound2();
+  },650);
 };
-
 
 G.startRound2=function(){
   G.state='r2';
@@ -2150,7 +2399,6 @@ G.startRound2=function(){
   );
 };
 
-
 G.lineEnded=function(gen){
   G.state='ended';
 
@@ -2158,13 +2406,8 @@ G.lineEnded=function(gen){
   G.input.reset();
   G.blackout(true);
 
-  const e=
-    document.getElementById(
-      'endtext'
-    );
-
-  // '대가 끊겼습니다' 제거
-  e.textContent='여기서 끝났다.';
+  const e=document.getElementById('endtext');
+  e.textContent='알집이 남지 않았다.';
   e.style.display='grid';
 
   setTimeout(()=>{
@@ -2190,62 +2433,36 @@ G.showRank=function(gen,ended){
   let list=[];
 
   try{
-    list=JSON.parse(
-      localStorage.getItem(
-        'roach_gens'
-      )||'[]'
-    );
+    list=JSON.parse(localStorage.getItem('roach_gens')||'[]');
   }catch(e){}
 
-  list.unshift({
-    g:gen,
-    t:Date.now()
-  });
-
+  list.unshift({g:gen,t:Date.now()});
   list=list.slice(0,10);
 
   try{
-    localStorage.setItem(
-      'roach_gens',
-      JSON.stringify(list)
-    );
+    localStorage.setItem('roach_gens',JSON.stringify(list));
   }catch(e){}
 
-  const n=(
-    G.savedWeapons||['hand']
-  ).length;
+  const generations=gen+1;
+  const rk=document.getElementById('rank');
 
-  const rk=
-    document.getElementById(
-      'rank'
-    );
+  rk.querySelector('.now').innerHTML=
+    `${generations}<small>세대</small>`;
 
-  rk.querySelector(
-    '.now'
-  ).innerHTML=
-    `${gen}<small>대</small>`;
-
-  rk.querySelector(
-    '.sub'
-  ).textContent=
+  rk.querySelector('.sub').textContent=
     ended
       ? '사람은 방을 비웠다.'
-      : `사용한 도구 ${n}개 중 ${gen}개를 넘겼다.`;
+      : `${generations}세대가 이어졌다.`;
 
-  rk.querySelector(
-    '.list'
-  ).innerHTML=
+  rk.querySelector('.list').innerHTML=
     list
       .slice(1)
-      .map(
-        o=>`<div>${o.g}대</div>`
-      )
+      .map(o=>`<div>${Number(o.g)+1}세대</div>`)
       .join('');
 
   rk.style.display='block';
   G.blackout(false);
 };
-
 
 
 G.restart=function(){ document.getElementById('rank').style.display='none'; G.startRound2(); };
@@ -2254,7 +2471,7 @@ G.restartAll=function(){ document.getElementById('rank').style.display='none'; G
 const Q=new URLSearchParams(location.search); G.paused=Q.get('pause')==='1';
 G.resize();
 if(Q.get('r')==='2'){ G.savedWeapons=Q.get('w')?Q.get('w').split(','):LETHAL_ORDER.slice(); G.savedBaits=Q.get('b')?Q.get('b').split(','):['bone']; G.startRound2(); if(Q.get('gen')){ G.r2.gen=parseInt(Q.get('gen'),10); G.r2.startGen(); } }
-else if(Q.get('r')==='rank'){ G.savedWeapons=['hand','slipper']; G.showRank(3,false); }
+else if(Q.get('r')==='rank'){ G.savedWeapons=['hand','slipper']; G.showRank(2,false); }
 else G.startRound1();
 window.__g=G; G.HOLES=HOLES;
 
