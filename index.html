@@ -88,7 +88,62 @@ button{font-family:inherit;color:inherit;border:0;background:none;padding:0;marg
 
 /* 전환/결과 */
 #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .6s}
-#endtext{position:fixed;inset:0;display:none;place-items:center;font-family:var(--serif);font-size:30px;color:#F3E9CF;letter-spacing:.04em;background:#000}
+
+#endtext{
+  position:fixed;
+  inset:0;
+  display:none;
+  place-items:center;
+  padding:32px;
+  text-align:center;
+  background:#000;
+  color:#F3E9CF;
+  font-family:var(--serif);
+  font-size:30px;
+  line-height:1.55;
+  letter-spacing:.02em;
+  pointer-events:none
+}
+
+#endtext .eyebrow{
+  display:block;
+  margin-bottom:18px;
+  font-family:var(--sans);
+  font-size:13px;
+  font-weight:700;
+  letter-spacing:.16em;
+  color:rgba(243,233,207,.58)
+}
+
+#endtext .tools{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:9px;
+  max-width:560px
+}
+
+#endtext .tools span{
+  padding:8px 13px;
+  border:1px solid rgba(243,233,207,.38);
+  border-radius:999px;
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1
+}
+
+#endtext .baitline{
+  margin-top:18px;
+  font-family:var(--sans);
+  font-size:14px;
+  line-height:1.6;
+  color:rgba(243,233,207,.64);
+  word-break:keep-all
+}
+
+
+
+
 #rank{position:fixed;inset:0;display:none;background:var(--ivory2);color:var(--ink);font-family:var(--serif)}
 #rank .now{position:absolute;left:0;right:0;top:22%;text-align:center;font-size:92px;line-height:1;letter-spacing:-.02em}
 #rank .now small{font-size:38px;letter-spacing:.06em;margin-left:6px}
@@ -103,29 +158,48 @@ button{font-family:inherit;color:inherit;border:0;background:none;padding:0;marg
 <canvas id="gl"></canvas>
 <div id="ui">
   <div id="stick"><div id="knob"></div></div>
+
   <div id="r1ui">
     <div id="wcol"></div>
     <div id="bcol"></div>
     <div id="kills"><span class="n">0</span><small>마리</small></div>
-    <div id="quit">그만 죽이시겠습니까</div>
-    <div id="confirm"><button class="stop">그만 죽이기</button><button class="more">더 죽이기</button></div>
+    <div id="quit">그만할까?</div>
+    <div id="confirm">
+      <button class="stop">그만하기</button>
+      <button class="more">계속하기</button>
+    </div>
   </div>
+
   <div id="r2ui">
     <canvas id="mini" width="176" height="264"></canvas>
     <div id="eggbar"></div>
+
     <div id="pad">
-      <button id="egg" class="rbtn">알</button>
+      <button id="egg" class="rbtn">알 낳기</button>
       <button id="dash" class="rbtn">달리기</button>
     </div>
+
     <div id="tapfx"></div>
   </div>
+
   <div id="vig"></div>
   <div id="tox"></div>
   <div id="hint"></div>
   <div id="genlabel"></div>
   <div id="fade"></div>
-  <div id="endtext">대가 끊겼습니다</div>
-  <div id="rank"><div class="now"></div><div class="sub"></div><div class="list"></div><div class="again">화면을 누르면 이어서 다시</div><button class="allover">처음부터</button></div>
+  <div id="endtext"></div>
+
+  <div id="rank">
+    <div class="now"></div>
+    <div class="sub"></div>
+    <div class="list"></div>
+    <div class="again">화면을 누르면 같은 조건으로 다시</div>
+    <button class="allover">처음부터</button>
+  </div>
+
+
+
+
 </div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 <script type="module">
@@ -827,9 +901,28 @@ class Round1{
     // 인트로: 방 전체가 보이는 높이에서 손에 잡히는 크기까지 내려온다
     this.intro={t:0,k0:Math.max(1,6/this.G.view.h)}; this.introK=this.intro.k0; this.G.setTopCam(this.cam.x,this.cam.z,this.introK);
     this.resetCushion(); for(let i=0;i<12;i++) this.spawn(true); for(let i=0;i<3;i++){ const r=this.spawn(true); r.x=CUSHION.x+rand(-0.12,0.12); r.z=CUSHION.z+rand(-0.12,0.12); r.spd=0; r.t=rand(3,9); r.m.g.position.set(r.x,0,r.z); }
-    this.selectItem('hand'); this.lastAction=0;
-    this.G.ui.hint('바퀴가 있는 자리를 그냥 누르면 내려친다.',3.4,1.9,true);
-    this.G.ui.hint(this.G.isTouch?'두 손가락으로 끌면 방 안을 둘러본다.':'오른쪽 버튼으로 끌면 방 안을 둘러본다. 숫자키로 아이템을 바꾼다.',3.6,0.3,true);
+   
+   
+     this.selectItem('hand');
+    this.lastAction=0;
+
+    this.G.ui.hint(
+      '도구를 고른 뒤 바퀴가 있는 곳을 누른다.',
+      3.2,
+      1.8,
+      true
+    );
+
+    this.G.ui.hint(
+      this.G.isTouch
+        ? '두 손가락 드래그: 화면 이동'
+        : '마우스 오른쪽 드래그: 화면 이동 · 숫자키: 도구 변경',
+      3.4,
+      0.25,
+      true
+    );
+
+
   }
   resetCushion(){ this.cushionF={flipped:false,t:0,k:0,dx:0,dz:1}; const c=this.G.room.cushion; c.position.set(CUSHION.x,0.022,CUSHION.z); c.quaternion.identity(); }
   underCushion(x,z){ return !this.cushionF.flipped&&this.cushionF.k<0.5&&dist2(x,z,CUSHION.x,CUSHION.z)<CUSHION.r*CUSHION.r; }
@@ -947,8 +1040,26 @@ class Round1{
     this.spawnT-=dt; if(vis<target&&alive<40&&this.spawnT<=0){ this.spawn(); const deficit=target-vis; this.spawnT=(this.boost>0?rand(0.2,0.45):rand(0.35,0.9))*(deficit>6?0.35:deficit>3?0.6:1); }
     for(let i=this.roaches.length-1;i>=0;i--){ const r=this.roaches[i]; if(r.gone){ this.roaches.splice(i,1); continue; } this.updateRoach(r,dt); if(r.remove){ this.grp.remove(r.m.g); this.roaches.splice(i,1); } }
     this.splat.update(dt); this.puffs.update(dt); this.updateCushion(dt);
-    // 그만두기 버튼: 손을 멈췄거나, 충분히 죽였거나
-    if(!this.quitShown&&!this.intro&&(this.kills>=QUIT_KILLS||(this.time-this.lastAction>5&&!this.hold&&!this.strike))){ this.quitShown=true; G.ui.showQuit(true); }
+
+
+    // 최소 1마리를 잡은 뒤 7초 쉬었거나,
+    // 40마리를 잡았을 때 종료 선택지를 보여준다.
+    const canAsk=!this.hold&&!this.strike;
+
+    if(
+      !this.quitShown &&
+      !this.intro &&
+      canAsk &&
+      (
+        this.kills>=QUIT_KILLS ||
+        (this.kills>0&&this.time-this.lastAction>7)
+      )
+    ){
+      this.quitShown=true;
+      G.ui.showQuit(true);
+    }
+
+
   }
   updateRoach(r,dt){
     const m=r.m;
@@ -987,20 +1098,43 @@ const HW={
   spray:{cone:{len:1.15,ang:0.36},speed:0.82,expo:1.7,burst:1.0,gap:1.1},
   flame:{cone:{len:0.8,ang:0.24},speed:0.78,expo:0.55,burst:0.7,gap:1.2},
 };
-const EGG_T=30, LAY_T=2.0;
+
+
+
+const LAY_T=2.0;
+
+// 1·2대 30초 / 3·4대 24초 / 5대 이후 20초
+const EGG_TIMES=[30,30,24,24,20];
+
+const eggTimeForGen=gen=>
+  EGG_TIMES[Math.min(gen,EGG_TIMES.length-1)];
+
 const SPD_MUL=[0.55,0.63,0.7,0.76,0.82,0.87,0.92,0.96];
-// 2라운드 안내 문구 — 고치려면 여기만
+
 const HINTS={
-  moveTouch:'왼쪽 화면을 끌면 움직인다. 오른쪽 화면을 끌면 둘러본다.',
-  moveKey:'WASD로 움직이고, 방향키로 둘러본다. 스페이스는 달리기, E는 알.',
-  dashTouch:'오른쪽 아래 「달리기」를 누르면 잠깐 빨라진다.',
-  hide:'구멍이나 가구 밑에 들어가면 사람 눈에 띄지 않는다. 화면 가장자리가 어두워지면 숨은 것이다.',
-  egg:'멈춰 선 채로 「알」을 2초 누르면 그 자리에 알집을 낳는다. 사람 눈에 안 띄는 곳에.',
-  laid:'알집이 30초를 버티면 다음 대가 태어난다. 그 안에 사람이 찾아내면 대가 끊긴다.',
-  watch:'내가 눌려도 알집만 남으면 대는 이어진다.',
-  trap:'사람이 놓아둔 먹이다. 가까이 가면 안 된다.',
+  goal:'알집을 낳고 지켜라. 내가 죽어도 알집이 살아 있으면 다음 대가 나온다.',
+
+  moveTouch:
+    '왼쪽 드래그: 이동 · 오른쪽 드래그: 시점 · 오른쪽 톡: 질주',
+
+  moveKey:
+    'WASD: 이동 · 마우스 드래그: 시점 · Space: 질주 · E: 알 낳기',
+
+  hide:
+    '구멍이나 가구 밑에서는 사람의 시야를 피한다. 화면 가장자리가 어두워지면 숨은 상태다.',
+
+  watch:
+    '알집은 아직 살아 있다.',
+
+  trap:
+    '아까 놓은 먹이다. 이번에는 닿으면 죽는다.',
+
   gen:(n)=>`${n}대째`,
 };
+
+
+
+
 const BAIT_LABEL={bone:'닭뼈',cola:'콜라',rice:'밥'};
 
 // A* 격자 (사람용)
@@ -1043,30 +1177,200 @@ class Round2{
     this.cushion=this.G.room.cushion; this.cushionBase={x:this.cushion.position.x,y:this.cushion.position.y,z:this.cushion.position.z};
   }
   start(weapons,baits){ this.weapons=weapons; this.baitKinds=baits||[]; this.gen=0; this.active=true; this.grp.visible=true; this.lastEgg=null; this.finished=false; this.hinted={}; this.G.input.mode='r2'; document.getElementById('r2ui').style.display='block'; this.G.ui.eggState('none'); this.G.ui.miniOn(true); this.camPitch=0.05; this.startGen(); }
-  stop(){ this.active=false; this.grp.visible=false; document.getElementById('r2ui').style.display='none'; this.roach.g.visible=false; this.human.root.visible=false; this.eggMesh.visible=false; this.hatchMesh.visible=false; this.ring.visible=false; this.warn.visible=false; this.suitcase.visible=false; if(this.swarm){ this.grp.remove(this.swarm.mesh); this.grp.remove(this.swarm.legs); this.swarm=null; } this.clearNpcs(); this.clearTraps(); this.puffs.clear(); this.resetCushion(); this.G.ui.vignette(false); this.G.ui.tox(0); this.G.ui.eggState('none'); this.G.ui.hintClear(); this.G.ui.genLabel(null); this.G.ui.miniOn(false); SFX.stopLoop('spray'); SFX.stopLoop('flame'); SFX.stopLoop('vacuum'); }
-  resetCushion(){ const c=this.cushion; c.position.set(this.cushionBase.x,this.cushionBase.y,this.cushionBase.z); c.quaternion.identity(); c.material.opacity=1; c.material.transparent=false; c.material.needsUpdate=true; this.cushionLift=0; }
-  startGen(){
-    const G=this.G; G.setLighting('dim'); this.G.room.door.rotation.y=0; this.resetCushion();
-    this.phase='play'; this.death=null; this.egg=null; this.ready=false; this.laying=0; this.assistW=0; this.lookTgt=null; this.lookIdle=9; this.eggDanger=false; this.hatch=null; this.genT=0; this.doneStep=false; this.warn.visible=false;
-    let sx,sz,sh;
-    if(this.gen>0&&this.lastEgg){ sx=this.lastEgg.x; sz=this.lastEgg.z; sh=this.lastEgg.h; }
-    else { const o=HOLE_LIST[Math.floor(rand(HOLE_LIST.length))]; sx=o.x+o.dx*0.05; sz=o.z+o.dz*0.05; sh=Math.atan2(o.dx,o.dz); }
-    const P=this.p={x:sx,z:sz,h:sh,spd:0,dash:0,dashCd:0,vx:0,vz:0,hidden:!!spotAt(sx,sz),poison:0,expo:0,noise:0,tox:0};
-    this.roach.g.visible=true; this.roach.g.rotation.set(0,P.h,0); this.roach.g.position.set(P.x,0,P.z); this.roach.pose(0,0,0);
-    this.camYaw=this.gen>0?sh:Math.atan2(-P.x,-P.z); this.camPitch=0.05;
-    this.eggMesh.visible=false; this.ring.visible=false; this.suitcase.visible=false;
-    const w=this.weapons[this.gen];
-    if(this.gen>0){ this.hatch={t:0}; this.hatchMesh.visible=true; this.hatchMesh.scale.setScalar(1); this.hatchMesh.position.set(sx,0,sz); this.hatchMesh.rotation.y=sh+Math.PI/2; SFX.eggHatch(); }
-    G.ui.genLabel(HINTS.gen(this.gen+1),'사람이 든 것 — '+LABEL[w]);
-    this.setupHuman(); this.spawnNpcs(); this.spawnTraps(); G.ui.eggState('none'); G.ui.vignette(P.hidden); G.ui.tox(0);
-    setTimeout(()=>{ if(this.active&&this.phase==='play') G.blackout(false,false); },350);
-    if(this.gen===0&&!this.hinted.move){ this.hinted.move=true;
-      G.ui.hint(G.isTouch?HINTS.moveTouch:HINTS.moveKey,4.6,0.9);
-      G.ui.hint(HINTS.hide,5.2,0.3);
-      G.ui.hint(HINTS.egg,5.6,0.3); this.hinted.egg=true;
-      if(G.isTouch) G.ui.hint(HINTS.dashTouch,4,0.3);
+  
+    stop(){
+    this.active=false;
+    this.grp.visible=false;
+
+    document.getElementById('r2ui').style.display='none';
+
+    this.roach.g.visible=false;
+    this.human.root.visible=false;
+    this.eggMesh.visible=false;
+    this.hatchMesh.visible=false;
+    this.ring.visible=false;
+    this.warn.visible=false;
+    this.suitcase.visible=false;
+
+    if(this.swarm){
+      for(const m of [
+        this.swarm.mesh,
+        this.swarm.heads,
+        this.swarm.legs
+      ]){
+        this.grp.remove(m);
+        m.geometry.dispose();
+      }
+
+      this.swarm=null;
     }
+
+    this.clearNpcs();
+    this.clearTraps();
+    this.puffs.clear();
+    this.resetCushion();
+
+    this.G.ui.vignette(false);
+    this.G.ui.tox(0);
+    this.G.ui.eggState('none');
+    this.G.ui.hintClear();
+    this.G.ui.genLabel(null);
+    this.G.ui.miniOn(false);
+
+    SFX.stopLoop('spray');
+    SFX.stopLoop('flame');
+    SFX.stopLoop('vacuum');
   }
+
+
+
+  resetCushion(){ const c=this.cushion; c.position.set(this.cushionBase.x,this.cushionBase.y,this.cushionBase.z); c.quaternion.identity(); c.material.opacity=1; c.material.transparent=false; c.material.needsUpdate=true; this.cushionLift=0; }
+ 
+ 
+  startGen(){
+    const G=this.G;
+
+    G.setLighting('dim');
+    this.G.room.door.rotation.y=0;
+    this.resetCushion();
+    G.ui.hintClear();
+
+    this.phase='play';
+    this.death=null;
+    this.egg=null;
+    this.ready=false;
+    this.laying=0;
+
+    // 현재 세대에 맞는 알집 시간을 저장한다.
+    this.eggT=eggTimeForGen(this.gen);
+
+    this.assistW=0;
+    this.lookTgt=null;
+    this.lookIdle=9;
+    this.eggDanger=false;
+    this.hatch=null;
+    this.genT=0;
+    this.doneStep=false;
+    this.warn.visible=false;
+
+    let sx,sz,sh;
+
+    if(this.gen>0&&this.lastEgg){
+      sx=this.lastEgg.x;
+      sz=this.lastEgg.z;
+      sh=this.lastEgg.h;
+    }else{
+      const o=HOLE_LIST[
+        Math.floor(rand(HOLE_LIST.length))
+      ];
+
+      sx=o.x+o.dx*0.05;
+      sz=o.z+o.dz*0.05;
+      sh=Math.atan2(o.dx,o.dz);
+    }
+
+    const P=this.p={
+      x:sx,
+      z:sz,
+      h:sh,
+      spd:0,
+      dash:0,
+      dashCd:0,
+      vx:0,
+      vz:0,
+      hidden:!!spotAt(sx,sz),
+      poison:0,
+      expo:0,
+      noise:0,
+      tox:0
+    };
+
+    this.roach.g.visible=true;
+    this.roach.g.rotation.set(0,P.h,0);
+    this.roach.g.position.set(P.x,0,P.z);
+    this.roach.pose(0,0,0);
+
+    this.camYaw=
+      this.gen>0
+        ? sh
+        : Math.atan2(-P.x,-P.z);
+
+    this.camPitch=0.05;
+
+    this.eggMesh.visible=false;
+    this.ring.visible=false;
+    this.suitcase.visible=false;
+
+    const w=this.weapons[this.gen];
+
+    if(this.gen>0){
+      this.hatch={t:0};
+      this.hatchMesh.visible=true;
+      this.hatchMesh.scale.setScalar(1);
+      this.hatchMesh.position.set(sx,0,sz);
+      this.hatchMesh.rotation.y=sh+Math.PI/2;
+      SFX.eggHatch();
+    }
+
+    // '사람이 든 것 — 슬리퍼' 대신
+    // 제목 아래에 도구 이름만 보여준다.
+    G.ui.genLabel(
+      HINTS.gen(this.gen+1),
+      LABEL[w]
+    );
+
+    this.setupHuman();
+    this.spawnNpcs();
+
+    G.ui.eggState('none');
+
+    // 긴 힌트가 사라져도 핵심 규칙은 계속 화면에 남는다.
+    G.ui.eggBar(
+      `알 버튼 2초 · 알집 ${this.eggT}초`,
+      false
+    );
+
+    G.ui.vignette(P.hidden);
+    G.ui.tox(0);
+
+    setTimeout(()=>{
+      if(this.active&&this.phase==='play'){
+        G.blackout(false,false);
+      }
+    },350);
+
+    if(this.gen===0&&!this.hinted.move){
+      this.hinted.move=true;
+
+      // 일반 조작보다 게임의 고유 규칙을 먼저 말한다.
+      G.ui.hint(
+        HINTS.goal,
+        3.8,
+        0.7
+      );
+
+      G.ui.hint(
+        G.isTouch
+          ? HINTS.moveTouch
+          : HINTS.moveKey,
+        4.8,
+        0.2
+      );
+
+      G.ui.hint(
+        HINTS.hide,
+        4.2,
+        0.2
+      );
+    }
+
+    // 미끼 설명은 핵심 안내 뒤에 붙인다.
+    this.spawnTraps();
+  }
+
+
+
+
   setupHuman(){
     const H=this.human, w=this.weapons[this.gen];
     const A=this.ai={state:'sleep',wake:0,stirred:false,autoWake:clamp(rand(26,36)-this.gen*2.6,11,36),genT:0,t:0,x:BEDSIDE.x,z:BEDSIDE.z,h:Math.PI,spd:0,path:null,wp:0,target:null,prey:null,lastSeen:null,searched:{},searchHole:null,weapon:w,W:HW[w],lightsOn:false,look:0,strike:null,rec:0,noiseT:0,footPhase:0,burstT:0,burstOn:false,sitT:0,spdMul:SPD_MUL[Math.min(this.gen,SPD_MUL.length-1)],windupAdd:this.gen<2?0.2:this.gen<4?0.12:0.05,aimErr:0.16*Math.max(0.35,1-this.gen*0.12),repathT:0,eggKnown:false,awake:false,nozzle:null};
@@ -1093,7 +1397,22 @@ class Round2{
       this.G.paint.bait(kind,s[0],s[1]);
       this.traps.push({kind,x:s[0],z:s[1],mesh});
     }
-    if(this.traps.length&&!this.hinted.trap){ this.hinted.trap=true; this.G.ui.hint(HINTS.trap,4.4,2.2); }
+
+
+
+        if(this.traps.length&&!this.hinted.trap){
+      this.hinted.trap=true;
+
+      this.G.ui.hint(
+        HINTS.trap,
+        4.0,
+        0.2
+      );
+    }
+
+
+
+
   }
   // ── 다른 바퀴들 ──
   npcTarget(){ return Math.min(30,16+this.gen*2); }
@@ -1274,20 +1593,137 @@ class Round2{
   layTick(dt,holding){ const P=this.p; if(this.egg) return;
     if(holding&&P.spd<0.05){ this.laying+=dt/LAY_T; if(this.laying>=1){ this.placeEgg(); return; } } else this.laying=Math.max(0,this.laying-dt*0.5);
     this.G.ui.eggProgress(this.laying); }
-  placeEgg(){ const P=this.p; const spot=spotAt(P.x,P.z); const ex=P.x-Math.sin(P.h)*0.06, ez=P.z-Math.cos(P.h)*0.06; this.egg={spot,x:ex,z:ez,t:0,lastK:-1}; this.laying=0; this.lastEgg={x:ex,z:ez,h:P.h,spot}; this.G.ui.eggProgress(0); this.G.ui.eggState('laid');
-    this.eggMesh.position.set(ex,0,ez); this.eggMesh.rotation.y=P.h+Math.PI/2; this.eggMesh.visible=true; this.ring.visible=true; this.ring.position.set(ex,0.006,ez); this.drawRing(0); SFX.click(0.25);
-    if(!this.hinted.laid){ this.hinted.laid=true; this.G.ui.hint(HINTS.laid,5.2,0.4); } }
-  drawRing(k){ const g=this.ringC.getContext('2d'); g.clearRect(0,0,96,96); g.lineWidth=7; g.strokeStyle='rgba(251,244,228,0.55)'; g.beginPath(); g.arc(48,48,36,0,TAU); g.stroke(); g.strokeStyle=k>=1?'#3A2412':'#FBF4E4'; g.lineCap='round'; g.beginPath(); g.arc(48,48,36,-Math.PI/2,-Math.PI/2+TAU*Math.min(1,k)); g.stroke(); this.ringTex.needsUpdate=true; }
-  tickEgg(dt){
-    const E=this.egg; if(!E||this.ready) return; const A=this.ai; E.t+=dt; const k=E.t/EGG_T;
-    if(Math.floor(k*60)!==E.lastK){ E.lastK=Math.floor(k*60); this.drawRing(k); this.G.ui.eggProgress(Math.min(1,k)); }
-    const left=Math.max(0,Math.ceil(EGG_T-E.t));
-    const dg=Math.hypot(A.x-E.x,A.z-E.z); const danger=A.awake&&(dg<1.0||(E.spot&&A.searchHole===E.spot)||A.eggKnown);
-    this.G.ui.eggBar('알집 '+left+'초',danger);
-    if(danger!==this.eggDanger){ this.eggDanger=danger; this.G.ui.eggDanger(danger); }
-    this.ring.material.opacity=danger?0.35+0.65*Math.abs(Math.sin(this.G.time*9)):1;
-    if(k>=1){ this.ready=true; SFX.eggReady(); this.G.ui.eggReady(true); this.G.ui.eggBar('알집이 여물었다',false); this.nextGen(); }
+ 
+ 
+  placeEgg(){
+    const P=this.p;
+    const spot=spotAt(P.x,P.z);
+
+    const ex=P.x-Math.sin(P.h)*0.06;
+    const ez=P.z-Math.cos(P.h)*0.06;
+
+    this.egg={
+      spot,
+      x:ex,
+      z:ez,
+      t:0,
+      lastK:-1
+    };
+
+    this.laying=0;
+
+    this.lastEgg={
+      x:ex,
+      z:ez,
+      h:P.h,
+      spot
+    };
+
+    this.G.ui.eggProgress(0);
+    this.G.ui.eggState('laid');
+    this.G.ui.eggBar(
+      `알집 · ${this.eggT}초`,
+      false
+    );
+
+    this.eggMesh.position.set(ex,0,ez);
+    this.eggMesh.rotation.y=P.h+Math.PI/2;
+    this.eggMesh.visible=true;
+
+    this.ring.visible=true;
+    this.ring.position.set(ex,0.006,ez);
+    this.drawRing(0);
+
+    SFX.click(0.25);
   }
+
+
+
+
+  drawRing(k){ const g=this.ringC.getContext('2d'); g.clearRect(0,0,96,96); g.lineWidth=7; g.strokeStyle='rgba(251,244,228,0.55)'; g.beginPath(); g.arc(48,48,36,0,TAU); g.stroke(); g.strokeStyle=k>=1?'#3A2412':'#FBF4E4'; g.lineCap='round'; g.beginPath(); g.arc(48,48,36,-Math.PI/2,-Math.PI/2+TAU*Math.min(1,k)); g.stroke(); this.ringTex.needsUpdate=true; }
+ 
+ 
+ 
+ 
+  tickEgg(dt){
+    const E=this.egg;
+
+    if(!E||this.ready){
+      return;
+    }
+
+    const A=this.ai;
+    const total=this.eggT;
+
+    E.t+=dt;
+
+    const k=E.t/total;
+
+    if(Math.floor(k*60)!==E.lastK){
+      E.lastK=Math.floor(k*60);
+
+      this.drawRing(k);
+      this.G.ui.eggProgress(
+        Math.min(1,k)
+      );
+    }
+
+    const left=Math.max(
+      0,
+      Math.ceil(total-E.t)
+    );
+
+    const dg=Math.hypot(
+      A.x-E.x,
+      A.z-E.z
+    );
+
+    const danger=
+      A.awake&&(
+        dg<1.0 ||
+        (
+          E.spot &&
+          A.searchHole===E.spot
+        ) ||
+        A.eggKnown
+      );
+
+    this.G.ui.eggBar(
+      `알집 · ${left}초`,
+      danger
+    );
+
+    if(danger!==this.eggDanger){
+      this.eggDanger=danger;
+      this.G.ui.eggDanger(danger);
+    }
+
+    this.ring.material.opacity=
+      danger
+        ? 0.35+
+          0.65*
+          Math.abs(
+            Math.sin(this.G.time*9)
+          )
+        : 1;
+
+    if(k>=1){
+      this.ready=true;
+
+      SFX.eggReady();
+      this.G.ui.eggReady(true);
+
+      // '알집이 여물었다' 제거
+      this.G.ui.eggBar(
+        '부화',
+        false
+      );
+
+      this.nextGen();
+    }
+  }
+
+
   destroyEgg(){ if(!this.egg) return; SFX.eggCrush(); this.G.shake(0.5); this.eggMesh.visible=false; this.ring.visible=false; this.egg=null; this.G.ui.eggState('none'); this.G.ui.eggBar(null); this.lineEnd(); }
   // ── 죽음과 그 뒤 ──
   killPlayer(type){ if(this.phase!=='play') return; this.phase='dying'; this.death={type,t:0}; const P=this.p; P.spd=0; this.G.ui.tox(0);
@@ -1307,9 +1743,40 @@ class Round2{
     this.roach.g.visible=false;
     if(this.egg) this.toWatch(); else this.lineEnd();
   }
-  toWatch(){ const E=this.egg; this.phase='watch'; this.G.blackout(false,false); this.G.ui.vignette(false);
-    this.watchYaw=Math.atan2(0.2-E.x,0.6-E.z);
-    if(!this.hinted.watch){ this.hinted.watch=true; this.G.ui.hint(HINTS.watch,4.4,0.5); } }
+
+
+  toWatch(){
+    const E=this.egg;
+
+    this.phase='watch';
+
+    this.G.blackout(false,false);
+    this.G.ui.vignette(false);
+
+    // 죽기 전에 나오던 안내가 남지 않게 한다.
+    this.G.ui.hintClear();
+
+    this.watchYaw=
+      Math.atan2(
+        0.2-E.x,
+        0.6-E.z
+      );
+
+    if(!this.hinted.watch){
+      this.hinted.watch=true;
+
+      this.G.ui.hint(
+        HINTS.watch,
+        3.2,
+        0.2
+      );
+    }
+  }
+
+
+
+
+
   lineEnd(){ if(this.phase==='over') return; this.phase='over'; this.overT=0; }
   nextGen(){ if(this.finished) return; this.finished=true; this.G.blackout(true,false);
     setTimeout(()=>{ if(!this.active) return; this.finished=false; this.gen++; if(this.gen>=this.weapons.length){ this.gen=this.weapons.length; this.beginLeave(); } else this.startGen(); },1500); }
@@ -1437,7 +1904,15 @@ class UI{
   showQuit(b){ this.quit.classList.toggle('show',b&&this.G.state==='r1'); }
   eggState(mode){ const e=this.egg; if(e.dataset.mode===mode) return; const was=e.dataset.mode; e.dataset.mode=mode;
     this.pad.style.display=(mode==='none')?'none':'flex';
-    e.classList.toggle('laid',mode==='laid'); e.textContent=mode==='laid'?'알집':'알';
+       e.classList.toggle(
+      'laid',
+      mode==='laid'
+    );
+
+    e.textContent=
+      mode==='laid'
+        ? '알집'
+        : '알 낳기';
     if(mode==='show'&&was!=='show'){ e.classList.remove('pop'); void e.offsetWidth; e.classList.add('pop'); }
     if(mode!=='laid'){ e.classList.remove('ready','danger'); }
     if(mode==='none'){ e.style.setProperty('--p','0'); this.eggBar(null); } }
@@ -1530,7 +2005,7 @@ G.resize=function(){ const w=innerWidth,h=innerHeight; G.renderer.setSize(w,h,fa
 G.setTopCam=function(cx,cz,scale=1){ const cam=G.camera; if(cam.fov!==40){ cam.fov=40; cam.updateProjectionMatrix(); G.resize(); } cam.up.set(G.portrait?0:1,0,G.portrait?-1:0); cam.position.set(cx,G.topH*scale,cz); cam.lookAt(cx,0,cz); if(G.portrait){ G.camRight.set(1,0,0); G.camUp.set(0,0,-1); } else { G.camRight.set(0,0,1); G.camUp.set(1,0,0); } };
 window.addEventListener('resize',()=>G.resize());
 G.input=new Input(G.canvas); G.ui=new UI(G); G.r1=new Round1(G); G.r2=new Round2(G);
-const inR1=()=>G.state==='r1'||G.state==='confirm';
+const inR1=()=>G.state==='r1';
 G.input.onPress=(x,y,t)=>{ if(inR1()) G.r1.press(x,y,t); };
 G.input.onDrag=(x,y)=>{ if(inR1()) G.r1.drag(x,y); };
 G.input.onRelease=()=>{ if(inR1()) G.r1.release(); };
@@ -1546,22 +2021,233 @@ window.addEventListener('keydown',e=>{ if(e.code==='Tab'&&inR1()) e.preventDefau
 window.addEventListener('wheel',e=>{ if(!inR1()) return; let i=ALL_SLOTS.indexOf(G.r1.item); i=(i+(e.deltaY>0?1:-1)+ALL_SLOTS.length)%ALL_SLOTS.length; G.r1.selectItem(ALL_SLOTS[i]); },{passive:true});
 // 흐름
 G.startRound1=function(){ G.state='r1'; G.r2.stop(); G.camera.fov=40; G.camera.near=0.05; G.camera.updateProjectionMatrix(); G.resize(); G.r1.start(); G.blackout(false,false); };
-G.toRound2=function(){ G.state='to_r2'; G.ui.showQuit(false); G.r1.stop(); G.input.reset(); G.blackout(true,false);
-  const killed=[...G.r1.killedWith].filter(k=>LETHAL_ORDER.includes(k));
-  const set=new Set(['hand',...killed]);
-  G.savedWeapons=[...set].sort((a,b)=>LETHAL_ORDER.indexOf(a)-LETHAL_ORDER.indexOf(b));
-  G.savedBaits=[...G.r1.baitsUsed];
-  setTimeout(()=>G.startRound2(),2200); };
-G.startRound2=function(){ G.state='r2'; G.r1.stop(); G.ui.showQuit(false); G.ui.confirm.classList.remove('show'); G.camera.fov=68; G.camera.near=0.01; G.camera.updateProjectionMatrix(); G.resize(); G.paint.clear(); G.corpses.clear(); G.r2.start(G.savedWeapons||['hand'],G.savedBaits||[]); };
-G.lineEnded=function(gen){ G.state='ended'; G.r2.stop(); G.input.reset(); G.blackout(true); const e=document.getElementById('endtext'); e.textContent='대가 끊겼습니다'; e.style.display='grid'; setTimeout(()=>{ e.style.display='none'; G.showRank(gen,false); },2600); };
-G.ending=function(gen){ G.state='ended'; G.r2.stop(); G.input.reset(); G.showRank(gen,true); };
-G.showRank=function(gen,ended){ G.state='rank'; G.rankT=0; let list=[]; try{ list=JSON.parse(localStorage.getItem('roach_gens')||'[]'); }catch(e){} list.unshift({g:gen,t:Date.now()}); list=list.slice(0,10); try{ localStorage.setItem('roach_gens',JSON.stringify(list)); }catch(e){}
-  const n=(G.savedWeapons||['hand']).length;
-  const rk=document.getElementById('rank');
-  rk.querySelector('.now').innerHTML=`${gen}<small>대</small>`;
-  rk.querySelector('.sub').textContent=ended?'사람은 방을 비웠다.':`1라운드에서 도구 ${n}가지를 썼다. 그만큼의 대를 버텨야 했다.`;
-  rk.querySelector('.list').innerHTML=list.slice(1).map(o=>`<div>${o.g}대</div>`).join('');
-  rk.style.display='block'; G.blackout(false); };
+
+
+G.toRound2=function(){
+  G.state='to_r2';
+
+  G.ui.showQuit(false);
+  G.r1.stop();
+  G.ui.hintClear();
+  G.input.reset();
+  G.blackout(true,false);
+
+  /*
+   * 단순히 버튼을 선택한 도구가 아니라
+   * 실제로 한 번이라도 작동시킨 살상 도구만 가져간다.
+   *
+   * 헛손질도 '사용'으로 친다.
+   * 도구를 고르기만 하고 휘두르지 않았다면 제외된다.
+   */
+  const used=[
+    ...G.r1.used
+  ].filter(
+    k=>LETHAL_ORDER.includes(k)
+  );
+
+  /*
+   * 기존처럼 맨손을 무조건 끼워 넣지 않는다.
+   * 빈 배열 방지용 fallback만 남긴다.
+   *
+   * 정상 플레이는 최소 한 마리를 잡고 종료하므로
+   * 실제로는 used가 비어 있을 일이 없다.
+   */
+  G.savedWeapons=(
+    used.length
+      ? used
+      : ['hand']
+  ).sort(
+    (a,b)=>
+      LETHAL_ORDER.indexOf(a)-
+      LETHAL_ORDER.indexOf(b)
+  );
+
+  G.savedBaits=[
+    ...G.r1.baitsUsed
+  ].sort(
+    (a,b)=>
+      BAIT_SLOTS.indexOf(a)-
+      BAIT_SLOTS.indexOf(b)
+  );
+
+  const e=
+    document.getElementById(
+      'endtext'
+    );
+
+  const tools=
+    G.savedWeapons
+      .map(
+        k=>`<span>${LABEL[k]}</span>`
+      )
+      .join('');
+
+  const baits=
+    G.savedBaits.length
+      ? `
+        <div class="baitline">
+          남겨 둔 먹이 ·
+          ${G.savedBaits
+            .map(k=>LABEL[k])
+            .join(' · ')}
+        </div>
+      `
+      : '';
+
+  // 화면이 검게 전환된 다음 목록을 보여준다.
+  setTimeout(()=>{
+    if(G.state!=='to_r2'){
+      return;
+    }
+
+    e.innerHTML=`
+      <div>
+        <span class="eyebrow">
+          사용한 도구
+        </span>
+
+        <div class="tools">
+          ${tools}
+        </div>
+
+        ${baits}
+      </div>
+    `;
+
+    e.style.display='grid';
+
+    setTimeout(()=>{
+      if(G.state!=='to_r2'){
+        return;
+      }
+
+      e.style.display='none';
+      G.startRound2();
+    },1900);
+
+  },600);
+};
+
+
+G.startRound2=function(){
+  G.state='r2';
+
+  G.r1.stop();
+  G.ui.showQuit(false);
+  G.ui.confirm.classList.remove('show');
+
+  G.camera.fov=68;
+  G.camera.near=0.01;
+  G.camera.updateProjectionMatrix();
+
+  G.resize();
+  G.paint.clear();
+  G.corpses.clear();
+
+  G.r2.start(
+    G.savedWeapons||['hand'],
+    G.savedBaits||[]
+  );
+};
+
+
+G.lineEnded=function(gen){
+  G.state='ended';
+
+  G.r2.stop();
+  G.input.reset();
+  G.blackout(true);
+
+  const e=
+    document.getElementById(
+      'endtext'
+    );
+
+  // '대가 끊겼습니다' 제거
+  e.textContent='여기서 끝났다.';
+  e.style.display='grid';
+
+  setTimeout(()=>{
+    e.style.display='none';
+    G.showRank(gen,false);
+  },1700);
+};
+
+
+G.ending=function(gen){
+  G.state='ended';
+
+  G.r2.stop();
+  G.input.reset();
+  G.showRank(gen,true);
+};
+
+
+G.showRank=function(gen,ended){
+  G.state='rank';
+  G.rankT=0;
+
+  let list=[];
+
+  try{
+    list=JSON.parse(
+      localStorage.getItem(
+        'roach_gens'
+      )||'[]'
+    );
+  }catch(e){}
+
+  list.unshift({
+    g:gen,
+    t:Date.now()
+  });
+
+  list=list.slice(0,10);
+
+  try{
+    localStorage.setItem(
+      'roach_gens',
+      JSON.stringify(list)
+    );
+  }catch(e){}
+
+  const n=(
+    G.savedWeapons||['hand']
+  ).length;
+
+  const rk=
+    document.getElementById(
+      'rank'
+    );
+
+  rk.querySelector(
+    '.now'
+  ).innerHTML=
+    `${gen}<small>대</small>`;
+
+  rk.querySelector(
+    '.sub'
+  ).textContent=
+    ended
+      ? '사람은 방을 비웠다.'
+      : `사용한 도구 ${n}개 중 ${gen}개를 넘겼다.`;
+
+  rk.querySelector(
+    '.list'
+  ).innerHTML=
+    list
+      .slice(1)
+      .map(
+        o=>`<div>${o.g}대</div>`
+      )
+      .join('');
+
+  rk.style.display='block';
+  G.blackout(false);
+};
+
+
+
 G.restart=function(){ document.getElementById('rank').style.display='none'; G.startRound2(); };
 G.restartAll=function(){ document.getElementById('rank').style.display='none'; G.startRound1(); };
 // 디버그 진입
@@ -1571,12 +2257,42 @@ if(Q.get('r')==='2'){ G.savedWeapons=Q.get('w')?Q.get('w').split(','):LETHAL_ORD
 else if(Q.get('r')==='rank'){ G.savedWeapons=['hand','slipper']; G.showRank(3,false); }
 else G.startRound1();
 window.__g=G; G.HOLES=HOLES;
-G.advance=function(T,step=1/60){ for(let i=0;i<Math.round(T/step);i++){ G.time+=step; if(G.state==='r1'||G.state==='confirm') G.r1.update(step); else if(G.state==='r2') G.r2.update(step); } G.paint.flush(G.time+999); };
+
+
+G.advance=function(T,step=1/60){
+  for(
+    let i=0;
+    i<Math.round(T/step);
+    i++
+  ){
+    G.time+=step;
+
+    if(G.state==='r1'){
+      G.r1.update(step);
+    }else if(G.state==='r2'){
+      G.r2.update(step);
+    }
+  }
+
+  G.paint.flush(G.time+999);
+};
+
+
 // 루프
 let last=now(); const _off=new THREE.Vector3();
 function frame(){ requestAnimationFrame(frame); const t=now(); let dt=Math.min(0.05,t-last); last=t; G.time+=dt;
   if(G.state==='rank') G.rankT+=dt;
-  if(!G.paused){ if(G.state==='r1'||G.state==='confirm') G.r1.update(dt); else if(G.state==='r2') G.r2.update(dt); }
+  
+  
+if(!G.paused){
+  if(G.state==='r1'){
+    G.r1.update(dt);
+  }else if(G.state==='r2'){
+    G.r2.update(dt);
+  }
+}
+
+
   if(G.state==='r2'){ G.ui.miniT-=dt; if(G.ui.miniT<=0){ G.ui.miniT=0.1; G.ui.drawMini(G.r2.miniData()); } }
   if(G.shakeAmt>0.001){ const a=G.shakeAmt*0.02; _off.set(rand(-a,a),rand(-a,a),rand(-a,a)); G.camera.position.add(_off); G.shakeAmt*=Math.exp(-9*dt); }
   G.paint.flush(G.time); G.renderer.render(G.scene,G.camera);
