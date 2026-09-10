@@ -1,0 +1,76 @@
+import {THREE,TAU,clamp,lerp,rand,damp,angleDamp,capsuleGeometry} from './specimen-core.js';
+
+const V3=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+const Q=new THREE.Quaternion();
+
+function shellMaterial(color=0x4a2611,rough=.48,clear=.5){
+  return new THREE.MeshPhysicalMaterial({color,roughness:rough,metalness:0,clearcoat:clear,clearcoatRoughness:.28,emissive:0x000000,emissiveIntensity:0});
+}
+function tissueMaterial(color=0xe1cc91){return new THREE.MeshPhysicalMaterial({color,roughness:.42,clearcoat:.18,transparent:true,opacity:.98});}
+function cloneMaterials(group){const out=[];group.traverse(o=>{if(o.isMesh){o.material=o.material.clone();out.push(o.material)}});return out;}
+function setPartId(group,id){group.traverse(o=>{if(o.isMesh)o.userData.partId=id});}
+function worldTransform(obj){const p=new THREE.Vector3(),q=new THREE.Quaternion(),s=new THREE.Vector3();obj.updateWorldMatrix(true,false);obj.matrixWorld.decompose(p,q,s);return{p,q,s};}
+function makeEllipsoid(rx,ry,rz,mat,seg=28){const m=new THREE.Mesh(new THREE.SphereGeometry(1,seg,Math.max(10,Math.floor(seg*.55))),mat);m.scale.set(rx,ry,rz);m.castShadow=true;m.receiveShadow=true;return m;}
+function makeTube(radius,length,mat,radial=9){const m=new THREE.Mesh(capsuleGeometry(radius,length,radial,5),mat);m.rotation.z=-Math.PI/2;m.position.x=length/2;m.castShadow=true;m.receiveShadow=true;return m;}
+function makeDisc(radius,mat){const m=new THREE.Mesh(new THREE.CircleGeometry(radius,20),mat);m.rotation.y=Math.PI/2;return m;}
+function curveWingGeometry(len=.9,width=.28){
+  const s=new THREE.Shape();s.moveTo(0,0);s.bezierCurveTo(width*.65,.02,width,len*.55,width*.2,len);s.bezierCurveTo(.02,len*1.04,-width*.08,len*.45,0,0);return new THREE.ExtrudeGeometry(s,{depth:.018,bevelEnabled:true,bevelSize:.006,bevelThickness:.004,bevelSegments:2,curveSegments:18});
+}
+function mandibleGeometry(side=1){
+  const s=new THREE.Shape();s.moveTo(0,0);s.lineTo(side*.16,.02);s.lineTo(side*.2,.13);s.lineTo(side*.07,.18);s.lineTo(0,.08);s.closePath();return new THREE.ExtrudeGeometry(s,{depth:.055,bevelEnabled:true,bevelSize:.008,bevelThickness:.006,bevelSegments:2});
+}
+
+export class SpecimenRoach{
+  constructor(app){
+    this.app=app;this.scene=app.scene;this.fx=app.fx;this.audio=app.audio;this.workbench=app.workbench;
+    this.root=new THREE.Group();this.root.name='specimenRoot';this.root.position.set(0,.065,.05);this.scene.add(this.root);
+    this.parts=new Map();this.selectables=[];this.looseRoots=[];this.pins=[];this.pinSeq=1;this.fragmentSeq=1;this.marks=[];this.hoverPart=null;this.threat=null;
+    this.vitals={alive:true,awareness:1,headCore:1,thoraxCore:1,abdomenCore:1,shock:0,heat:0,fatigue:0,mobility:1,reflex:1};
+    this.gait=rand(TAU);this.wriggle=rand(TAU);this.fear=.45;this.dir=rand(TAU);this.dirT=rand(.4,1.5);this.rootVel=V3();this.rootYaw=0;this.toolContact=0;this.detachedCount=0;
+    this.legChains=[];this.antennaChains=[];this.abdomen=[];this.coreParts=[];this.build();this.captureBases();
+  }
+  mat(kind='shell'){
+    if(kind==='eye')return shellMaterial(0x170b06,.22,.9);
+    if(kind==='joint')return shellMaterial(0x281208,.68,.2);
+    if(kind==='wing')return new THREE.MeshPhysicalMaterial({color:0x6b3b18,roughness:.35,clearcoat:.65,clearcoatRoughness:.23,transparent:true,opacity:.78,side:THREE.DoubleSide,emissive:0x000000});
+    if(kind==='hindwing')return new THREE.MeshPhysicalMaterial({color:0xc69d5e,roughness:.46,transparent:true,opacity:.36,side:THREE.DoubleSide,depthWrite:false,emissive:0x000000});
+    if(kind==='tissue')return tissueMaterial();
+    if(kind==='nerve')return new THREE.MeshStandardMaterial({color:0xf0dca8,roughness:.52,emissive:0x2b1707,emissiveIntensity:.06});
+    return shellMaterial();
+  }
+  register(id,label,kind,group,{parentId=null,strength=.7,linear=null,vital=0,cuttable=true}={}){
+    if(this.parts.has(id))throw new Error(`duplicate part ${id}`);
+    const materials=cloneMaterials(group);
+    const part={id,label,kind,group,parentId,children:[],strength,linear,vital,cuttable,attached:true,bodyAttached:true,detachedRoot:false,anchored:0,integrity:1,scoreDepth:0,crack:0,puncture:0,burn:0,crush:0,leak:0,nerve:1,twitch:0,marks:[],fragmentLevel:0,materials,baseColors:materials.map(m=>m.color?m.color.clone():null),baseRough:materials.map(m=>m.roughness??.5),basePos:null,baseQuat:null,baseScale:null,mesh:linear?.mesh||null,distal:linear?.distal||null};
+    this.parts.set(id,part);if(parentId&&this.parts.has(parentId))this.parts.get(parentId).children.push(id);setPartId(group,id);group.userData.partId=id;group.userData.partRef=part;
+    group.traverse(o=>{if(o.isMesh){this.selectables.push(o);o.castShadow=true}});
+    return part;
+  }
+  captureBases(){for(const p of this.parts.values()){p.basePos=p.group.position.clone();p.baseQuat=p.group.quaternion.clone();p.baseScale=p.group.scale.clone();}}
+  build(){
+    this.buildThorax();this.buildAbdomen();this.buildHead();this.buildWings();this.buildLegs();this.buildCerci();
+  }
+  buildAbdomen(){
+    const z0=-.24;
+    for(let i=0;i<10;i++){
+      const t=i/9,z=z0-i*.105,w=lerp(.38,.17,Math.pow(t,1.35)),len=.17,h=lerp(.14,.08,t);
+      const g=new THREE.Group();g.position.set(0,0,z);this.root.add(g);
+      const mat=shellMaterial(i%2?0x4b2611:0x542b13,.5,.45);const shell=makeEllipsoid(w,h,len,mat,30);shell.position.y=.075;g.add(shell);
+      const seam=new THREE.Mesh(new THREE.TorusGeometry(w*.88,.009,6,28,Math.PI),shellMaterial(0x211006,.72,.15));seam.rotation.set(Math.PI/2,0,Math.PI/2);seam.scale.z=len/w;seam.position.set(0,.085,len*.16);g.add(seam);
+      const vent=makeEllipsoid(w*.85,h*.42,len*.82,shellMaterial(0x6b3a1b,.7,.2),22);vent.position.y=.035;g.add(vent);
+      const id=`abdomen_${String(i+1).padStart(2,'0')}`;const p=this.register(id,`배 ${i+1}마디`,'abdomen',g,{parentId:i?`abdomen_${String(i).padStart(2,'0')}`:'metathorax',strength:.82-i*.025,vital:i<3?.08:.045});
+      p.segmentIndex=i;p.localHalf=V3(w,h,len);this.abdomen.push(p);this.coreParts.push(p);
+      const tissue=makeEllipsoid(w*.67,h*.45,len*.58,this.mat('tissue'),18);tissue.position.y=.067;tissue.visible=false;tissue.userData.internal=true;g.add(tissue);p.tissue=tissue;
+    }
+  }
+  buildThorax(){
+    const specs=[
+      ['metathorax','뒷가슴','thorax',-.10,.37,.16,.25,0x43210f,.95,.23],
+      ['mesothorax','가운데가슴','thorax',.13,.36,.17,.24,0x4b2611,.92,.25],
+      ['prothorax','앞가슴','thorax',.36,.34,.18,.23,0x3f1e0d,.92,.27]
+    ];
+    for(const [id,label,kind,z,rx,ry,rz,col,str,vital] of specs){const g=new THREE.Group();g.position.set(0,0,z);this.root.add(g);const m=makeEllipsoid(rx,ry,rz,shellMaterial(col,.45,.55),32);m.position.y=.085;g.add(m);const vent=makeEllipsoid(rx*.84,ry*.4,rz*.85,shellMaterial(0x673617,.7,.18),24);vent.position.y=.035;g.add(vent);const p=this.register(id,label,kind,g,{strength:str,vital});p.localHalf=V3(rx,ry,rz);this.coreParts.push(p);const tissue=makeEllipsoid(rx*.65,ry*.42,rz*.58,this.mat('tissue'),20);tissue.position.y=.075;tissue.visible=false;g.add(tissue);p.tissue=tissue;}
+    const pg=new THREE.Group();pg.position.set(0,.025,.46);this.root.add(pg);const plate=makeEllipsoid(.43,.14,.31,shellMaterial(0x351809,.39,.7),36);plate.position.y=.14;plate.rotation.x=-.05;pg.add(plate);const rim=new THREE.Mesh(new THREE.TorusGeometry(.36,.015,7,38),shellMaterial(0x6c4323,.58,.35));rim.rotation.x=Math.PI/2;rim.scale.z=.72;rim.position.y=.13;pg.add(rim);const p=this.register('pronotum','앞가슴등판','plate',pg,{parentId:'prothorax',strength:1.12,vital:.08});p.localHalf=V3(.43,.14,.31);
+  }
+  buildHead(){
+    const g=new THREE.Group();g.position.set(0,.06,.72);g.r
