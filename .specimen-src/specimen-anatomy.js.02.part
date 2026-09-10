@@ -1,0 +1,58 @@
+labelSide} ${row.name}다리 발톱 ${clawSide<0?'안쪽':'바깥쪽'}`,'claw',g,{parentId:last.id,strength:.10});p.side=side;p.row=row.tag;chain.push(p)}
+    this.legChains.push({prefix,row:row.tag,side,parts:chain,phase:(row.tag==='M'?Math.PI:0)+(side<0?Math.PI:0)});
+  }
+  buildCerci(){
+    for(const side of [-1,1]){
+      let host=this.root,lastId='abdomen_10';const chain=[];
+      for(let i=0;i<6;i++){
+        const len=lerp(.085,.045,i/5),r=lerp(.012,.004,i/5),g=new THREE.Group();
+        if(i===0){g.position.set(side*.09,.065,-1.18);g.rotation.y=side*(Math.PI*.35)}else{g.position.x=0;g.rotation.y=side*.06}
+        host.add(g);const mesh=makeTube(r,len,shellMaterial(0x2c1407,.65,.18),6);g.add(mesh);const distal=new THREE.Object3D();distal.position.x=len;g.add(distal);const id=`cercus_${side<0?'L':'R'}_${i}`;const p=this.register(id,`${side<0?'왼쪽':'오른쪽'} 꼬리감각기관 ${i+1}마디`,'cercus',g,{parentId:lastId,strength:lerp(.20,.08,i/5),linear:{mesh,distal,length:len,radius:r}});p.side=side;p.chainIndex=i;chain.push(p);host=distal;lastId=id;
+      }
+    }
+  }
+  partFromObject(o){while(o){if(o.userData?.partId&&this.parts.has(o.userData.partId))return this.parts.get(o.userData.partId);o=o.parent}return null;}
+  raycastObjects(){return this.selectables.filter(o=>o.visible&&o.parent);}
+  getPartState(part){
+    const bits=[];if(!part.bodyAttached)bits.push('분리됨');if(part.anchored)bits.push(`핀 ${part.anchored}`);if(part.scoreDepth>.08)bits.push(`칼집 ${Math.round(part.scoreDepth*100)}%`);if(part.crack>.08)bits.push(`균열 ${Math.round(part.crack*100)}%`);if(part.puncture>.08)bits.push(`파손점 ${Math.round(part.puncture*100)}%`);if(part.burn>.08)bits.push(`열손상 ${Math.round(part.burn*100)}%`);if(part.integrity<.98)bits.push(`외피 ${Math.max(0,Math.round(part.integrity*100))}%`);return bits.length?bits.join(' · '):'외피와 연결부가 멀쩡함';
+  }
+  setHighlight(part){
+    if(this.hoverPart===part)return;if(this.hoverPart)this.applyHighlight(this.hoverPart,false);this.hoverPart=part;if(part)this.applyHighlight(part,true);
+  }
+  applyHighlight(part,on){for(let i=0;i<part.materials.length;i++){const m=part.materials[i];if(!m?.emissive)continue;m.emissive.set(on?0x5f3010:0x000000);m.emissiveIntensity=on?.32:0}}
+  localHit(part,worldPoint,worldNormal){
+    const p=part.group.worldToLocal(worldPoint.clone());const inv=part.group.getWorldQuaternion(new THREE.Quaternion()).invert();const n=worldNormal.clone().applyQuaternion(inv).normalize();return{p,n};
+  }
+  markCircle(part,localPoint,localNormal,r,color,opacity=.9){
+    const mat=new THREE.MeshBasicMaterial({color,transparent:opacity<1,opacity,depthWrite:false,side:THREE.DoubleSide});const m=new THREE.Mesh(new THREE.CircleGeometry(r,20),mat);m.position.copy(localPoint).addScaledVector(localNormal,.004);m.quaternion.setFromUnitVectors(V3(0,0,1),localNormal);part.group.add(m);part.marks.push({mesh:m,type:'circle'});return m;
+  }
+  addPuncture(part,worldPoint,worldNormal,amount=.25){
+    const {p,n}=this.localHit(part,worldPoint,worldNormal);part.puncture=clamp(part.puncture+amount,0,1);part.crack=clamp(part.crack+amount*.45,0,1);part.integrity=clamp(part.integrity-amount*.11,0,1);part.leak=clamp(part.leak+amount*.18,0,1);
+    const r=.018+.026*part.puncture;this.markCircle(part,p,n,r,0x1e0d06,.92);
+    const crackMat=new THREE.LineBasicMaterial({color:0x1b0b04,transparent:true,opacity:.82});for(let i=0;i<3+Math.floor(part.puncture*3);i++){const a=rand(TAU),len=rand(.03,.07)*(1+part.puncture),tangent=V3(Math.cos(a),0,Math.sin(a));if(Math.abs(n.y)<.75)tangent.cross(n).normalize();const pts=[p.clone().addScaledVector(n,.006),p.clone().addScaledVector(n,.006).addScaledVector(tangent,len)];const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),crackMat.clone());part.group.add(l);part.marks.push({mesh:l,type:'crack'})}
+    this.damageCore(part,amount*.035);this.refreshVisual(part);if(part.puncture>.5){this.fx.burst(worldPoint,worldNormal,3+Math.floor(amount*8),.28,.35);this.fx.stain(worldPoint,.018+.018*amount,false)}
+  }
+  addScore(part,localPoints,worldPoint,worldNormal){
+    if(localPoints.length<2)return 0;const center=localPoints.reduce((a,p)=>a.add(p),V3()).multiplyScalar(1/localPoints.length);let mark=part.marks.find(m=>m.type==='score'&&m.center.distanceTo(center)<.09);
+    if(mark){mark.depth=clamp(mark.depth+.27,0,1);part.group.remove(mark.outer);part.group.remove(mark.inner);mark.outer.geometry.dispose();mark.outer.material.dispose();if(mark.inner){mark.inner.geometry.dispose();mark.inner.material.dispose()}}
+    else{mark={type:'score',center:center.clone(),depth:.24,points:localPoints.map(p=>p.clone())};part.marks.push(mark)}
+    mark.points=localPoints.map(p=>p.clone());const curve=new THREE.CatmullRomCurve3(mark.points,false,'centripetal');const outer=new THREE.Mesh(new THREE.TubeGeometry(curve,Math.max(6,mark.points.length*2),.006+.006*mark.depth,5,false),new THREE.MeshBasicMaterial({color:0x1a0904,depthWrite:false}));part.group.add(outer);mark.outer=outer;
+    if(mark.depth>.48){const inner=new THREE.Mesh(new THREE.TubeGeometry(curve,Math.max(6,mark.points.length*2),.0025+.004*mark.depth,5,false),new THREE.MeshBasicMaterial({color:mark.depth>.78?0xe6d39b:0x8d542a,depthWrite:false}));part.group.add(inner);mark.inner=inner}
+    part.scoreDepth=clamp(part.scoreDepth+.14+.16*mark.depth,0,1);part.crack=clamp(part.crack+.08*mark.depth,0,1);part.integrity=clamp(part.integrity-.035-.05*mark.depth,0,1);part.leak=clamp(part.leak+.05*Math.max(0,mark.depth-.4),0,1);this.damageCore(part,.018*mark.depth);this.refreshVisual(part);
+    if(mark.depth>.7){this.fx.burst(worldPoint,worldNormal,2+Math.floor(mark.depth*3),.22,.25);this.fx.stain(worldPoint,.012+.015*mark.depth,false)}
+    return mark.depth;
+  }
+  addScorch(part,worldPoint,worldNormal,amount){
+    const {p,n}=this.localHit(part,worldPoint,worldNormal);part.burn=clamp(part.burn+amount,0,1);part.integrity=clamp(part.integrity-amount*.025,0,1);this.vitals.heat=clamp(this.vitals.heat+amount*.025,0,1);this.refreshVisual(part);if(Math.random()<amount*2)this.markCircle(part,p,n,.018+part.burn*.045,part.burn>.65?0x120b07:0x4a2411,.25+.45*part.burn);if(part.kind==='wing'||part.kind==='hindwing'||part.kind==='antenna')part.group.scale.multiplyScalar(1-amount*.008);this.damageCore(part,amount*.006);
+  }
+  refreshVisual(part){
+    for(let i=0;i<part.materials.length;i++){const m=part.materials[i],base=part.baseColors[i];if(!m?.color||!base)continue;const c=base.clone();if(part.burn>0)c.lerp(new THREE.Color(part.burn>.72?0x0f0b08:0x3a1a0e),part.burn*.88);else if(part.crack>.3)c.lerp(new THREE.Color(0x2c1208),part.crack*.22);m.color.copy(c);if('roughness'in m)m.roughness=clamp(part.baseRough[i]+part.burn*.35+part.crack*.08,.15,1)}
+    if(part.tissue)part.tissue.visible=part.integrity<.55||part.crack>.72||part.puncture>.72;
+    if(part.optic)part.optic.visible=!part.bodyAttached||part.integrity<.45;
+  }
+  damageCore(part,amount){
+    if(!part.vital)return;if(part.kind==='head'||part.kind==='eye'||part.kind==='mandible')this.vitals.headCore=clamp(this.vitals.headCore-amount*part.vital,0,1);else if(part.kind==='thorax'||part.kind==='plate'||part.kind==='leg')this.vitals.thoraxCore=clamp(this.vitals.thoraxCore-amount*part.vital,0,1);else if(part.kind==='abdomen')this.vitals.abdomenCore=clamp(this.vitals.abdomenCore-amount*part.vital,0,1);
+    if(this.vitals.thoraxCore<.03&&this.vitals.abdomenCore<.06)this.vitals.alive=false;
+  }
+  getSubtree(part){const out=[];const walk=p=>{out.push(p);for(const id of p.children){const c=this.parts.get(id);if(c)walk(c)}};walk(part);return out;}
+  subtreeAnchors(part){return this.getS
