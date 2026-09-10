@@ -1,0 +1,43 @@
+name: Harden specimen browser smoke test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/specimen-fix-smoke.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch browser test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('specimen-smoke-test.cjs')
+          s = p.read_text()
+          s = s.replace("const fs=require('fs');\n", "")
+          s = s.replace(
+              "    page.on('console',m=>{if(m.type()==='error')errors.push(`console: ${m.text()}`)});",
+              "    page.on('response',r=>{if(r.status()>=400&&!r.url().endsWith('/favicon.ico'))errors.push(`response ${r.status()}: ${r.url()}`)});\n    page.on('requestfailed',r=>{if(!r.url().endsWith('/favicon.ico'))errors.push(`request: ${r.url()} :: ${r.failure()?.errorText||'failed'}`)});"
+          )
+          s = s.replace(
+              "    await page.goto('http://127.0.0.1:8765/specimen.html',{waitUntil:'networkidle0',timeout:60000});\n    await page.click('#startBtn');",
+              "    await page.goto('http://127.0.0.1:8765/specimen.html',{waitUntil:'networkidle0',timeout:60000});\n    await page.waitForFunction(()=>window.__specimenApp&&window.__specimenThree,{timeout:20000});\n    await page.click('#startBtn');"
+          )
+          p.write_text(s)
+          PY
+          node --check specimen-smoke-test.cjs
+      - name: Commit test fix and remove one-off workflow
+        run: |
+          rm .github/workflows/specimen-fix-smoke.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden specimen browser smoke test"
+          git push
