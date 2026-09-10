@@ -1,3 +1,11 @@
+// Canvas round-rectangle guard: tiny liquid fills can briefly produce a negative height.
+roundRect=function(g,x,y,w,h,r){
+  if(w<0){x+=w;w=-w;}
+  if(h<0){y+=h;h=-h;}
+  r=Math.max(0,Math.min(Math.abs(r),w/2,h/2));
+  g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();
+};
+
 function hitAt(x,y,radius=48){
   const hit=[];for(let i=roaches.length-1;i>=0;i--)if(dist(x,y,roaches[i].x,roaches[i].y)<radius)hit.push(i);
   const deadHit=[];for(let i=0;i<corpses.length;i++)if(dist(x,y,corpses[i].x,corpses[i].y)<radius*1.05)deadHit.push(i);
