@@ -3,7 +3,7 @@ name: Specimen bootstrap diagnostic
 on:
   push:
     paths:
-      - 'specimen-smoke-debug2.b64'
+      - 'specimen-smoke-debug.cjs'
       - '.github/workflows/specimen-debug.yml'
   workflow_dispatch:
 
@@ -27,6 +27,4 @@ jobs:
           python3 -m http.server 8765 >/tmp/specimen-server.log 2>&1 &
           sleep 1
       - name: Diagnose browser bootstrap
-        run: |
-          base64 --decode specimen-smoke-debug2.b64 > specimen-smoke-debug2.cjs
-          node specimen-smoke-debug2.cjs
+        run: node specimen-smoke-debug.cjs
