@@ -28,5 +28,5 @@ jobs:
           sleep 1
       - name: Diagnose browser bootstrap
         run: |
-          base64 --decode specimen-smoke-debug2.b64 > /tmp/specimen-smoke-debug2.cjs
-          node /tmp/specimen-smoke-debug2.cjs
+          base64 --decode specimen-smoke-debug2.b64 > specimen-smoke-debug2.cjs
+          node specimen-smoke-debug2.cjs
