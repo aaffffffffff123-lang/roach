@@ -244,6 +244,7 @@ export class SpecimenRoach{
   applyHeat(part,point,amount){this.addScorch(part,point,V3(0,1,0),amount);part.twitch=Math.max(part.twitch,.6+amount*2);this.fear=clamp(this.fear+amount*.8,0,2);this.toolContact=1;}
   mobility(){
     let total=0;for(const chain of this.legChains){let s=1;const majors=chain.parts.filter(p=>p.kind==='leg').slice(0,4);for(const p of majors){if(!p.bodyAttached)s*=.05;else s*=clamp(p.integrity*.8+p.nerve*.2,0,1)}total+=s}this.vitals.mobility=clamp(total/6,0,1);return this.vitals.mobility;
+  }
   lifeState(){if(!this.vitals.alive)return this.vitals.reflex>.08?'반사 운동':'종료';const c=Math.min(this.vitals.headCore,this.vitals.thoraxCore,this.vitals.abdomenCore);if(c<.22)return'중추 손상';if(c<.52||this.vitals.fatigue>.65)return'쇠약';return'생존';}
   setThreat(point,intensity=.4){this.threat=point?point.clone():null;this.fear=clamp(this.fear+intensity,0,2);this.toolContact=1;}
   clearThreat(){this.threat=null;}
