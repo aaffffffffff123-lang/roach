@@ -1,0 +1,3 @@
+nt)this.scene.remove(rec.group);for(const p of this.parts.values())p.group.traverse(o=>{o.geometry?.dispose();if(Array.isArray(o.material))o.material.forEach(m=>m.dispose?.());else o.material?.dispose?.()});this.parts.clear();this.selectables.length=this.looseRoots.length=this.pins.length=0;
+  }
+}
