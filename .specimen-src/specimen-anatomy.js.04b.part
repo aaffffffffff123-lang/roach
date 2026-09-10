@@ -1,0 +1,20 @@
+k,inj=1-this.vitals.mobility;for(let i=0;i<this.abdomen.length;i++){const p=this.abdomen[i];if(!p.bodyAttached)continue;p.group.rotation.y=Math.sin(this.wriggle+i*.55)*(.018+.07*inj)+rand(-.03,.03)*shock;p.group.rotation.x=Math.sin(this.wriggle*1.2+i*.42)*(.012+.04*inj)}
+    const head=this.parts.get('head_capsule');if(head.bodyAttached){head.group.rotation.y=Math.sin(time*2.6)*(.06+.10*this.fear)+rand(-.13,.13)*shock;head.group.rotation.z=Math.sin(time*3.1)*.025+rand(-.1,.1)*shock}
+    for(const p of this.parts.values()){if(p.twitch>0){p.twitch=Math.max(0,p.twitch-dt*(.7+rand(.4)));const k=p.twitch;const s=Math.sin(time*(19+rand(12))+p.id.length);p.group.rotation.z+=s*.035*k;p.group.rotation.y+=Math.cos(time*23+p.id.length)*.025*k}}
+  }
+  updateLegs(dt,time){
+    const mob=this.vitals.mobility,shock=this.vitals.shock;for(const chain of this.legChains){const major=chain.parts.filter(p=>p.kind==='leg'),legHealth=major.slice(0,4).reduce((a,p)=>a*(p.bodyAttached?p.integrity:.02),1),phase=this.gait+chain.phase;for(let i=0;i<major.length;i++){const p=major[i];if(!p.bodyAttached)continue;const base=p.baseQuat,sw=Math.sin(phase+i*.25),lift=Math.max(0,Math.sin(phase+Math.PI/2));const y=(i===0?.12:i===1?.16:i===2?.28:i===3?-.48:.12)*sw*legHealth*mob;const z=(i===2?.20:i===3?.34:.08)*lift*legHealth;const q=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,y+rand(-.08,.08)*shock,z+rand(-.12,.12)*shock,'XYZ'));p.group.quaternion.copy(base).multiply(q)}
+      if(legHealth<.35&&Math.random()<dt*(2+this.fear*2)){for(const p of major)if(p.bodyAttached)p.twitch=Math.max(p.twitch,rand(.2,.7))}
+    }
+  }
+  updateAntennae(dt,time){
+    for(const chain of this.antennaChains){for(let i=0;i<chain.length;i++){const p=chain[i];if(!p.bodyAttached)continue;const base=p.baseQuat,w=Math.sin(time*(2.8+i*.05)+i*.4+p.side)*(.025+.12*this.fear)*(1-i/18),q=new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.sin(time*3.7+i)*.018,p.side*w,Math.cos(time*2.5+i)*.025,'XYZ'));p.group.quaternion.copy(base).multiply(q)}}
+  }
+  updateLoose(dt,time){
+    for(const rec of this.looseRoots){if(!rec.group.parent)continue;const anchored=this.subtreeAnchors(rec.part)>0;if(!anchored&&!rec.sleep){rec.v.y-=1.2*dt;rec.group.position.addScaledVector(rec.v,dt);rec.group.rotation.x+=rec.w.x*dt;rec.group.rotation.y+=rec.w.y*dt;rec.group.rotation.z+=rec.w.z*dt;if(rec.group.position.y<.055){rec.group.position.y=.055;rec.v.y=Math.abs(rec.v.y)*.12;rec.v.x*=.88;rec.v.z*=.88;rec.w.multiplyScalar(.93)}const before=this.root.position.clone();before.copy(rec.group.position);this.workbench.clampDish(rec.group.position,.12);if(before.distanceTo(rec.group.position)>.001){rec.v.x*=-.4;rec.v.z*=-.4}if(rec.v.length()<.01&&rec.w.length()<.12)rec.sleep=true}
+      rec.twitch=Math.max(0,rec.twitch-dt*.28);if(rec.twitch>0){const k=rec.twitch*(this.vitals.alive?.65:1);rec.group.rotation.x+=Math.sin(time*22+rec.part.id.length)*.025*k;rec.group.rotation.z+=Math.cos(time*27+rec.part.id.length)*.03*k;rec.sleep=false}
+    }
+  }
+  updatePins(){for(const pin of this.pins){if(pin.part.bodyAttached){pin.group.position.x=pin.point.x;pin.group.position.z=pin.point.z}else if(pin.part.group.parent===this.scene){pin.group.position.x=pin.part.group.position.x;pin.group.position.z=pin.part.group.position.z}}}
+  reset(){
+    this.scene.remove(this.root);for(const pin of [...this.pins])this.removePin(pin);for(const rec of this.looseRoots)if(rec.group.pare
