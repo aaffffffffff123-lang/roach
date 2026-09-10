@@ -1,0 +1,33 @@
+import {THREE,clamp,lerp,rand,smooth} from './specimen-core.js';
+
+export const TOOL_LABELS={
+  pin:'핀',tweezer:'족집게',clipper:'손톱깎이',awl:'송곳',cutter:'커터',lighter:'목 긴 라이터',piezo:'압전 딱딱이'
+};
+export const TOOL_HINTS={
+  pin:'몸통이나 조각을 누르면 작업대에 고정한다. 핀 머리를 다시 누르면 뽑힌다.',
+  tweezer:'부위를 누른 채 당긴다. 고정하지 않았으면 몸 전체가 끌려오고, 핀으로 고정한 뒤에는 연결부에 장력이 쌓인다.',
+  clipper:'작은 부위 가까이를 누르면 가장 가까운 절단점에 입이 맞춰진 뒤 딱 닫힌다.',
+  awl:'표면을 누른 채 버틴다. 일찍 떼면 함몰과 긁힘만 남고, 끝까지 누르면 균열 뒤에 갑자기 파고든다.',
+  cutter:'표면 위를 드래그해 칼집을 낸다. 한 번은 선만 남고 같은 경로를 반복해야 깊어진다.',
+  lighter:'누른 채 움직여 국소 가열한다. 얇은 날개와 더듬이는 먼저 말리고, 오래 가열한 외피는 검게 굳는다.',
+  piezo:'표면을 누를 때마다 짧은 전기 펄스가 한 번 튄다. 누르고 있는 것보다 반복 클릭이 중요하다.'
+};
+const V3=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+
+function matMetal(){return new THREE.MeshStandardMaterial({color:0xc5c9cc,roughness:.22,metalness:.92});}
+function matDark(){return new THREE.MeshStandardMaterial({color:0x29292c,roughness:.42,metalness:.45});}
+function matPlastic(c){return new THREE.MeshPhysicalMaterial({color:c,roughness:.42,clearcoat:.55});}
+function box(w,h,d,mat,x=0,y=0,z=0){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;return m;}
+function cyl(rt,rb,h,mat,x=0,y=0,z=0,seg=12){const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,seg),mat);m.position.set(x,y,z);m.castShadow=true;return m;}
+
+function buildPin(){
+  const g=new THREE.Group(),metal=matMetal(),red=matPlastic(0x992b22);const shaft=cyl(.008,.004,.42,metal,0,0,.21,9);shaft.rotation.x=Math.PI/2;g.add(shaft);const head=new THREE.Mesh(new THREE.SphereGeometry(.045,14,9),red);head.scale.y=.46;head.position.z=.43;g.add(head);return g;
+}
+function buildTweezer(){
+  const g=new THREE.Group(),metal=matMetal();for(const s of [-1,1]){const arm=box(.025,.018,.62,metal,s*.038,0,.31);arm.rotation.y=s*-.06;g.add(arm);const tip=box(.014,.012,.12,metal,s*.012,0,.04);tip.rotation.y=s*.12;g.add(tip)}const bridge=box(.10,.026,.06,matDark(),0,0,.61);g.add(bridge);g.userData.jaws=g.children.slice(0,4);return g;
+}
+function buildClipper(){
+  const g=new THREE.Group(),metal=matMetal(),dark=matDark();const body=box(.15,.045,.42,metal,0,0,.28);g.add(body);const lower=box(.13,.018,.18,dark,0,-.027,.08);g.add(lower);const jawA=box(.068,.022,.12,metal,-.04,.003,.045),jawB=box(.068,.022,.12,metal,.04,.003,.045);jawA.rotation.y=-.11;jawB.rotation.y=.11;g.add(jawA,jawB);const lever=new THREE.Group();lever.position.set(0,.055,.34);lever.add(box(.12,.018,.34,metal,0,0,.02));lever.rotation.x=-.22;g.add(lever);g.userData.lever=lever;g.userData.jaws=[jawA,jawB];return g;
+}
+function buildAwl(){
+  const g=new THREE.Group(),metal=matMetal(),wood=matPlastic(0x7a3e20);const spike=cyl(.004,.018,.54,metal,0,0,.27,10);spike.rotation.x=Math.PI/2;g.add(spike);const ferrule=cyl(.03,.025,.11,metal,0,0,.60,12);ferrule.rota
