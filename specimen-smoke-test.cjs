@@ -1,4 +1,3 @@
-const fs=require('fs');
 const puppeteer=require('puppeteer-core');
 
 (async()=>{
@@ -14,8 +13,10 @@ const puppeteer=require('puppeteer-core');
     const page=await browser.newPage();
     await page.setViewport({width:430,height:900,deviceScaleFactor:1});
     page.on('pageerror',e=>errors.push(`pageerror: ${e.stack||e.message}`));
-    page.on('console',m=>{if(m.type()==='error')errors.push(`console: ${m.text()}`)});
+    page.on('response',r=>{if(r.status()>=400&&!r.url().endsWith('/favicon.ico'))errors.push(`response ${r.status()}: ${r.url()}`)});
+    page.on('requestfailed',r=>{if(!r.url().endsWith('/favicon.ico'))errors.push(`request: ${r.url()} :: ${r.failure()?.errorText||'failed'}`)});
     await page.goto('http://127.0.0.1:8765/specimen.html',{waitUntil:'networkidle0',timeout:60000});
+    await page.waitForFunction(()=>window.__specimenApp&&window.__specimenThree,{timeout:20000});
     await page.click('#startBtn');
     await new Promise(r=>setTimeout(r,1800));
     const initial=await page.evaluate(()=>{
