@@ -86,7 +86,8 @@ button{font-family:inherit;color:inherit;border:0;background:none;padding:0;marg
 #genlabel.show{opacity:1}
 #genlabel small{display:block;font-size:17px;letter-spacing:.02em;margin-top:10px;opacity:.85}
 
-/* 전환/결과 */
+#deathfx{position:fixed;inset:0;width:100%;height:100%;display:none;pointer-events:none;z-index:20}
+#deathfx.show{display:block}
 #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .6s}
 
 #endtext{
@@ -182,8 +183,9 @@ button{font-family:inherit;color:inherit;border:0;background:none;padding:0;marg
     <div id="tapfx"></div>
   </div>
 
-  <div id="vig"></div>
+<div id="vig"></div>
   <div id="tox"></div>
+  <canvas id="deathfx"></canvas>
   <div id="hint"></div>
   <div id="genlabel"></div>
   <div id="fade"></div>
@@ -369,6 +371,62 @@ class AudioFX{
     this.tone({t:0.04,dur:0.42,gain:0.45*g,freq:190,freqEnd:48,type:'triangle',pan});
     this.noise({t:0.08,dur:0.3,gain:0.4*g,freq:800,q:3,freqEnd:380,trem:34,pan});
   }
+
+
+
+// 2라운드 세대 교대용 2.3초 죽음 음향
+  deathSequence(type,weapon='hand'){
+    if(!this.ctx) return;
+
+    if(type==='crush'){
+      this.crushDeath(weapon,1.18,0);
+      for(let i=0;i<9;i++){
+        const t=0.11+i*(0.035+Math.random()*0.024);
+        this.noise({t,dur:0.012+Math.random()*0.018,gain:0.42,freq:1800+Math.random()*4200,q:2.2,pan:rand(-0.8,0.8)});
+        if(i%2===0) this.tone({t,dur:0.045,gain:0.24,freq:260+Math.random()*260,freqEnd:55,type:'square',pan:rand(-0.5,0.5)});
+      }
+      this.noise({t:0.18,dur:0.92,gain:0.24,freq:760,q:2.6,freqEnd:95,trem:18});
+      this.tone({t:0.55,dur:0.76,gain:0.18,freq:74,freqEnd:23,type:'triangle'});
+      this.noise({t:1.06,dur:0.035,gain:0.18,freq:2400,q:2.2});
+      return;
+    }
+
+    if(type==='vacuum'){
+      this.vacuumSuck();
+      this.noise({dur:1.18,gain:0.58,freq:240,q:0.8,freqEnd:4200});
+      this.tone({dur:1.12,gain:0.34,freq:78,freqEnd:480,type:'sawtooth'});
+      for(let i=0;i<3;i++){
+        const t=0.56+i*0.27;
+        this.tone({t,dur:0.1,gain:0.5,freq:105-i*18,freqEnd:28,type:'triangle',pan:i%2?-0.55:0.55});
+        this.noise({t,dur:0.045,gain:0.4,freq:650+i*380,q:1.1,pan:i%2?-0.55:0.55});
+      }
+      this.noise({t:1.35,dur:0.38,gain:0.22,freq:440,q:2.4,freqEnd:80,trem:13});
+      return;
+    }
+
+    if(type==='flame'){
+      this.kill('flame',0,1.08,0,0,0.35);
+      for(let i=0;i<13;i++){
+        const t=i*0.055+Math.random()*0.035;
+        this.noise({t,dur:0.012+Math.random()*0.022,gain:0.28,freq:3900+Math.random()*5200,q:2.8,pan:rand(-0.7,0.7)});
+      }
+      this.noise({dur:1.35,gain:0.4,freq:980,q:1.1,freqEnd:180,trem:21});
+      this.tone({t:0.15,dur:1.2,gain:0.16,freq:118,freqEnd:30,type:'triangle'});
+      return;
+    }
+
+    // 스프레이와 독 먹이: 큰 한 방보다 운동 회로가 하나씩 끊기는 소리
+    for(let i=0;i<14;i++){
+      const t=0.08+i*(0.09+Math.random()*0.055);
+      this.noise({t,dur:0.012+Math.random()*0.016,gain:0.18+Math.random()*0.12,freq:2100+Math.random()*3300,q:2.5,pan:rand(-0.75,0.75)});
+      if(i%3===0) this.tone({t,dur:0.055,gain:0.13,freq:180+Math.random()*170,freqEnd:48,type:'square',pan:rand(-0.5,0.5)});
+    }
+    this.noise({t:0.05,dur:1.75,gain:0.18,freq:620,q:2.0,freqEnd:90,trem:11});
+    this.tone({t:0.32,dur:1.45,gain:0.13,freq:66,freqEnd:21,type:'triangle'});
+  }
+
+
+
   eggHatch(){ if(!this.ctx) return; for(let i=0;i<7;i++) this.noise({t:i*0.07+Math.random()*0.03,dur:0.025,gain:0.3,freq:1800+Math.random()*2200,q:2.5}); this.noise({t:0.1,dur:0.3,gain:0.25,freq:600,q:1,type:'lowpass',freqEnd:200}); }
   eggReady(){ if(!this.ctx) return; this.tone({dur:0.25,gain:0.12,freq:330,type:'triangle'}); this.tone({t:0.18,dur:0.4,gain:0.12,freq:440,type:'triangle'}); }
   cushionFlip(){ if(!this.ctx) return; this.noise({dur:0.16,gain:0.5,freq:380,q:0.8,type:'lowpass',freqEnd:140}); this.noise({t:0.05,dur:0.08,gain:0.25,freq:1200,q:1,freqEnd:500}); }
@@ -890,6 +948,338 @@ class Puffs{
   }
 }
 
+
+
+
+// ───────── 2라운드 죽음 화면 ─────────
+class DeathFX{
+  constructor(G){
+    this.G=G;
+    this.c=document.getElementById('deathfx');
+    this.g=this.c.getContext('2d');
+    this.active=false;
+    this.duration=2.3;
+    this.w=1;
+    this.h=1;
+    this.drops=[];
+    this.shards=[];
+    this.tears=[];
+    window.addEventListener('resize',()=>{ if(this.active) this.resize(); });
+  }
+
+  resize(){
+    this.w=Math.max(1,innerWidth);
+    this.h=Math.max(1,innerHeight);
+    this.dpr=Math.min(devicePixelRatio||1,1.5);
+    this.c.width=Math.round(this.w*this.dpr);
+    this.c.height=Math.round(this.h*this.dpr);
+    this.g.setTransform(this.dpr,0,0,this.dpr,0,0);
+  }
+
+  start(type){
+    this.stop();
+    this.active=true;
+    this.type=type;
+    this.t=0;
+    this.roll=Math.random()<0.5?-1:1;
+    this.resize();
+    this.c.classList.add('show');
+
+    const slow=type==='poison'||type==='trap';
+    const cx=this.w*0.5;
+    const cy=this.h*(type==='trap'?0.62:0.47);
+    const fluidN=type==='crush'?42:type==='flame'?18:type==='vacuum'?14:20;
+    const shardN=type==='crush'?18:type==='flame'?11:type==='vacuum'?8:7;
+
+    this.drops=[];
+    for(let i=0;i<fluidN;i++){
+      this.drops.push({
+        birth:slow?rand(0.08,1.28):rand(0.025,0.30),
+        life:slow?rand(0.55,1.05):rand(0.52,0.95),
+        x:cx+rand(-this.w*0.035,this.w*0.035),
+        y:cy+rand(-this.h*0.025,this.h*0.025),
+        vx:slow?rand(-this.w*0.09,this.w*0.09):rand(-this.w*0.55,this.w*0.55),
+        vy:slow?rand(this.h*0.04,this.h*0.24):rand(-this.h*0.96,-this.h*0.16),
+        gravity:slow?rand(this.h*0.18,this.h*0.48):rand(this.h*1.25,this.h*2.15),
+        len:slow?rand(8,26):rand(16,58),
+        width:rand(1.2,4.6),
+        dark:Math.random()<(type==='flame'?0.48:0.22)
+      });
+    }
+
+    this.shards=[];
+    for(let i=0;i<shardN;i++){
+      this.shards.push({
+        birth:rand(0.035,0.42),
+        life:rand(0.55,1.05),
+        x:cx+rand(-this.w*0.025,this.w*0.025),
+        y:cy+rand(-this.h*0.02,this.h*0.02),
+        vx:rand(-this.w*0.48,this.w*0.48),
+        vy:rand(-this.h*0.72,-this.h*0.06),
+        gravity:rand(this.h*1.0,this.h*1.8),
+        rot:rand(TAU),
+        vr:rand(-10,10),
+        w:rand(2,6),
+        h:rand(10,34)
+      });
+    }
+
+    this.tears=[];
+    for(let i=0;i<12;i++){
+      this.tears.push({
+        birth:rand(0.10,1.68),
+        life:rand(0.045,0.19),
+        y:rand(0,this.h),
+        h:rand(4,22),
+        x:rand(-this.w*0.08,this.w*0.58),
+        w:rand(this.w*0.28,this.w*0.78)
+      });
+    }
+
+    this.G.canvas.style.transformOrigin='50% 50%';
+    this.G.canvas.style.willChange='transform,filter';
+  }
+
+  stop(){
+    this.active=false;
+    this.c.classList.remove('show');
+    this.g.clearRect(0,0,this.w||1,this.h||1);
+    this.G.canvas.style.transform='';
+    this.G.canvas.style.filter='';
+    this.G.canvas.style.willChange='';
+  }
+
+  drawDrops(){
+    const g=this.g;
+    g.lineCap='round';
+
+    for(const p of this.drops){
+      const a=this.t-p.birth;
+      if(a<0||a>p.life) continue;
+
+      const alpha=clamp(1-a/p.life,0,1);
+      const x=p.x+p.vx*a;
+      const y=p.y+p.vy*a+0.5*p.gravity*a*a;
+      const speedY=p.vy+p.gravity*a;
+      const mag=Math.max(1,Math.hypot(p.vx,speedY));
+      const tx=p.vx/mag*p.len;
+      const ty=speedY/mag*p.len;
+
+      g.strokeStyle=p.dark
+        ? `rgba(62,35,18,${alpha*0.82})`
+        : `rgba(246,240,216,${alpha*0.92})`;
+      g.lineWidth=p.width;
+      g.beginPath();
+      g.moveTo(x-tx,y-ty);
+      g.lineTo(x,y);
+      g.stroke();
+    }
+  }
+
+  drawShards(){
+    const g=this.g;
+    for(const p of this.shards){
+      const a=this.t-p.birth;
+      if(a<0||a>p.life) continue;
+
+      const alpha=clamp(1-a/p.life,0,1);
+      const x=p.x+p.vx*a;
+      const y=p.y+p.vy*a+0.5*p.gravity*a*a;
+      g.save();
+      g.translate(x,y);
+      g.rotate(p.rot+p.vr*a);
+      g.fillStyle=`rgba(54,29,14,${alpha*0.9})`;
+      g.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+      g.restore();
+    }
+  }
+
+  drawTears(){
+    const g=this.g;
+    for(const q of this.tears){
+      const a=this.t-q.birth;
+      if(a<0||a>q.life) continue;
+
+      const k=clamp(1-a/q.life,0,1);
+      g.beginPath();
+      g.moveTo(q.x,q.y);
+      for(let i=1;i<=7;i++){
+        g.lineTo(q.x+q.w*i/7,q.y+rand(-q.h,q.h));
+      }
+      for(let i=7;i>=0;i--){
+        g.lineTo(q.x+q.w*i/7,q.y+q.h+rand(-q.h*0.35,q.h*0.35));
+      }
+      g.closePath();
+      g.fillStyle=`rgba(0,0,0,${0.35+0.62*k})`;
+      g.fill();
+
+      g.strokeStyle=`rgba(248,241,218,${0.16*k})`;
+      g.lineWidth=1;
+      g.stroke();
+    }
+  }
+
+  drawCrush(){
+    const g=this.g,t=this.t,w=this.w,h=this.h;
+    if(t<0.085){
+      g.fillStyle=`rgba(255,250,229,${1-t/0.085})`;
+      g.fillRect(0,0,w,h);
+    }
+
+    const edge=clamp((t-0.22)/1.35,0,0.82);
+    const gr=g.createRadialGradient(w*0.5,h*0.5,0,w*0.5,h*0.5,Math.max(w,h)*0.72);
+    gr.addColorStop(0,'rgba(0,0,0,0)');
+    gr.addColorStop(0.48,`rgba(0,0,0,${edge*0.25})`);
+    gr.addColorStop(1,`rgba(0,0,0,${edge})`);
+    g.fillStyle=gr;
+    g.fillRect(0,0,w,h);
+
+    if(
+      (t>0.22&&t<0.255)||
+      (t>0.43&&t<0.485)||
+      (t>0.76&&t<0.82)||
+      (t>1.12&&t<1.17)
+    ){
+      g.fillStyle='rgba(0,0,0,0.78)';
+      g.fillRect(0,0,w,h);
+    }
+  }
+
+  drawVacuum(){
+    const g=this.g,t=this.t,w=this.w,h=this.h;
+    const p=clamp(t/1.45,0,1);
+    const r=Math.max(6,Math.min(w,h)*(0.48-0.39*p));
+    const gr=g.createRadialGradient(w*0.5,h*0.5,r*0.08,w*0.5,h*0.5,r*2.2);
+    gr.addColorStop(0,'rgba(0,0,0,0)');
+    gr.addColorStop(0.34,`rgba(0,0,0,${0.08+0.22*p})`);
+    gr.addColorStop(1,`rgba(0,0,0,${0.58+0.34*p})`);
+    g.fillStyle=gr;
+    g.fillRect(0,0,w,h);
+
+    g.strokeStyle=`rgba(238,236,218,${0.16*(1-p)})`;
+    g.lineWidth=1.2;
+    for(let i=0;i<18;i++){
+      const a=i/18*TAU+t*4.5;
+      const x=w*0.5+Math.cos(a)*Math.max(w,h);
+      const y=h*0.5+Math.sin(a)*Math.max(w,h);
+      g.beginPath();
+      g.moveTo(x,y);
+      g.lineTo(w*0.5,h*0.5);
+      g.stroke();
+    }
+  }
+
+  drawFlame(){
+    const g=this.g,t=this.t,w=this.w,h=this.h;
+    const flash=clamp(1-t/0.28,0,1);
+    g.fillStyle=`rgba(255,172,62,${0.42*flash})`;
+    g.fillRect(0,0,w,h);
+
+    const burn=clamp((t-0.16)/1.6,0,1);
+    const gr=g.createRadialGradient(w*0.5,h*0.48,0,w*0.5,h*0.48,Math.max(w,h)*0.68);
+    gr.addColorStop(0,`rgba(255,238,184,${0.08*(1-burn)})`);
+    gr.addColorStop(0.42,`rgba(95,27,4,${0.15+0.2*burn})`);
+    gr.addColorStop(1,`rgba(0,0,0,${0.56+0.38*burn})`);
+    g.fillStyle=gr;
+    g.fillRect(0,0,w,h);
+  }
+
+  drawPoison(){
+    const g=this.g,t=this.t,w=this.w,h=this.h;
+    const p=clamp(t/1.8,0,1);
+    g.fillStyle=`rgba(80,92,28,${0.08+0.16*p})`;
+    g.fillRect(0,0,w,h);
+
+    const bands=3+Math.floor(p*5);
+    for(let i=0;i<bands;i++){
+      const y=(i/bands*h+t*83+i*37)%h;
+      const hh=rand(4,22)*(0.4+p);
+      g.fillStyle=`rgba(0,0,0,${rand(0.08,0.25)*p})`;
+      g.fillRect(0,y,w,hh);
+    }
+
+    if((t>0.62&&t<0.69)||(t>1.08&&t<1.16)||(t>1.55&&t<1.68)){
+      g.fillStyle='rgba(0,0,0,0.52)';
+      g.fillRect(0,0,w,h);
+    }
+  }
+
+  distort(){
+    const t=this.t;
+    let x=0,y=0,r=0,s=1,b=1,c=1,sat=1;
+
+    if(this.type==='crush'){
+      const k=clamp(1-t/0.72,0,1);
+      x=rand(-17,17)*k;
+      y=rand(-12,12)*k;
+      r=this.roll*(4.5*clamp((t-0.18)/1.2,0,1))+rand(-2.6,2.6)*k;
+      s=1+0.065*k;
+      b=t<0.11?1.75:lerp(1,0.42,clamp((t-0.75)/1.45,0,1));
+      c=1+1.7*k;
+      sat=lerp(1,0.22,clamp((t-0.55)/1.65,0,1));
+    }else if(this.type==='vacuum'){
+      const k=clamp(t/1.5,0,1);
+      r=this.roll*k*k*24;
+      s=1+0.58*k*k;
+      x=Math.sin(t*27)*5*(1-k);
+      y=Math.cos(t*31)*4*(1-k);
+      b=lerp(1,0.28,k);
+      c=1+0.8*k;
+      sat=lerp(1,0.12,k);
+    }else if(this.type==='flame'){
+      const k=clamp(t/1.35,0,1);
+      x=rand(-8,8)*(1-k);
+      y=rand(-6,6)*(1-k);
+      r=this.roll*2.8*k+Math.sin(t*31)*0.8*(1-k);
+      s=1.025+0.025*Math.sin(t*23);
+      b=t<0.25?1.7:lerp(1.15,0.25,k);
+      c=1.35+0.75*k;
+      sat=lerp(1.4,0.08,k);
+    }else{
+      const k=clamp(t/1.75,0,1);
+      x=Math.sin(t*19)*7*(0.35+k);
+      y=Math.cos(t*23)*4*(0.25+k);
+      r=this.roll*(0.4+5.5*k)+Math.sin(t*13)*1.1;
+      s=1+0.018*Math.sin(t*17);
+      b=lerp(1,0.33,k);
+      c=1+0.9*k;
+      sat=lerp(0.9,0.15,k);
+    }
+
+    this.G.canvas.style.transform=`translate3d(${x.toFixed(2)}px,${y.toFixed(2)}px,0) rotate(${r.toFixed(2)}deg) scale(${s.toFixed(3)})`;
+    this.G.canvas.style.filter=`brightness(${b.toFixed(3)}) contrast(${c.toFixed(3)}) saturate(${sat.toFixed(3)})`;
+  }
+
+  update(dt){
+    if(!this.active) return false;
+
+    this.t=Math.min(this.duration,this.t+dt);
+    const g=this.g;
+    g.clearRect(0,0,this.w,this.h);
+
+    if(this.type==='crush') this.drawCrush();
+    else if(this.type==='vacuum') this.drawVacuum();
+    else if(this.type==='flame') this.drawFlame();
+    else this.drawPoison();
+
+    this.drawDrops();
+    this.drawShards();
+    this.drawTears();
+
+    const close=clamp((this.t-1.88)/0.42,0,1);
+    if(close>0){
+      g.fillStyle=`rgba(0,0,0,${close})`;
+      g.fillRect(0,0,this.w,this.h);
+    }
+
+    this.distort();
+    return this.t>=this.duration;
+  }
+}
+
+
+
+
 // ───────── 아이템 정의 ─────────
 const ITEMS={
   hand:   {r:0.10,windup:0.05,rest:0.10,hover:0.30},
@@ -1173,6 +1563,30 @@ class Round1{
         n++;
       }
     }
+
+
+
+    if(!n){
+      SFX.miss(
+        item,
+        clamp((x-this.cam.x)/2,-0.8,0.8)
+      );
+    }
+
+    this.G.shake(
+      item==='pan'||item==='book'
+        ? 0.55
+        : item==='hand'
+          ? 0.18
+          : 0.3
+    );
+
+    this.scare(x,z,R+0.18);
+    this.touch();
+
+    return n;
+  }
+
 
 
 
@@ -1481,7 +1895,14 @@ class Round2{
     this.G=G; this.grp=new THREE.Group(); this.grp.visible=false; G.scene.add(this.grp); this.nav=new NavGrid();
     this.roach=makeRoach(); this.grp.add(this.roach.g);
     this.human=makeHuman(); this.grp.add(this.human.root);
-    this.weaponMesh=null; this.strikeMesh=null; this.puffs=new Puffs(this.grp);
+   
+   this.weaponMesh=null;
+this.strikeMesh=null;
+this.puffs=new Puffs(this.grp);
+
+this.deathFX=new DeathFX(G);
+
+
     this.eggMesh=makeItem('egg'); this.eggMesh.scale.setScalar(1.25); this.eggMesh.visible=false; this.grp.add(this.eggMesh);
     this.hatchMesh=makeItem('egg'); this.hatchMesh.visible=false; this.grp.add(this.hatchMesh);
     // 내려오는 것의 그림자 — 바퀴에게 유일한 경고
@@ -1500,8 +1921,9 @@ class Round2{
   }
   start(weapons,baits){ this.weapons=weapons; this.baitKinds=baits||[]; this.gen=0; this.active=true; this.grp.visible=true; this.lastEgg=null; this.finished=false; this.hinted={}; this.G.input.mode='r2'; document.getElementById('r2ui').style.display='block'; this.G.ui.eggState('none'); this.G.ui.miniOn(true); this.camPitch=0.05; this.startGen(); }
   
-    stop(){
+      stop(){
     this.active=false;
+    this.deathFX.stop();
     this.grp.visible=false;
 
     document.getElementById('r2ui').style.display='none';
@@ -1536,7 +1958,7 @@ class Round2{
 
 this.G.room.blanket.visible=true;
 
-        this.G.room.blanket.visible=true;
+ 
 
     this.G.ui.vignette(false);
     this.G.ui.tox(0);
@@ -1555,8 +1977,12 @@ this.G.room.blanket.visible=true;
   resetCushion(){ const c=this.cushion; c.position.set(this.cushionBase.x,this.cushionBase.y,this.cushionBase.z); c.quaternion.identity(); c.material.opacity=1; c.material.transparent=false; c.material.needsUpdate=true; this.cushionLift=0; }
  
  
-  startGen(){
+   startGen(){
     const G=this.G;
+
+    this.deathFX.stop();
+    G.camera.up.set(0,1,0);
+    G.input.idleStick();
 
     G.setLighting('dim');
     this.G.room.door.rotation.y=0;
@@ -2020,134 +2446,343 @@ clearTraps(){
  
  
  
- 
   tickEgg(dt){
     const E=this.egg;
-
-    if(!E||this.ready){
-      return;
-    }
+    if(!E||this.ready) return;
 
     const A=this.ai;
     const total=this.eggT;
-
     E.t+=dt;
 
     const k=E.t/total;
 
     if(Math.floor(k*60)!==E.lastK){
       E.lastK=Math.floor(k*60);
-
       this.drawRing(k);
-      this.G.ui.eggProgress(
-        Math.min(1,k)
-      );
+      this.G.ui.eggProgress(Math.min(1,k));
     }
 
-    const left=Math.max(
-      0,
-      Math.ceil(total-E.t)
+    const left=Math.max(0,Math.ceil(total-E.t));
+    const dg=Math.hypot(A.x-E.x,A.z-E.z);
+
+    const danger=A.awake&&(
+      dg<1.0 ||
+      (E.spot&&A.searchHole===E.spot) ||
+      A.eggKnown
     );
 
-    const dg=Math.hypot(
-      A.x-E.x,
-      A.z-E.z
-    );
-
-    const danger=
-      A.awake&&(
-        dg<1.0 ||
-        (
-          E.spot &&
-          A.searchHole===E.spot
-        ) ||
-        A.eggKnown
-      );
-
-     this.G.ui.eggBar(
-      `부화까지 ${left}초`,
-      danger
-    );
-
-    if(danger!==this.eggDanger){
-      this.eggDanger=danger;
-      this.G.ui.eggDanger(danger);
-    }
-
-    this.ring.material.opacity=
-      danger
-        ? 0.35+
-          0.65*
-          Math.abs(
-            Math.sin(this.G.time*9)
-          )
-        : 1;
-
-
-    if(k>=1){
-      this.ready=true;
-
-      SFX.eggReady();
-      this.G.ui.eggReady(true);
-
+    // 죽음 장면에서는 일반 UI를 다시 띄우지 않는다.
+    if(this.phase!=='dying'){
       this.G.ui.eggBar(
-        this.phase==='watch'
-          ? '부화'
-          : '알집 성숙',
-        false
+        `부화까지 ${left}초`,
+        danger
       );
 
-      // 바퀴벌레가 이미 죽은 상태에서
-      // 알집까지 성숙했을 때만 다음 세대로 간다.
-      if(this.phase==='watch'){
-        this.nextGen();
+      if(danger!==this.eggDanger){
+        this.eggDanger=danger;
+        this.G.ui.eggDanger(danger);
       }
     }
 
+    this.ring.material.opacity=danger
+      ? 0.35+0.65*Math.abs(Math.sin(this.G.time*9))
+      : 1;
 
+    if(k>=1){
+      this.ready=true;
+      SFX.eggReady();
 
+      if(this.phase!=='dying'){
+        this.G.ui.eggReady(true);
+        this.G.ui.eggBar(
+          this.phase==='watch'
+            ? '부화'
+            : '알집 성숙',
+          false
+        );
+      }
 
+      // 살아 있는 동안에는 다음 세대로 넘어가지 않는다.
+      // 먼저 죽어서 알집을 지켜보는 중일 때만 넘어간다.
+      if(this.phase==='watch'){
+        this.nextGen(650);
+      }
+    }
   }
 
 
   destroyEgg(){ if(!this.egg) return; SFX.eggCrush(); this.G.shake(0.5); this.eggMesh.visible=false; this.ring.visible=false; this.egg=null; this.G.ui.eggState('none'); this.G.ui.eggBar(null); this.lineEnd(); }
-  // ── 죽음과 그 뒤 ──
-  killPlayer(type){ if(this.phase!=='play') return; this.phase='dying'; this.death={type,t:0}; const P=this.p; P.spd=0; this.G.ui.tox(0);
-    if(type==='crush'){ SFX.crushDeath(this.ai.weapon); this.G.shake(1.2); this.G.blackout(true); this.G.paint.corpse(P.x,P.z,P.h,0.5,'crushed'); this.G.corpses.add(P.x,P.z,P.h,'crushed'); }
-    if(type==='vacuum'){ SFX.vacuumSuck(); SFX.stopLoop('vacuum'); this.G.blackout(true); }
-    if(type==='flame'){ SFX.kill('flame',0,1.2,0,0,0.4); SFX.stopLoop('flame'); this.G.flash('#ff8a1e'); this.G.paint.corpse(P.x,P.z,P.h,0.5,'burnt'); this.G.corpses.add(P.x,P.z,P.h,'burnt'); }
-    if(type==='poison'||type==='trap'){ SFX.stopLoop('spray'); this.roach.g.rotation.z=Math.PI; this.roach.g.position.y=ROACH_L*0.22; }
+ 
+ 
+ // ── 죽음과 그 뒤 ──
+  killPlayer(type){
+    if(this.phase!=='play') return;
+
+    const P=this.p;
+    const A=this.ai;
+
+    // 죽는 순간 카메라가 바라볼 위치
+    let tx=A.x;
+    let ty=1.12;
+    let tz=A.z;
+
+    // 청소기는 노즐을 바라본다.
+    if(type==='vacuum'&&A.nozzle){
+      tx=A.nozzle[0];
+      ty=0.07;
+      tz=A.nozzle[1];
+
+    // 독 먹이는 가장 가까운 먹이를 바라본다.
+    }else if(type==='trap'&&this.traps.length){
+      let best=this.traps[0];
+      let bd=Infinity;
+
+      for(const q of this.traps){
+        const d=dist2(P.x,P.z,q.x,q.z);
+
+        if(d<bd){
+          bd=d;
+          best=q;
+        }
+      }
+
+      tx=best.x;
+      ty=0.04;
+      tz=best.z;
+
+    // 불과 스프레이는 사람이 들고 있는 도구 쪽을 바라본다.
+    }else if(
+      (type==='flame'||type==='poison')&&
+      this.weaponMesh
+    ){
+      this.weaponMesh.getWorldPosition(this.tmp3);
+
+      tx=this.tmp3.x;
+      ty=this.tmp3.y;
+      tz=this.tmp3.z;
+    }
+
+    let dx=tx-P.x;
+    let dz=tz-P.z;
+
+    if(Math.hypot(dx,dz)<0.02){
+      tx=A.x;
+      ty=1.12;
+      tz=A.z;
+
+      dx=tx-P.x;
+      dz=tz-P.z;
+    }
+
+    this.phase='dying';
+
+    this.death={
+      type,
+      t:0,
+      weapon:A.weapon,
+      target:{
+        x:tx,
+        y:ty,
+        z:tz
+      },
+      faceYaw:Math.atan2(dx,dz),
+      roll:Math.random()<0.5?-1:1,
+      baked:false
+    };
+
+    P.spd=0;
+    P.vx=0;
+    P.vz=0;
+
+    // 죽기 직전 누르고 있던 스틱과 버튼 입력을 초기화한다.
+    this.G.input.reset();
+
+    // 옛 코드처럼 즉시 암전하지 않는다.
+    this.G.blackout(false,true);
+
+    this.G.ui.tox(0);
+    this.G.ui.eggState('none');
+    this.G.ui.miniOn(false);
+    this.G.ui.hintClear();
+    this.G.ui.vignette(false);
+
+    document.getElementById('stick').style.display='none';
+
+    this.hideWarn();
+
+    SFX.stopLoop('spray');
+    SFX.stopLoop('flame');
+    SFX.stopLoop('vacuum');
+
+    // 이미 넣어둔 새 죽음 음향을 실제로 호출한다.
+    SFX.deathSequence(type,A.weapon);
+
+    // 이미 넣어둔 DeathFX 화면을 실제로 시작한다.
+    this.deathFX.start(type);
+
+    this.G.shake(
+      type==='crush'
+        ? 1.6
+        : type==='vacuum'
+          ? 1.1
+          : 0.85
+    );
   }
+
   updateDeath(dt){
-    const D=this.death; D.t+=dt;
-    if(D.type==='poison'||D.type==='trap'){ this.roach.pose(0.5+0.5*Math.sin(D.t*40),dt*rand(0.3,2),0.1); if(Math.random()<dt*6) SFX.poisonTwitch(); const P=this.p;
-      if(D.t>2.4&&!D.baked){ D.baked=true; this.G.paint.corpse(P.x,P.z,P.h,0.5,'belly'); this.G.corpses.add(P.x,P.z,P.h,'belly'); }
-      if(D.t>2.8) this.afterDeath(); return; }
-    if(D.t>1.4) this.afterDeath();
+    const D=this.death;
+    const P=this.p;
+
+    D.t=Math.min(2.3,D.t+dt);
+
+    // 체액, 파편, 점멸, 화면 찢김 등을 매 프레임 갱신한다.
+    this.deathFX.update(dt);
+
+    if(D.type==='crush'){
+      this.roach.pose(
+        0,
+        dt,
+        clamp(D.t/0.24,0,1)
+      );
+
+      if(D.t>=0.18&&!D.baked){
+        D.baked=true;
+
+        this.G.paint.corpse(
+          P.x,
+          P.z,
+          P.h,
+          0.5,
+          'crushed'
+        );
+
+        this.G.corpses.add(
+          P.x,
+          P.z,
+          P.h,
+          'crushed'
+        );
+      }
+
+    }else if(D.type==='vacuum'){
+      const k=clamp(D.t/0.92,0,1);
+
+      this.roach.g.position.set(
+        lerp(P.x,D.target.x,k*0.82),
+        lerp(0,0.05,k),
+        lerp(P.z,D.target.z,k*0.82)
+      );
+
+      this.roach.g.rotation.y+=dt*(12+24*k);
+      this.roach.pose(1,dt,0.08*k);
+
+      if(D.t>0.82){
+        this.roach.g.visible=false;
+      }
+
+    }else if(D.type==='flame'){
+      const k=clamp(D.t/1.05,0,1);
+
+      this.roach.pose(
+        0.25,
+        dt,
+        0.72*k
+      );
+
+      this.roach.g.rotation.z=
+        Math.sin(D.t*34)*0.12*(1-k);
+
+      if(D.t>=0.86&&!D.baked){
+        D.baked=true;
+
+        this.G.paint.corpse(
+          P.x,
+          P.z,
+          P.h,
+          0.5,
+          'burnt'
+        );
+
+        this.G.corpses.add(
+          P.x,
+          P.z,
+          P.h,
+          'burnt'
+        );
+      }
+
+    }else{
+      // 스프레이·독 먹이
+      const fall=clamp(D.t/1.48,0,1);
+
+      this.roach.pose(
+        0.45+0.55*Math.sin(D.t*38),
+        dt*rand(0.4,2.2),
+        0.12+0.18*fall
+      );
+
+      this.roach.g.rotation.z=
+        D.roll*Math.PI*fall;
+
+      this.roach.g.position.y=
+        ROACH_L*0.22*fall;
+
+      if(Math.random()<dt*7){
+        SFX.poisonTwitch();
+      }
+
+      if(D.t>=1.72&&!D.baked){
+        D.baked=true;
+
+        this.G.paint.corpse(
+          P.x,
+          P.z,
+          P.h,
+          0.5,
+          'belly'
+        );
+
+        this.G.corpses.add(
+          P.x,
+          P.z,
+          P.h,
+          'belly'
+        );
+      }
+    }
+
+    if(D.t>=2.3){
+      this.afterDeath();
+    }
   }
+
   afterDeath(){
     if(this.doneStep) return;
+
     this.doneStep=true;
 
+    // DeathFX가 완전히 검게 닫힌 상태를 실제 fade로 이어받는다.
+    this.G.blackout(true,true);
+    this.deathFX.stop();
+    this.G.camera.up.set(0,1,0);
     this.roach.g.visible=false;
 
-    // 알집을 남기지 못했으면 여기서 끝난다.
+    // 알집을 남기지 못했으면 종료
     if(!this.egg){
       this.lineEnd();
       return;
     }
 
-    // 알집이 이미 성숙했다면
-    // 죽음 연출이 끝난 뒤 바로 다음 세대로 간다.
+    // 이미 성숙한 알집이 있으면 다음 세대
     if(this.ready){
-      this.G.ui.eggBar('부화',false);
-      this.nextGen();
+      this.nextGen(450);
       return;
     }
 
-    // 먼저 죽었다면 알집이 성숙할 때까지 지켜본다.
+    // 알집은 있지만 아직 성숙하지 않았으면 관전
     this.toWatch();
   }
+
 
 
   toWatch(){
@@ -2157,8 +2792,18 @@ clearTraps(){
 
     this.G.blackout(false,false);
     this.G.ui.vignette(false);
+    this.G.ui.miniOn(true);
 
-    // 죽기 전에 나오던 안내가 남지 않게 한다.
+    this.G.ui.eggBar(
+      `부화까지 ${
+        Math.max(
+          0,
+          Math.ceil(this.eggT-E.t)
+        )
+      }초`,
+      false
+    );
+
     this.G.ui.hintClear();
 
     this.watchYaw=
@@ -2189,8 +2834,32 @@ clearTraps(){
     this.G.ui.hintClear();
     this.G.ui.vignette(false);
   }
-  nextGen(){ if(this.finished) return; this.finished=true; this.G.blackout(true,false);
-    setTimeout(()=>{ if(!this.active) return; this.finished=false; this.gen++; if(this.gen>=this.weapons.length){ this.gen=this.weapons.length; this.beginLeave(); } else this.startGen(); },1500); }
+
+
+
+  nextGen(delay=650){
+    if(this.finished) return;
+
+    this.finished=true;
+    this.G.blackout(true,false);
+
+    setTimeout(()=>{
+      if(!this.active) return;
+
+      this.finished=false;
+      this.gen++;
+
+      if(this.gen>=this.weapons.length){
+        this.gen=this.weapons.length;
+        this.beginLeave();
+      }else{
+        this.startGen();
+      }
+    },delay);
+  }
+
+
+
   // ── 엔딩: 사람이 떠난다 ──
   beginLeave(){ const A=this.ai, H=this.human; this.phase='leave'; this.G.blackout(false); this.G.setLighting('on'); A.lightsOn=true; A.state='leave'; A.leaveT=0; A.leaveStep=0; A.done=false; A.doorShut=false; this.eggMesh.visible=false; this.ring.visible=false; this.hatchMesh.visible=false; this.hideWarn(); this.clearNpcs(); this.clearHatchNymphs(); this.clearTraps(); this.resetCushion(); this.G.ui.vignette(false); this.G.ui.tox(0); this.G.ui.eggState('none'); this.G.ui.eggBar(null); this.G.ui.hintClear(); this.G.ui.genLabel(null); this.G.ui.miniOn(false);
     if(this.weaponMesh){ H.hold.remove(this.weaponMesh); this.weaponMesh=null; } if(this.strikeMesh){ this.grp.remove(this.strikeMesh); this.strikeMesh=null; }
@@ -2231,16 +2900,23 @@ clearTraps(){
 
     if(this.phase==='leave'){ this.updateLeave(dt); this.puffs.update(dt); this.leaveCamera(dt); return; }
     if(this.phase==='over'){ this.overT+=dt; this.updateHuman(dt); this.updateNpcs(dt); this.puffs.update(dt); this.updateVac(); if(this.overT>1.3&&!this.finished){ this.finished=true; G.blackout(true); setTimeout(()=>{ if(this.active) G.lineEnded(this.gen); },900); } this.watchCamera(dt); return; }
+    
+    
        if(this.phase==='dying'){
       this.tickEgg(dt);
       this.updateDeath(dt);
       this.deathCamera(dt);
-      this.updateHuman(dt);
+
+      // 사람과 타격 도구는 충돌 자세에 고정한다.
       this.updateNpcs(dt);
       this.puffs.update(dt);
       this.updateVac();
+
       return;
     }
+
+
+
     if(this.phase==='watch'){ this.tickEgg(dt); this.updateHuman(dt); this.updateNpcs(dt); this.puffs.update(dt); this.updateVac(); this.watchCamera(dt); this.footsteps(dt); return; }
     this.genT+=dt;
     if(this.hatch){ this.hatch.t+=dt; const k=this.hatch.t; if(k<0.5){ this.hatchMesh.scale.set(1+k*0.5,1-k*0.3,1+k*0.3); } else { const q=Math.min(1,(k-0.5)/0.6); this.hatchMesh.scale.set(1.25*(1-q),0.85*(1-q)+0.001,1.15*(1-q)); if(q>=1){ this.hatchMesh.visible=false; this.hatch=null; } } }
@@ -2293,7 +2969,140 @@ clearTraps(){
     if(w>0.001&&tgt){ const hd=Math.max(0.45,Math.hypot(tgt.x-cx,tgt.z-cz)); this.tmp2.set(cx+fx*hd,Math.min(tgt.y,cy+hd*0.95),cz+fz*hd); this.tmp.lerp(this.tmp2,w); }
     cam.position.copy(G.camBase); cam.up.set(0,1,0); cam.lookAt(this.tmp); cam.updateMatrixWorld();
     G.camRight.set(1,0,0).applyQuaternion(cam.quaternion); G.camRight.y=0; G.camRight.normalize(); G.camFwd.set(fx,0,fz); }
-  deathCamera(dt){ const P=this.p, D=this.death; if(D.type==='poison'||D.type==='trap'){ const A=this.ai; const yaw=Math.atan2(A.x-P.x,A.z-P.z); this.camYaw=angleDamp(this.camYaw,yaw,4,dt); const cam=this.G.camera; cam.position.set(P.x,0.06,P.z); this.tmp.set(A.x,1.55,A.z); cam.lookAt(this.tmp); } else { this.applyCam(P.x,P.z,this.camYaw,this.camPitch,0,null); } }
+  
+  
+  
+    deathCamera(dt){
+    const P=this.p;
+    const D=this.death;
+    const cam=this.G.camera;
+    const t=Math.min(2.3,D.t);
+
+    const yaw=D.faceYaw;
+    const fx=Math.sin(yaw);
+    const fz=Math.cos(yaw);
+
+    const rx=fz;
+    const rz=-fx;
+
+    // 청소기: 노즐 안으로 끌려가며 회전
+    if(D.type==='vacuum'){
+      const k=clamp(t/1.22,0,1);
+      const e=k*k*(3-2*k);
+      const spin=D.roll*k*k*5.6;
+
+      cam.position.set(
+        lerp(P.x,D.target.x,e*0.88),
+        lerp(0.075,0.038,e),
+        lerp(P.z,D.target.z,e*0.88)
+      );
+
+      cam.up.set(
+        rx*Math.sin(spin),
+        Math.cos(spin),
+        rz*Math.sin(spin)
+      ).normalize();
+
+      this.tmp.set(
+        D.target.x,
+        D.target.y,
+        D.target.z
+      );
+
+      cam.lookAt(this.tmp);
+      return;
+    }
+
+    // 압사: 첫 0.2초 동안 손이나 도구를 정면에서 본다.
+    if(
+      D.type==='crush' &&
+      t<0.2 &&
+      this.strikeMesh
+    ){
+      const k=clamp(t/0.2,0,1);
+      const back=lerp(0.11,0.035,k);
+
+      cam.position.set(
+        P.x-fx*back,
+        lerp(0.075,0.028,k),
+        P.z-fz*back
+      );
+
+      cam.up.set(0,1,0);
+
+      this.tmp.copy(
+        this.strikeMesh.position
+      );
+
+      this.tmp.y=Math.max(
+        0.028,
+        this.strikeMesh.position.y+0.028
+      );
+
+      cam.lookAt(this.tmp);
+      return;
+    }
+
+    let fall=0;
+    let roll=0;
+    let y=0.065;
+    let side=0;
+
+    if(D.type==='crush'){
+      fall=clamp((t-0.18)/0.78,0,1);
+      roll=D.roll*(0.12+1.18*fall);
+      y=lerp(0.064,0.018,fall);
+      side=D.roll*0.025*fall;
+
+    }else if(D.type==='flame'){
+      fall=clamp(t/1.18,0,1);
+
+      roll=
+        D.roll*0.68*fall+
+        Math.sin(t*27)*0.07*(1-fall);
+
+      y=lerp(0.072,0.022,fall);
+      side=Math.sin(t*23)*0.012*(1-fall);
+
+    }else{
+      // 스프레이·독 먹이
+      fall=clamp(t/1.5,0,1);
+
+      roll=
+        D.roll*1.16*fall+
+        Math.sin(t*22)*0.12*(0.25+fall);
+
+      y=lerp(0.068,0.02,fall);
+      side=Math.sin(t*29)*0.018*(0.2+fall);
+    }
+
+    cam.position.set(
+      P.x-fx*0.045+rx*side,
+      y,
+      P.z-fz*0.045+rz*side
+    );
+
+    cam.up.set(
+      rx*Math.sin(roll),
+      Math.cos(roll),
+      rz*Math.sin(roll)
+    ).normalize();
+
+    const targetY=
+      lerp(D.target.y,0.055,fall);
+
+    this.tmp.set(
+      D.target.x,
+      targetY,
+      D.target.z
+    );
+
+    cam.lookAt(this.tmp);
+  }
+
+
+
+
   // 죽은 뒤에는 알집 곁에서 사람이 다가오는 것을 지켜본다
   watchCamera(dt){ const E=this.egg, cam=this.G.camera, A=this.ai;
     if(!E){ this.applyCam(this.p.x,this.p.z,this.camYaw,this.camPitch,0,null); return; }
