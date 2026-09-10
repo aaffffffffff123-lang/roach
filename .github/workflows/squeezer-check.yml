@@ -1,0 +1,31 @@
+name: Squeezer syntax check
+
+on:
+  push:
+    paths:
+      - 'squeezer.html'
+      - 'squeezer-*.js'
+      - '.github/workflows/squeezer-check.yml'
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JavaScript syntax
+        run: |
+          node --check squeezer-core.js
+          node --check squeezer-world.js
+          node --check squeezer-effects.js
+          node --check squeezer-press.js
+          node --check squeezer-detail.js
+          node --check squeezer-ui.js
+      - name: Check script wiring
+        run: |
+          grep -q 'squeezer-core.js' squeezer.html
+          grep -q 'squeezer-world.js' squeezer.html
+          grep -q 'squeezer-effects.js' squeezer.html
+          grep -q 'squeezer-press.js' squeezer.html
+          grep -q 'squeezer-detail.js' squeezer.html
+          grep -q 'squeezer-ui.js' squeezer.html
