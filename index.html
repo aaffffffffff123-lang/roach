@@ -1147,10 +1147,10 @@ class Round1{
     for(const q of this.roaches){ if(q.state==='dead'||q.gone) continue; if(this.underCushion(q.x,q.z)) continue; if(dist2(q.x,q.z,x,z)<R*R) hit.push(q); }
     hit.sort((a,b)=>dist2(a.x,a.z,x,z)-dist2(b.x,b.z,x,z));
     let n=0; for(const q of hit){ this.killRoach(q,item,x,z,n); n++; }
-    const nr=it.r+ROACH_R*NYMPH_SCALE;
-    for(const q of [...this.nymphs]){ if(q.delay>0||q.state==='dead') continue; if(dist2(q.x,q.z,x,z)<nr*nr){ this.killNymph(q,item,n); n++; } }
-    const er=it.r+0.04;
-    for(const o of [...this.oothecae]){ if(dist2(o.x,o.z,x,z)<er*er){ this.destroyOotheca(o); n++; } }
+
+
+const nr=it.r+ROACH_R*NYMPH_SCALE; for(const q of [...this.nymphs]){ if( q.delay>0 || q.state==='dead' || this.underCushion(q.x,q.z) ) continue; if(dist2(q.x,q.z,x,z)<nr*nr){ this.killNymph(q,item,n); n++; } } const er=it.r+0.04; for(const o of [...this.oothecae]){ if( q.delay>0 || q.state==='dead' || this.underCushion(q.x,q.z) ) continue; if(dist2(o.x,o.z,x,z)<er*er){ this.destroyOotheca(o); n++; } }
+      
     if(!n) SFX.miss(item,clamp((x-this.cam.x)/2,-0.8,0.8));
     this.G.shake(item==='pan'||item==='book'?0.55:item==='hand'?0.18:0.3);
     this.scare(x,z,R+0.18); this.touch(); return n;
@@ -1227,7 +1227,7 @@ class Round1{
           }
         }
         for(const q of this.nymphs){
-          if(q.delay>0||q.state!=='live') continue;
+       if( q.delay>0 || q.state!=='live' || this.underCushion(q.x,q.z) ) continue;
           if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
             q.spray+=dt;
             if(q.spray>=0.55){ q.state='poison'; q.poisonT=rand(1.1,1.8); }
@@ -1261,7 +1261,7 @@ class Round1{
           }
         }
         for(const q of [...this.nymphs]){
-          if(q.delay>0||q.state==='dead') continue;
+         if( q.delay>0 || q.state==='dead' || this.underCushion(q.x,q.z) ) continue;
           if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
             const ddx=h.x-q.x, ddz=h.z-q.z, d=Math.hypot(ddx,ddz);
             if(d<0.07){ this.killNymph(q,'vacuum'); SFX.vacuumSuck(); }
@@ -1479,8 +1479,7 @@ class Round2{
 
 this.G.room.blanket.visible=true;
 
-        this.G.room.blanket.visible=true;
-
+       
     this.G.ui.vignette(false);
     this.G.ui.tox(0);
     this.G.ui.eggState('none');
