@@ -1,0 +1,5 @@
+oast(`${q.part.label} 전기 펄스`);this.app.ui.refresh();
+  }
+  update(dt,time){
+    if(this.action?.type==='pin'){
+      const a=this.action;a.t+=dt;const k=clamp(a.t/.18,0,1),e=smooth(k);this.models.pin.position.copy(a.point).add(V3(0,lerp(.42,.02,e),0));if(!a.done&&k>=.78){a.done=true;const pin=this.specimen.addPin(a.part,a.point);if(pin){this.audio.pin();a.part.twitch=Math.max(a.part.twitch,.7);thi
