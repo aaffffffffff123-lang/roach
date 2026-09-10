@@ -1147,14 +1147,36 @@ class Round1{
     for(const q of this.roaches){ if(q.state==='dead'||q.gone) continue; if(this.underCushion(q.x,q.z)) continue; if(dist2(q.x,q.z,x,z)<R*R) hit.push(q); }
     hit.sort((a,b)=>dist2(a.x,a.z,x,z)-dist2(b.x,b.z,x,z));
     let n=0; for(const q of hit){ this.killRoach(q,item,x,z,n); n++; }
+  
+      const nr=it.r+ROACH_R*NYMPH_SCALE;
+
+    for(const q of [...this.nymphs]){
+      if(
+        q.delay>0 ||
+        q.state==='dead' ||
+        this.underCushion(q.x,q.z)
+      ) continue;
+
+      if(dist2(q.x,q.z,x,z)<nr*nr){
+        this.killNymph(q,item,n);
+        n++;
+      }
+    }
+
+    const er=it.r+0.04;
+
+    for(const o of [...this.oothecae]){
+      if(this.underCushion(o.x,o.z)) continue;
+
+      if(dist2(o.x,o.z,x,z)<er*er){
+        this.destroyOotheca(o);
+        n++;
+      }
+    }
 
 
-const nr=it.r+ROACH_R*NYMPH_SCALE; for(const q of [...this.nymphs]){ if( q.delay>0 || q.state==='dead' || this.underCushion(q.x,q.z) ) continue; if(dist2(q.x,q.z,x,z)<nr*nr){ this.killNymph(q,item,n); n++; } } const er=it.r+0.04; for(const o of [...this.oothecae]){ if( q.delay>0 || q.state==='dead' || this.underCushion(q.x,q.z) ) continue; if(dist2(o.x,o.z,x,z)<er*er){ this.destroyOotheca(o); n++; } }
-      
-    if(!n) SFX.miss(item,clamp((x-this.cam.x)/2,-0.8,0.8));
-    this.G.shake(item==='pan'||item==='book'?0.55:item==='hand'?0.18:0.3);
-    this.scare(x,z,R+0.18); this.touch(); return n;
-  }
+
+
   itemYaw(k){ const U=this.G.camUp; const up=Math.atan2(U.x,U.z);
     if(k==='pan') return up+Math.PI; if(k==='hand') return up; if(k==='slipper') return up+rand(-0.35,0.35); if(k==='book') return rand(-0.6,0.6); if(k==='tissue') return rand(TAU); return up; }
   press(sx,sy,type){ if(!this.active||this.intro) return; const p=this.floorPoint(sx,sy); if(!p) return; this.touch(); const it=ITEMS[this.item];
@@ -1227,13 +1249,15 @@ const nr=it.r+ROACH_R*NYMPH_SCALE; for(const q of [...this.nymphs]){ if( q.delay
           }
         }
         for(const q of this.nymphs){
-       if( q.delay>0 || q.state!=='live' || this.underCushion(q.x,q.z) ) continue;
+          if(q.delay>0||q.state!=='live') continue;
           if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
             q.spray+=dt;
             if(q.spray>=0.55){ q.state='poison'; q.poisonT=rand(1.1,1.8); }
           }
         }
-        for(const o of [...this.oothecae]){
+             for(const o of [...this.oothecae]){
+          if(this.underCushion(o.x,o.z)) continue;
+
           if(this.inCone(o,h.x,h.z,yaw,c.len,c.ang)){
             o.spray+=dt;
             if(o.spray>=0.55) this.destroyOotheca(o);
@@ -1246,8 +1270,30 @@ const nr=it.r+ROACH_R*NYMPH_SCALE; for(const q of [...this.nymphs]){ if( q.delay
         this.scorchT-=dt; if(this.scorchT<0){ this.scorchT=0.12; const d=rand(0.1,c.len), a=yaw+rand(-c.ang*0.7,c.ang*0.7); G.paint.scorch(h.x+Math.sin(a)*d,h.z+Math.cos(a)*d,rand(0.03,0.07)); }
         let n=0;
         for(const q of this.roaches){ if(q.state==='dead'||q.gone||this.underCushion(q.x,q.z)) continue; if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)) this.killRoach(q,'flame',h.x,h.z,n++); }
-        for(const q of [...this.nymphs]){ if(q.delay>0||q.state==='dead') continue; if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)) this.killNymph(q,'flame',n++); }
-        for(const o of [...this.oothecae]){ if(this.inCone(o,h.x,h.z,yaw,c.len,c.ang)) this.destroyOotheca(o); }
+       
+       
+            for(const q of [...this.nymphs]){
+          if(
+            q.delay>0 ||
+            q.state==='dead' ||
+            this.underCushion(q.x,q.z)
+          ) continue;
+
+          if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
+            this.killNymph(q,'flame',n++);
+          }
+        }
+
+        for(const o of [...this.oothecae]){
+          if(this.underCushion(o.x,o.z)) continue;
+
+          if(this.inCone(o,h.x,h.z,yaw,c.len,c.ang)){
+            this.destroyOotheca(o);
+          }
+        }
+
+
+
       }
       if(h.item==='vacuum'){
         this.puffs.emit('spray',h.x+h.dx*c.len*rand(0.4,1),0.03,h.z+h.dz*c.len*rand(0.4,1),-h.dx,-h.dz,1,1.4);
@@ -1261,16 +1307,27 @@ const nr=it.r+ROACH_R*NYMPH_SCALE; for(const q of [...this.nymphs]){ if( q.delay
           }
         }
         for(const q of [...this.nymphs]){
-         if( q.delay>0 || q.state==='dead' || this.underCushion(q.x,q.z) ) continue;
+          if(q.delay>0||q.state==='dead') continue;
           if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
             const ddx=h.x-q.x, ddz=h.z-q.z, d=Math.hypot(ddx,ddz);
             if(d<0.07){ this.killNymph(q,'vacuum'); SFX.vacuumSuck(); }
             else { q.x+=ddx/d*dt*2.2; q.z+=ddz/d*dt*2.2; q.h=Math.atan2(-ddx,-ddz); }
           }
         }
-        for(const o of [...this.oothecae]){
-          if(this.inCone(o,h.x,h.z,yaw,c.len,c.ang)&&Math.hypot(h.x-o.x,h.z-o.z)<0.11) this.destroyOotheca(o);
+               for(const o of [...this.oothecae]){
+          if(this.underCushion(o.x,o.z)) continue;
+
+          if(
+            this.inCone(o,h.x,h.z,yaw,c.len,c.ang) &&
+            Math.hypot(h.x-o.x,h.z-o.z)<0.11
+          ){
+            this.destroyOotheca(o);
+          }
         }
+
+
+
+
       }
     }
 
@@ -1479,7 +1536,8 @@ class Round2{
 
 this.G.room.blanket.visible=true;
 
-       
+        this.G.room.blanket.visible=true;
+
     this.G.ui.vignette(false);
     this.G.ui.tox(0);
     this.G.ui.eggState('none');
@@ -2025,20 +2083,30 @@ clearTraps(){
           )
         : 1;
 
+
     if(k>=1){
       this.ready=true;
 
       SFX.eggReady();
       this.G.ui.eggReady(true);
 
-      // '알집이 여물었다' 제거
       this.G.ui.eggBar(
-        '부화',
+        this.phase==='watch'
+          ? '부화'
+          : '알집 성숙',
         false
       );
 
-      this.nextGen();
+      // 바퀴벌레가 이미 죽은 상태에서
+      // 알집까지 성숙했을 때만 다음 세대로 간다.
+      if(this.phase==='watch'){
+        this.nextGen();
+      }
     }
+
+
+
+
   }
 
 
@@ -2057,9 +2125,28 @@ clearTraps(){
       if(D.t>2.8) this.afterDeath(); return; }
     if(D.t>1.4) this.afterDeath();
   }
-  afterDeath(){ if(this.doneStep) return; this.doneStep=true;
+  afterDeath(){
+    if(this.doneStep) return;
+    this.doneStep=true;
+
     this.roach.g.visible=false;
-    if(this.egg) this.toWatch(); else this.lineEnd();
+
+    // 알집을 남기지 못했으면 여기서 끝난다.
+    if(!this.egg){
+      this.lineEnd();
+      return;
+    }
+
+    // 알집이 이미 성숙했다면
+    // 죽음 연출이 끝난 뒤 바로 다음 세대로 간다.
+    if(this.ready){
+      this.G.ui.eggBar('부화',false);
+      this.nextGen();
+      return;
+    }
+
+    // 먼저 죽었다면 알집이 성숙할 때까지 지켜본다.
+    this.toWatch();
   }
 
 
@@ -2144,7 +2231,16 @@ clearTraps(){
 
     if(this.phase==='leave'){ this.updateLeave(dt); this.puffs.update(dt); this.leaveCamera(dt); return; }
     if(this.phase==='over'){ this.overT+=dt; this.updateHuman(dt); this.updateNpcs(dt); this.puffs.update(dt); this.updateVac(); if(this.overT>1.3&&!this.finished){ this.finished=true; G.blackout(true); setTimeout(()=>{ if(this.active) G.lineEnded(this.gen); },900); } this.watchCamera(dt); return; }
-    if(this.phase==='dying'){ this.updateDeath(dt); this.deathCamera(dt); this.updateHuman(dt); this.updateNpcs(dt); this.puffs.update(dt); this.updateVac(); return; }
+       if(this.phase==='dying'){
+      this.tickEgg(dt);
+      this.updateDeath(dt);
+      this.deathCamera(dt);
+      this.updateHuman(dt);
+      this.updateNpcs(dt);
+      this.puffs.update(dt);
+      this.updateVac();
+      return;
+    }
     if(this.phase==='watch'){ this.tickEgg(dt); this.updateHuman(dt); this.updateNpcs(dt); this.puffs.update(dt); this.updateVac(); this.watchCamera(dt); this.footsteps(dt); return; }
     this.genT+=dt;
     if(this.hatch){ this.hatch.t+=dt; const k=this.hatch.t; if(k<0.5){ this.hatchMesh.scale.set(1+k*0.5,1-k*0.3,1+k*0.3); } else { const q=Math.min(1,(k-0.5)/0.6); this.hatchMesh.scale.set(1.25*(1-q),0.85*(1-q)+0.001,1.15*(1-q)); if(q>=1){ this.hatchMesh.visible=false; this.hatch=null; } } }
