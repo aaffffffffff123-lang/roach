@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>바퀴 착즙기</title>
+<style>
+:root{
+  --ivory:#fbf4e4;
+  --ivory2:#f2e7cb;
+  --ink:#352113;
+  --ink2:#6b4728;
+  --edge:#c7a568;
+  --steel:#74777b;
+  --danger:#7f261b;
+  --sans:"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --serif:"Apple Myungjo","Nanum Myeongjo","Noto Serif KR","Batang",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d7c6a0;color:var(--ink);font-family:var(--sans);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none}
+button{font:inherit;color:inherit;border:0;background:none;-webkit-tap-highlight-color:transparent;touch-action:none}
+#stage{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#ui{position:fixed;inset:0;pointer-events:none}
+#top{
+  position:fixed;left:calc(12px + env(safe-area-inset-left));right:calc(12px + env(safe-area-inset-right));
+  top:calc(10px + env(safe-area-inset-top));display:flex;gap:10px;align-items:flex-start;justify-content:space-between;pointer-events:none
+}
+#brand{
+  padding:9px 13px;border-radius:14px;background:rgba(251,244,228,.91);
+  box-shadow:0 2px 0 var(--edge),0 5px 18px rgba(58,34,13,.18);backdrop-filter:blur(8px)
+}
+#brand b{display:block;font-family:var(--serif);font-size:20px;line-height:1;letter-spacing:-.04em}
+#brand small{display:block;margin-top:5px;color:var(--ink2);font-size:11px;letter-spacing:.04em}
+#stats{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:52vw}
+.stat{min-width:66px;padding:8px 10px;border-radius:12px;text-align:center;background:rgba(251,244,228,.89);box-shadow:0 2px 0 var(--edge),0 4px 14px rgba(58,34,13,.16)}
+.stat strong{display:block;font-size:18px;line-height:1;font-family:var(--serif)}
+.stat span{display:block;margin-top:4px;color:var(--ink2);font-size:10px}
+#tools{
+  position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  display:flex;gap:7px;max-width:calc(100vw - 20px);overflow-x:auto;padding:4px;pointer-events:auto;
+  scrollbar-width:none
+}
+#tools::-webkit-scrollbar{display:none}
+.tool{
+  flex:0 0 auto;min-width:62px;height:48px;padding:0 9px;border-radius:14px;background:var(--ivory);
+  box-shadow:0 2px 0 var(--edge),0 5px 14px rgba(58,34,13,.22);
+  font-size:12px;font-weight:800;line-height:1.05;display:grid;place-items:center;transition:transform .08s,background .08s,color .08s
+}
+.tool:active{transform:translateY(2px)}
+.tool.sel{background:var(--ink);color:var(--ivory);box-shadow:0 2px 0 #160c06,0 5px 15px rgba(0,0,0,.28);transform:translateY(-2px)}
+.tool.off{opacity:.28;filter:grayscale(1)}
+#actions{
+  position:fixed;right:calc(12px + env(safe-area-inset-right));bottom:calc(78px + env(safe-area-inset-bottom));
+  display:flex;flex-direction:column;gap:7px;align-items:flex-end;pointer-events:auto
+}
+.action{
+  padding:10px 14px;border-radius:999px;background:rgba(251,244,228,.94);
+  box-shadow:0 2px 0 var(--edge),0 5px 14px rgba(58,34,13,.2);font-size:12px;font-weight:800;white-space:nowrap
+}
+.action:active{transform:translateY(2px)}
+.action.dark{background:var(--ink);color:var(--ivory);box-shadow:0 2px 0 #160c06,0 5px 14px rgba(0,0,0,.26)}
+#hint{
+  position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  max-width:min(640px,76vw);padding:8px 13px;border-radius:999px;background:rgba(53,33,19,.78);color:var(--ivory);
+  text-align:center;font-size:12px;font-weight:700;line-height:1.35;pointer-events:none;opacity:0;transition:opacity .2s
+}
+#hint.show{opacity:1}
+#detailButtons{
+  position:fixed;left:50%;top:calc(72px + env(safe-area-inset-top));transform:translateX(-50%);
+  display:none;gap:8px;pointer-events:auto
+}
+#detailButtons.show{display:flex}
+#detailButtons button{
+  padding:10px 15px;border-radius:999px;background:rgba(251,244,228,.95);
+  box-shadow:0 2px 0 var(--edge),0 5px 14px rgba(0,0,0,.22);font-size:12px;font-weight:800
+}
+#detailButtons .dump{background:var(--ink);color:var(--ivory)}
+#toast{
+  position:fixed;left:50%;top:45%;transform:translate(-50%,-50%) scale(.9);
+  padding:13px 18px;border-radius:16px;background:rgba(35,20,10,.86);color:var(--ivory);
+  font-family:var(--serif);font-size:18px;text-align:center;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s
+}
+#toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+#intro{
+  position:fixed;inset:0;display:grid;place-items:center;padding:22px;background:rgba(33,20,10,.46);
+  backdrop-filter:blur(5px);pointer-events:auto
+}
+#intro.hide{display:none}
+.card{
+  width:min(520px,94vw);padding:24px 22px 20px;border-radius:24px;background:var(--ivory2);
+  box-shadow:0 4px 0 #a88650,0 22px 60px rgba(30,16,6,.36);text-align:center
+}
+.card h1{margin:0;font-family:var(--serif);font-size:36px;letter-spacing:-.06em}
+.card p{margin:15px auto 18px;max-width:420px;color:var(--ink2);font-size:14px;line-height:1.75;word-break:keep-all}
+.card button{padding:13px 22px;border-radius:999px;background:var(--ink);color:var(--ivory);font-weight:900;box-shadow:0 3px 0 #120a05}
+@media(max-width:720px){
+  #brand b{font-size:17px}
+  #brand small{display:none}
+  .stat{min-width:56px;padding:7px 8px}.stat strong{font-size:16px}.stat span{font-size:9px}
+  #stats{max-width:58vw}
+  #actions{bottom:calc(73px + env(safe-area-inset-bottom))}
+  .action{padding:9px 12px;font-size:11px}
+  #hint{bottom:calc(70px + env(safe-area-inset-bottom));max-width:68vw}
+  .tool{min-width:58px;height:45px;font-size:11px}
+}
+@media(max-height:560px){
+  #brand{padding:7px 10px}#brand b{font-size:16px}
+  .stat{padding:6px 8px}.stat strong{font-size:15px}
+  #tools{bottom:calc(7px + env(safe-area-inset-bottom))}
+  #actions{bottom:calc(62px + env(safe-area-inset-bottom))}
+  #hint{bottom:calc(59px + env(safe-area-inset-bottom))}
+}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="ui">
+  <div id="top">
+    <div id="brand"><b>바퀴 착즙기</b><small>SCRAPE · DISSECT · PRESS</small></div>
+    <div id="stats">
+      <div class="stat"><strong id="aliveN">0</strong><span>살아 있음</span></div>
+      <div class="stat"><strong id="loadN">0.0</strong><span>스크래퍼</span></div>
+      <div class="stat"><strong id="jarN">0.0</strong><span>압착통</span></div>
+      <div class="stat"><strong id="juiceN">0.0</strong><span>추출액</span></div>
+    </div>
+  </div>
+
+  <div id="tools">
+    <button class="tool sel" data-tool="bait">닭고기</button>
+    <button class="tool" data-tool="pan">프라이팬</button>
+    <button class="tool" data-tool="scraper">스크래퍼</button>
+    <button class="tool" data-tool="tweezer">핀셋</button>
+    <button class="tool" data-tool="clipper">손톱깎이</button>
+    <button class="tool" data-tool="snips">쪽가위</button>
+    <button class="tool" data-tool="press">착즙 프레스</button>
+  </div>
+
+  <div id="actions">
+    <button class="action" id="spawnBtn">바퀴 더 풀기</button>
+    <button class="action" id="liveBtn">생바퀴 8마리 투입</button>
+    <button class="action dark" id="resetBtn">작업대 초기화</button>
+  </div>
+
+  <div id="detailButtons">
+    <button id="backBtn">작업대로</button>
+    <button class="dump" id="dumpBtn">조각을 압착통으로</button>
+  </div>
+
+  <div id="hint" class="show"></div>
+  <div id="toast"></div>
+
+  <div id="intro">
+    <div class="card">
+      <h1>바퀴 착즙기</h1>
+      <p>닭고기로 모아 프라이팬으로 눌러 붙이고, 스크래퍼로 긁어 투명 통에 담는다. 핀셋으로 한 마리를 집으면 접사 해체 작업대로 들어간다. 마지막에는 손잡이를 끝까지 끌어내린다.</p>
+      <button id="startBtn">작업 시작</button>
+    </div>
+  </div>
+</div>
+
+<script src="squeezer-core.js"></script>
+<script src="squeezer-world.js"></script>
+<script src="squeezer-press.js"></script>
+<script src="squeezer-detail.js"></script>
+</body>
+</html>
