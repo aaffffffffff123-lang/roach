@@ -1,0 +1,9 @@
+hter'){this.audio.stopFlame();this.models.lighter.userData.flame.visible=false}this.hold=null;this.action=null;this.cutPath.length=0;this.clearPreview();this.app.ui?.meter(0,false);this.specimen?.clearThreat();
+  }
+  closeTweezers(on){const m=this.models.tweezer;const arms=m.userData.jaws||[];for(let i=0;i<arms.length;i++){const s=i%2?-1:1;arms[i].rotation.y=on?s*.08:0}}
+  finishAwl(auto=false){
+    const h=this.hold;if(!h)return;const amount=h.penetrated?.38:clamp(h.t/.9,0,.35);if(amount>.02)this.specimen.addPuncture(h.part,h.point,h.normal,amount);if(!h.penetrated&&h.t>.1)this.audio.awlDent(amount);this.hold=null;this.app.ui.meter(0,false);this.specimen.clearThreat();this.app.ui.refresh();if(auto)this.pointer.down=false;
+  }
+  finishCut(){
+    const groups=[];let cur=null;for(const p of this.cutPath){if(!cur||cur.part!==p.part){cur={part:p.part,pts:[],world:[],normal:[]};groups.push(cur)}cur.pts.push(p.local);cur.world.push(p.world);cur.normal.push(p.normal)}let deepest=0,cutName='';
+    for(const g of groups){if(g.pts.length<2)continue;const wp=g.world.reduce((a,p)=>a.add(p),V3()).multiplyScalar(1/g.world.length),wn=g.normal.reduce((a,p)=>a.add(p),V3()).normalize(),depth=this.sp
