@@ -1,0 +1,27 @@
+cancel();this.hover=null;}
+  setTool(k){if(!this.models[k])return;this.cancel();for(const [id,m] of Object.entries(this.models))m.visible=id===k;this.tool=k;this.activeModel=this.models[k];this.app.ui.selectTool(k);this.app.ui.hint(TOOL_HINTS[k],5);this.updateModelPose();}
+  hitNormal(hit){if(hit.face){return hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()}return V3(0,1,0)}
+  rayParts(x,y){
+    const hits=this.workbench.ray(x,y,this.specimen.raycastObjects(),true);for(const h of hits){const p=this.specimen.partFromObject(h.object);if(p)return{hit:h,part:p,point:h.point.clone(),normal:this.hitNormal(h)}}return null;
+  }
+  rayPins(x,y){const objs=[];for(const p of this.specimen.pins)objs.push(...p.meshes);const h=this.workbench.ray(x,y,objs,true)[0];return h?.object?.userData?.pinRef||null;}
+  hoverAt(x,y){
+    if(this.pointer.down)return;const q=this.rayParts(x,y);this.hover=q;this.specimen.setHighlight(q?.part||null);if(q){this.app.ui.part(q.part.label,this.specimen.getPartState(q.part));this.tipNormal.copy(q.normal)}else this.app.ui.part(null);this.updateModelPose();
+  }
+  updateModelPose(pointOverride=null,normalOverride=null){
+    const m=this.activeModel;if(!m)return;const q=pointOverride?{point:pointOverride,normal:normalOverride||V3(0,1,0)}:this.hover;if(!q){m.visible=false;return}m.visible=true;
+    if(this.tool==='pin'){m.position.copy(q.point).add(V3(0,.02,0));m.quaternion.identity();m.rotation.x=-Math.PI/2;return}
+    const dir=this.camera.position.clone().sub(q.point).normalize();if(this.tool==='lighter')dir.lerp(V3(0,.55,1).normalize(),.25).normalize();m.position.copy(q.point).addScaledVector(q.normal,.018);m.quaternion.setFromUnitVectors(V3(0,0,1),dir);const sc=this.tool==='clipper'?.82:this.tool==='piezo'?.84:this.tool==='tweezer'?.9:.86;m.scale.setScalar(sc);
+  }
+  down(e){
+    if(e.button!==undefined&&e.button!==0)return false;this.audio.ensure();this.pointer.down=true;this.pointer.id=e.pointerId;this.pointer.x=e.clientX;this.pointer.y=e.clientY;
+    if(this.tool==='pin'){
+      const pin=this.rayPins(e.clientX,e.clientY);if(pin){this.specimen.removePin(pin);this.audio.unpin();this.app.ui.toast('핀을 뽑았다');this.app.ui.refresh();return true}
+    }
+    const q=this.rayParts(e.clientX,e.clientY);if(!q){this.pointer.down=false;return false}this.hover=q;this.specimen.setHighlight(q.part);this.specimen.setThreat(q.point,.28);this.app.ui.part(q.part.label,this.specimen.getPartState(q.part));
+    switch(this.tool){
+      case'pin':this.action={type:'pin',t:0,done:false,...q};break;
+      case'tweezer':this.startGrab(q);break;
+      case'clipper':this.startClip(q);break;
+      case'awl':this.hold={type:'awl',t:0,stage:0,penetrated:false,...q};this.app.ui.meter(0,true);break;
+      case'cutter':this.startCut(q);brea
