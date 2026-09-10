@@ -353,7 +353,11 @@ class AudioFX{
   footstep(dist,pan=0){ if(!this.ctx) return; const g=clamp(1.4/(0.45+dist),0.06,1.15); this.tone({dur:0.32,gain:0.95*g,freq:58,freqEnd:22,pan}); this.tone({t:0.01,dur:0.11,gain:0.3*g,freq:125,freqEnd:48,type:'triangle',pan}); this.noise({dur:0.07,gain:0.45*g,freq:280,q:0.8,type:'lowpass',freqEnd:90,pan}); if(dist<1.2) this.noise({t:0.03,dur:0.18,gain:0.12*g,freq:900,q:6,freqEnd:600,pan}); }
   // 동료가 눌리는 소리 = 1라운드의 그 소리 + 바닥에서 듣는 저역·뼈
   npcCrush(dist,pan=0,weapon='hand'){ if(!this.ctx) return;
-    const g=clamp(1.35/(0.55+dist),0.14,1.1), bright=clamp(0.28+dist*0.34,0.28,1);
+   
+   const g=clamp(0.42/(0.65+dist),0.025,0.42),
+      bright=clamp(0.28+dist*0.34,0.28,1);
+
+
     this.kill(weapon,0,g,0,pan,bright);
     this.tone({dur:0.26,gain:0.7*g,freq:62,freqEnd:26,pan});
     const n=3+Math.floor(Math.random()*3); for(let i=0;i<n;i++){ const t=0.02+i*(0.05+Math.random()*0.035); this.tone({t,dur:0.03,gain:0.5*g,freq:230+Math.random()*200,freqEnd:80,type:'square',pan}); this.noise({t,dur:0.022,gain:0.3*g,freq:1400+Math.random()*900,q:1.6,pan}); }
@@ -1919,7 +1923,48 @@ this.deathFX=new DeathFX(G);
 
     this.cushion=this.G.room.cushion; this.cushionBase={x:this.cushion.position.x,y:this.cushion.position.y,z:this.cushion.position.z};
   }
-  start(weapons,baits){ this.weapons=weapons; this.baitKinds=baits||[]; this.gen=0; this.active=true; this.grp.visible=true; this.lastEgg=null; this.finished=false; this.hinted={}; this.G.input.mode='r2'; document.getElementById('r2ui').style.display='block'; this.G.ui.eggState('none'); this.G.ui.miniOn(true); this.camPitch=0.05; this.startGen(); }
+  start(weapons,baits){
+    // 1라운드에서 사용한 무기는
+    // 세대 수가 아니라 2라운드 공격 패턴 풀이다.
+    const pool=(
+      weapons&&weapons.length
+        ? weapons
+        : ['hand']
+    ).slice();
+
+    // 최소 세 번은 실제 세대를 플레이한다.
+    const playableStages=Math.max(
+      4,
+      pool.length
+    );
+
+    this.weaponPool=pool;
+
+    this.weapons=Array.from(
+      {length:playableStages},
+      (_,i)=>pool[i%pool.length]
+    );
+
+    this.baitKinds=baits||[];
+    this.gen=0;
+    this.active=true;
+    this.grp.visible=true;
+    this.lastEgg=null;
+    this.finished=false;
+    this.hinted={};
+
+    this.G.input.mode='r2';
+
+    document.getElementById(
+      'r2ui'
+    ).style.display='block';
+
+    this.G.ui.eggState('none');
+    this.G.ui.miniOn(true);
+
+    this.camPitch=0.05;
+    this.startGen();
+  }
   
       stop(){
     this.active=false;
@@ -2225,15 +2270,75 @@ clearTraps(){
   npcFlee(n){ if(n.state==='dead'||n.state==='poison') return; n.state='flee'; n.trap=null; let best=null,bd=1e9; for(const h of HOLES){ const d=dist2(n.x,n.z,h.x,h.z)*(0.7+Math.random()*0.6); if(d<bd){bd=d;best=h;} } n.hole=best; }
   killNpc(n,weapon){ if(n.state==='dead') return; n.state='dead'; n.t=0; n.dead=0; n.startle=0; n.hidden=false; n.m.g.visible=true; n.bake=weapon==='flame'?'burnt':weapon==='spray'?'belly':'crushed';
     const d=Math.hypot(n.x-this.p.x,n.z-this.p.z), pan=clamp(Math.sin(wrapAng(Math.atan2(n.x-this.p.x,n.z-this.p.z)-this.camYaw)),-1,1);
-    if(weapon==='vacuum'){ n.t=1; SFX.vacuumSuck(); return; }
-    SFX.npcCrush(d,pan,weapon); this.G.shake(clamp(0.5/(0.4+d),0.05,0.6));
-    if(weapon!=='flame'&&weapon!=='spray'){ const a=rand(TAU); this.G.paint.splat(n.x,n.z,Math.cos(a),Math.sin(a),0.09,0.45,weapon); } }
+   
+       if(weapon==='vacuum'){
+      n.t=1;
+
+      // 아주 가까울 때만 들린다.
+      if(d<0.55){
+        SFX.vacuumSuck();
+      }
+
+      return;
+    }
+
+    // 먹이나 살충제로 독사한 배경 바퀴에게
+    // 압사 파열음을 붙이지 않는다.
+    if(weapon==='spray'){
+      return;
+    }
+
+    // 불도 압사음이 아니라 작은 연소음만 낸다.
+    if(weapon==='flame'){
+      const g=clamp(
+        0.32/(0.45+d),
+        0.04,
+        0.26
+      );
+
+      SFX.kill(
+        'flame',
+        0,
+        g,
+        0,
+        pan,
+        clamp(0.34+d*0.28,0.34,1)
+      );
+
+      this.G.shake(
+        clamp(0.16/(0.4+d),0.01,0.18)
+      );
+
+      return;
+    }
+
+    // 손·슬리퍼·책·프라이팬으로 실제 압사했을 때만.
+    SFX.npcCrush(d,pan,weapon);
+
+    this.G.shake(
+      clamp(0.5/(0.4+d),0.05,0.6)
+    );
+
+    const a=rand(TAU);
+
+    this.G.paint.splat(
+      n.x,
+      n.z,
+      Math.cos(a),
+      Math.sin(a),
+      0.09,
+      0.45,
+      weapon
+    );
+ }
+
+
   updateNpcs(dt){
     const A=this.ai; let alive=0;
     for(let i=this.npcs.length-1;i>=0;i--){ const n=this.npcs[i], m=n.m;
       if(n.state==='dead'){ n.t+=dt; n.dead=Math.min(1,n.t/0.3); m.pose(0,dt,n.bake==='belly'?0.15:n.dead); m.g.position.set(n.x,n.bake==='belly'?ROACH_L*0.22*(1-n.dead):0,n.z); if(n.dead>=1&&!n.baked){ n.baked=true; this.G.paint.corpse(n.x,n.z,n.h,0.45,n.bake||'crushed'); this.G.corpses.add(n.x,n.z,n.h,n.bake||'crushed'); } if(n.t>0.4){ this.grp.remove(m.g); this.npcs.splice(i,1); } continue; }
       alive++;
-      if(n.state==='poison'){ n.t-=dt; n.twitch=(n.twitch||0)+dt*rand(10,30); m.pose(0.6+0.4*Math.sin(n.twitch),dt*rand(0.5,3),0.15); if(Math.random()<dt*2) SFX.poisonTwitch(); if(n.t<=0) this.killNpc(n,'spray'); continue; }
+      if(n.state==='poison'){ n.t-=dt; n.twitch=(n.twitch||0)+dt*rand(10,30); m.pose(0.6+0.4*Math.sin(n.twitch),dt*rand(0.5,3),0.15); if(n.t<=0) this.killNpc(n,'spray'); continue; }
       if(n.state==='hide'){ n.t-=dt; if(n.t<=0&&!(A.searchHole===n.hole&&A.state==='search')){ n.hidden=false; m.g.visible=true; n.state='wander'; n.spd=rand(0.15,0.3); n.t=rand(0.6,2); const [ex,ez]=this.spotExit(n.hole); n.x=ex+(n.hole.rect?rand(-0.3,0.3):0); n.z=ez; n.h=Math.atan2(n.hole.dx,n.hole.dz)+rand(-0.6,0.6); n.fleeSoon=-1; m.g.position.set(n.x,0,n.z); } continue; }
       if(A.lightsOn&&n.fleeSoon<0&&n.state==='wander'&&!n.bold&&!n.trap) n.fleeSoon=rand(3,11);
       if(n.fleeSoon>0){ n.fleeSoon-=dt; if(n.fleeSoon<=0&&n.state==='wander') this.npcFlee(n); }
@@ -2243,7 +2348,9 @@ clearTraps(){
       if(n.state==='wander'){ n.t-=dt; if(n.t<0){ if(n.spd>0){ n.spd=0; n.t=rand(0.5,2.2); } else { n.spd=rand(0.12,0.3); n.t=rand(0.6,2.2); n.turn=rand(-1,1); } } if(n.spd>0){ n.h+=n.turn*dt; spd=n.spd; } if(Math.random()<dt*0.025) this.npcFlee(n);
         if(!n.trap&&this.traps.length&&Math.random()<dt*0.9){ for(const t of this.traps){ if(dist2(n.x,n.z,t.x,t.z)<2.2*2.2){ n.trap=t; n.state='toTrap'; n.tx=t.x+rand(-0.1,0.1); n.tz=t.z+rand(-0.1,0.1); break; } } } }
       else if(n.state==='toTrap'){ const dx=n.tx-n.x, dz=n.tz-n.z, d=Math.hypot(dx,dz); n.h=angleDamp(n.h,Math.atan2(dx,dz),6,dt); if(d>0.05) spd=0.35; else { n.state='eat'; n.eat=rand(3,7); } }
-      else if(n.state==='eat'){ n.eat-=dt; n.h+=Math.sin(this.G.time*7+n.x*20)*dt*1.4; spd=0.015; if(Math.random()<dt*1.4) SFX.nibble(clamp(Math.sin(wrapAng(Math.atan2(n.x-this.p.x,n.z-this.p.z)-this.camYaw)),-1,1)*0.6);
+      else if(n.state==='eat'){ n.eat-=dt; n.h+=Math.sin(this.G.time*7+n.x*20)*dt*1.4; spd=0.015; 
+      
+
         if(n.eat<=0){ n.state='poison'; n.t=rand(2,4); m.g.rotation.z=Math.PI; m.g.position.y=ROACH_L*0.22; continue; } }
       else if(n.state==='flee'){ spd=n.slug?0.6:0.8; const dx=n.hole.x-n.x, dz=n.hole.z-n.z; n.h=angleDamp(n.h,Math.atan2(dx,dz),8,dt); if(inSpot(n.hole,n.x,n.z)&&Math.hypot(dx,dz)<(n.hole.rect?0.35:(n.hole.r||0.1)*0.6)){ n.state='hide'; n.hidden=true; m.g.visible=false; n.t=A.lightsOn?rand(6,14):rand(4,10); n.fleeSoon=-1; n.vx=n.vz=0; continue; } }
       if(spd>0){ const nx=n.x+Math.sin(n.h)*spd*dt, nz=n.z+Math.cos(n.h)*spd*dt; const [px,pz]=roachMove(n.x,n.z,nx,nz); if(px===n.x&&pz===n.z){ n.h+=rand(1.8,2.8)*(Math.random()<0.5?1:-1); if(n.state==='flee') n.hole=HOLES[Math.floor(rand(HOLES.length))]; } n.vx=(px-n.x)/Math.max(dt,1e-4); n.vz=(pz-n.z)/Math.max(dt,1e-4); n.x=px; n.z=pz; } else { n.vx=n.vz=0; }
@@ -2340,10 +2447,90 @@ clearTraps(){
   hideWarn(){ this.warn.visible=false; this.warn.material.opacity=0; }
   beginStrike(sx,sz,intoHole){
     const A=this.ai, H=this.human, W=A.W; const dx=sx-A.x, dz=sz-A.z, d=Math.hypot(dx,dz); const rd=Math.min(d,W.reach); const nx=d>0.001?dx/d:0, nz=d>0.001?dz/d:1;
-    A.state='strike'; A.strike={t:0,x:A.x+nx*rd,z:A.z+nz*rd,intoHole,hit:false}; A.h=Math.atan2(nx,nz); A.spd=0; H.strikeAnim=true;
-    if(this.weaponMesh){ this.weaponMesh.visible=false; } const sm=this.strikeMesh=makeItem(A.weapon==='hand'?'hand':A.weapon); this.grp.add(sm);
-    H.armR.sh.updateWorldMatrix(true,false); const hp=new THREE.Vector3(); H.armR.hand.getWorldPosition(hp); A.strike.from=hp.clone(); A.strike.from.y=Math.max(hp.y,0.9);
-    sm.position.copy(A.strike.from); sm.rotation.y=A.h; if(A.weapon==='pan') sm.rotation.y=A.h+Math.PI;
+    
+    const rx=nz;
+    const rz=-nx;
+
+    A.state='strike';
+
+    A.strike={
+      t:0,
+      x:A.x+nx*rd,
+      z:A.z+nz*rd,
+      intoHole,
+      hit:false,
+
+      // 공격 방향
+      nx,
+      nz,
+
+      // 공격 방향에 수직인 방향
+      rx,
+      rz,
+
+      // 프라이팬을 어느 쪽으로 살짝 휘두를지
+      swingSide:Math.random()<0.5?-1:1
+    };
+
+    A.h=Math.atan2(nx,nz);
+    A.spd=0;
+    H.strikeAnim=true;
+
+    if(this.weaponMesh){
+      this.weaponMesh.visible=false;
+    }
+
+    const sm=this.strikeMesh=makeItem(
+      A.weapon==='hand'
+        ? 'hand'
+        : A.weapon
+    );
+
+    this.grp.add(sm);
+
+    H.root.updateWorldMatrix(true,true);
+
+    const hp=new THREE.Vector3();
+
+    H.armR.hand.getWorldPosition(hp);
+
+    if(A.weapon==='pan'){
+      /*
+       * 프라이팬 모델의 원점은 팬 바닥 중심이다.
+       * 손잡이가 +Z 방향으로 뻗어 있으므로,
+       * 팬 바닥을 손보다 앞쪽에 둬야 손잡이 끝이 손에 붙는다.
+       */
+      sm.position.set(
+        hp.x+nx*0.25,
+        Math.max(0.08,hp.y-0.02),
+        hp.z+nz*0.25
+      );
+
+      sm.rotation.set(
+        -0.25,
+        A.h+Math.PI,
+        0
+      );
+
+    }else{
+      sm.position.copy(hp);
+      sm.position.y=Math.max(
+        sm.position.y,
+        0.9
+      );
+
+      sm.rotation.set(
+        0,
+        A.h,
+        0
+      );
+    }
+
+    A.strike.from=sm.position.clone();
+
+
+
+
     if(A.weapon==='hand') sm.scale.setScalar(1.35);
     this.showWarn(A.strike.x,A.strike.z,W.r+0.03,0);
   }
@@ -2353,9 +2540,192 @@ clearTraps(){
     H.crouch=damp(H.crouch,W.crouch,10,dt); H.headPitch=0.7;
     if(!S.hit){
       this.showWarn(S.x,S.z,W.r+0.03,k);
-      const up=k<0.45?k/0.45:1, down=k<0.45?0:(k-0.45)/0.55; H.armR.sh.rotation.x=lerp(-0.3,-2.4,up)*(1-down)+lerp(-2.4,0.6,down)*down; H.armR.el.rotation.x=-0.4*(1-down);
-      if(k<0.45){ H.root.updateWorldMatrix(true,true); H.armR.hand.getWorldPosition(sm.position); S.from.copy(sm.position); sm.rotation.set(-0.6,A.h,0); }
-      else { const q=Math.pow((k-0.45)/0.55,1.5); sm.position.set(lerp(S.from.x,S.x,q),lerp(S.from.y,0.015,q),lerp(S.from.z,S.z,q)); sm.rotation.set(lerp(-0.6,0,q),A.weapon==='pan'?A.h+Math.PI:A.h,0); }
+     
+     
+           const up=
+        k<0.45
+          ? k/0.45
+          : 1;
+
+      const down=
+        k<0.45
+          ? 0
+          : (k-0.45)/0.55;
+
+      H.armR.sh.rotation.x=
+        lerp(-0.3,-2.4,up)*(1-down)+
+        lerp(-2.4,0.6,down)*down;
+
+      H.armR.el.rotation.x=
+        -0.4*(1-down);
+
+      // 현재 프레임의 실제 손 위치를 계속 가져온다.
+      H.root.updateWorldMatrix(true,true);
+
+      H.armR.hand.getWorldPosition(
+        this.tmp3
+      );
+
+      if(A.weapon==='pan'){
+        /*
+         * 팬 바닥 중심은 손보다 공격 방향 앞쪽에 둔다.
+         * 따라서 프라이팬 손잡이 끝이 계속 실제 손 쪽에 남는다.
+         */
+        const handX=
+          this.tmp3.x+
+          S.nx*(0.24+0.04*up);
+
+        const handY=Math.max(
+          0.05,
+          this.tmp3.y-
+          0.02+
+          0.08*up*(1-0.7*down)
+        );
+
+        const handZ=
+          this.tmp3.z+
+          S.nz*(0.24+0.04*up);
+
+        if(k<0.45){
+          // 들어 올리는 동안은 실제 손을 그대로 따라간다.
+          sm.position.set(
+            handX+
+              S.rx*
+              S.swingSide*
+              0.035*
+              up,
+
+            handY,
+
+            handZ+
+              S.rz*
+              S.swingSide*
+              0.035*
+              up
+          );
+
+          S.from.copy(
+            sm.position
+          );
+
+        }else{
+          const q=Math.pow(
+            (k-0.45)/0.55,
+            1.35
+          );
+
+          /*
+           * 내려치는 초반에는 손을 따라가고,
+           * 마지막 부분에서만 타격 지점으로 수렴한다.
+           */
+          let blend=clamp(
+            (q-0.48)/0.52,
+            0,
+            1
+          );
+
+          blend=
+            blend*
+            blend*
+            (3-2*blend);
+
+          const arc=Math.sin(
+            Math.PI*blend
+          );
+
+          sm.position.set(
+            lerp(
+              handX,
+              S.x,
+              blend
+            )+
+              S.rx*
+              S.swingSide*
+              0.10*
+              arc,
+
+            lerp(
+              handY,
+              0.015,
+              blend
+            )+
+              0.09*
+              arc,
+
+            lerp(
+              handZ,
+              S.z,
+              blend
+            )+
+              S.rz*
+              S.swingSide*
+              0.10*
+              arc
+          );
+        }
+
+        /*
+         * 들어 올릴 때는 세워지고,
+         * 내려치면서 팬 바닥이 다시 평평해진다.
+         */
+        const panTilt=
+          k<0.45
+            ? lerp(
+                -0.25,
+                -1.0,
+                up
+              )
+            : lerp(
+                -1.0,
+                0.04,
+                down
+              );
+
+        sm.rotation.set(
+          panTilt,
+          A.h+Math.PI,
+          S.swingSide*
+            0.24*
+            (1-down)
+        );
+
+      }else if(k<0.45){
+        // 다른 도구의 기존 동작은 그대로 유지
+        sm.position.copy(
+          this.tmp3
+        );
+
+        S.from.copy(
+          sm.position
+        );
+
+        sm.rotation.set(
+          -0.6,
+          A.h,
+          0
+        );
+
+      }else{
+        const q=Math.pow(
+          (k-0.45)/0.55,
+          1.5
+        );
+
+        sm.position.set(
+          lerp(S.from.x,S.x,q),
+          lerp(S.from.y,0.015,q),
+          lerp(S.from.z,S.z,q)
+        );
+
+        sm.rotation.set(
+          lerp(-0.6,0,q),
+          A.h,
+          0
+        );
+      }
+
+
+
       if(k>=1){ S.hit=true; this.hideWarn(); sm.position.y=0.005; const nearMe=this.phase==='play'&&Math.hypot(P.x-S.x,P.z-S.z)<W.r+0.03; const hidOk=!P.hidden||S.intoHole; this.G.shake(0.9);
         let hitNpc=false; for(const n of this.npcs){ if(n.hidden||n.state==='dead') continue; if(Math.hypot(n.x-S.x,n.z-S.z)<W.r+0.03){ this.killNpc(n,A.weapon); hitNpc=true; } }
         if(S.egg&&this.egg&&!this.ready&&Math.hypot(this.egg.x-S.x,this.egg.z-S.z)<W.r+0.06){ this.destroyEgg(); }
