@@ -1,0 +1,22 @@
+tion.x=Math.PI/2;g.add(ferrule);const handle=cyl(.075,.055,.36,wood,0,0,.83,18);handle.rotation.x=Math.PI/2;g.add(handle);return g;
+}
+function buildCutter(){
+  const g=new THREE.Group(),metal=matMetal(),yellow=matPlastic(0xd7a11b),dark=matDark();const blade=box(.065,.008,.30,metal,0,0,.15);blade.geometry.translate(0,0,-.15);g.add(blade);const h=box(.13,.06,.48,yellow,0,0,.54);g.add(h);g.add(box(.035,.065,.25,dark,.055,0,.51));for(let i=0;i<4;i++)g.add(box(.08,.006,.012,dark,0,.034,.41+i*.07));return g;
+}
+function buildLighter(){
+  const g=new THREE.Group(),metal=matMetal(),plastic=matPlastic(0x282a2d);const tube=cyl(.018,.018,.64,metal,0,0,.32,10);tube.rotation.x=Math.PI/2;g.add(tube);const neck=box(.06,.05,.08,metal,0,0,.68);g.add(neck);const handle=box(.18,.12,.38,plastic,0,0,.89);g.add(handle);g.add(box(.08,.035,.08,matPlastic(0xa62d22),0,.075,.73));const flame=new THREE.Mesh(new THREE.ConeGeometry(.035,.16,12),new THREE.MeshBasicMaterial({color:0xffa62f,transparent:true,opacity:.9,depthWrite:false}));flame.rotation.x=-Math.PI/2;flame.position.z=-.08;flame.visible=false;g.add(flame);g.userData.flame=flame;return g;
+}
+function buildPiezo(){
+  const g=new THREE.Group(),dark=matPlastic(0x303236),metal=matMetal(),red=matPlastic(0xa43427);g.add(box(.16,.11,.34,dark,0,0,.30));g.add(box(.09,.05,.10,red,0,.075,.38));for(const s of [-1,1]){const e=cyl(.006,.006,.28,metal,s*.045,0,.02,7);e.rotation.x=Math.PI/2;g.add(e)}g.userData.electrodes=[g.children.at(-2),g.children.at(-1)];return g;
+}
+function buildModel(tool){switch(tool){case'pin':return buildPin();case'tweezer':return buildTweezer();case'clipper':return buildClipper();case'awl':return buildAwl();case'cutter':return buildCutter();case'lighter':return buildLighter();case'piezo':return buildPiezo();default:return new THREE.Group()}}
+
+export class ToolController{
+  constructor(app,specimen){
+    this.app=app;this.scene=app.scene;this.camera=app.camera;this.workbench=app.workbench;this.audio=app.audio;this.fx=app.fx;this.specimen=specimen;
+    this.tool='pin';this.models={};for(const k of Object.keys(TOOL_LABELS)){const m=buildModel(k);m.visible=false;m.renderOrder=8;m.traverse(o=>{if(o.isMesh){o.material=o.material.clone();o.material.depthTest=true}});this.scene.add(m);this.models[k]=m}
+    this.activeModel=this.models.pin;this.activeModel.visible=true;this.hover=null;this.pointer={down:false,id:null,x:0,y:0};this.grab=null;this.hold=null;this.action=null;this.cutPath=[];this.cutPreview=null;this.lastHoverTime=0;
+    this.tmp=V3();this.tmp2=V3();this.tmpQ=new THREE.Quaternion();this.tipNormal=V3(0,1,0);
+  }
+  dispose(){for(const m of Object.values(this.models)){this.scene.remove(m);m.traverse(o=>{o.geometry?.dispose();o.material?.dispose?.()})}this.clearPreview();}
+  setSpecimen(s){this.specimen=s;this.
