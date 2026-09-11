@@ -272,6 +272,7 @@ class AudioFX{
   ensure(){
     if(!this.ctx){
       const C=window.AudioContext||window.webkitAudioContext; if(!C) return;
+      try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(err){}
       this.ctx=new C();
       this.master=this.ctx.createGain(); this.master.gain.value=0.85;
       this.comp=this.ctx.createDynamicsCompressor(); this.comp.threshold.value=-14; this.comp.ratio.value=5; this.comp.attack.value=0.002; this.comp.release.value=0.12;
@@ -280,7 +281,7 @@ class AudioFX{
       for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
       this.noiseBuf=buf;
     }
-    if(this.ctx.state==='suspended') this.ctx.resume();
+    if(this.ctx.state==='suspended') this.ctx.resume().catch(()=>{});
   }
   get t(){return this.ctx?this.ctx.currentTime:0;}
   env(g,t,att,dur,peak){ g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(Math.max(peak,0.0002),t+att); g.gain.exponentialRampToValueAtTime(0.0001,t+att+dur); }
@@ -445,6 +446,8 @@ class AudioFX{
   toxWarn(){ if(!this.ctx) return; this.tone({dur:0.18,gain:0.1,freq:210,freqEnd:150,type:'sawtooth'}); }
 }
 const SFX=new AudioFX();
+// 휴대폰 브라우저는 손가락을 '뗄 때'만 소리 재생을 허락한다. 누를 때만 깨우면 끝까지 무음이 된다.
+for(const ev of ['pointerdown','pointerup','touchend','click','keydown']) window.addEventListener(ev,()=>SFX.ensure(),{capture:true,passive:true});
 
 // ───────── 바닥 페인트 (장판 위 얼룩·시체·그을음·미끼) ─────────
 class FloorPaint{
@@ -3747,7 +3750,7 @@ G.resize();
 if(Q.get('r')==='2'){ G.savedWeapons=Q.get('w')?Q.get('w').split(','):LETHAL_ORDER.slice(); G.savedBaits=Q.get('b')?Q.get('b').split(','):['bone']; G.startRound2(); if(Q.get('gen')){ G.r2.gen=parseInt(Q.get('gen'),10); G.r2.startGen(); } }
 else if(Q.get('r')==='rank'){ G.savedWeapons=['hand','slipper']; G.showRank(2,false); }
 else G.startRound1();
-window.__g=G; G.HOLES=HOLES;
+window.__g=G; window.__THREE=THREE; window.__SFX=SFX; G.HOLES=HOLES;
 
 
 G.advance=function(T,step=1/60){
@@ -3771,7 +3774,7 @@ G.advance=function(T,step=1/60){
 
 // 루프
 let last=now(); const _off=new THREE.Vector3();
-function frame(){ requestAnimationFrame(frame); const t=now(); let dt=Math.min(0.05,t-last); last=t; G.time+=dt;
+function frame(){ requestAnimationFrame(frame); if(G.sleep){ last=now(); return; } const t=now(); let dt=Math.min(0.05,t-last); last=t; G.time+=dt;
   if(G.state==='rank') G.rankT+=dt;
   
   
