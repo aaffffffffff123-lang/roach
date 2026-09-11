@@ -51,7 +51,8 @@ button{font:inherit;border:0;color:inherit;-webkit-tap-highlight-color:transpare
   <div id="side">
     <button class="action" id="unpinBtn">핀 전부 빼기</button>
     <button class="action" id="centerBtn">시점 원위치</button>
-    <button class="action dark" id="resetBtn">새 실험체</button>
+    <button class="action" id="flipBtn">뒤집기</button>
+    <button class="action dark" id="resetBtn">새 바퀴벌레</button>
   </div>
   <div id="hint"></div>
   <div id="partLabel"></div>
@@ -62,6 +63,7 @@ button{font:inherit;border:0;color:inherit;-webkit-tap-highlight-color:transpare
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
@@ -238,6 +240,14 @@ class AudioFX{
   scratch(k=.5){if(!this.ready())return;const n=1+Math.round(k*2.5);for(let i=0;i<n;i++)this.noise({delay:i*rand(.012,.03),dur:rand(.006,.016),gain:.035+k*.09,freq:rand(3000,7000),q:2.4,pan:rand(-.6,.6)})}
   // 부르르 — 겉날개를 떠는 짧은 날갯짓
   flutter(k=.5){if(!this.ready())return;const d=rand(.08,.16);this.noise({dur:d,gain:.05+k*.06,freq:170,q:3,pan:rand(-.3,.3),attack:.01});this.tone({dur:d,gain:.025+k*.03,freq:rand(95,130),type:'sawtooth'})}
+  // 휙 — 들어 올려 굴린다
+  flipWhoosh(){if(!this.ready())return;this.noise({dur:.42,gain:.16,freq:320,end:2300,q:.7,attack:.08});this.crackle({dur:.3,n:6,gain:.07,fmin:3000,fmax:6500})}
+  // 탁 — 등껍질(또는 다리)이 판에 떨어진다
+  shellLand(back){if(!this.ready())return;this.snap({size:back?.75:.5,gain:.45});this.thump({gain:back?.42:.3});this.crackle({dur:.1,n:8,gain:.14,fmin:1800,fmax:5600});this.scratch(.8)}
+  // 스윽 — 시체를 판 가장자리로 치운다
+  toss(){if(!this.ready())return;this.noise({dur:.34,gain:.14,freq:420,end:1900,q:.8,attack:.06});this.crackle({dur:.18,n:5,gain:.06,fmin:2500,fmax:5500})}
+  // 털썩 — 뒤집힌 시체가 판에 떨어진다
+  corpseLand(){if(!this.ready())return;this.thump({gain:.5});this.crackle({dur:.14,n:12,gain:.2,fmin:1400,fmax:5200});this.squish({delay:.02,size:.7,gain:.3});this.scratch(.6)}
   // 마지막 경련
   expire(){if(!this.ready())return;this.crackle({dur:.5,n:14,gain:.08,fmin:2600,fmax:6500});this.squish({delay:.15,size:.4,gain:.12})}
   close(){this.ctx?.close?.();this.ctx=null;this.master=null;this.noiseBuf=null}
@@ -302,7 +312,8 @@ for(const [x,z,w,d] of [[0,-3.77,8.34,.08],[0,3.77,8.34,.08],[-4.13,0,.08,7.46],
 const mat={
   body:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x4a2412,roughness:.52,metalness:0})),
   plate:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x6a3d1f,roughness:.5,metalness:0})),
-  head:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x6a3015,roughness:.42,metalness:0})),
+  head:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.42,metalness:0})),
+  remains:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.5,metalness:0})),
   pronotum:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.36,metalness:0})),
   abdomen:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.46,metalness:0})),
   antenna:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x4a2413,roughness:.5})),
@@ -451,9 +462,13 @@ function abdomenGeometry(W,HD,HV,L){
 }
 // 머리: 정수리가 넓고 입 쪽으로 좁아지는 역삼각형에 가까운 모양
 function headGeometry(){
-  const g=new THREE.SphereGeometry(1,IS_SMALL?20:26,IS_SMALL?14:18),p=g.attributes.position;
-  for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i);p.setXYZ(i,x*.3*(.8+.22*y),y*.25,z*.21*(.92+.08*y))}
-  g.computeVertexNormals();return g;
+  const g=new THREE.SphereGeometry(1,IS_SMALL?36:48,IS_SMALL?28:36),p=g.attributes.position,col=[],c=new THREE.Color();
+  const base=new THREE.Color(0x6a3015),top=new THREE.Color(0x47190a),low=new THREE.Color(0x7d3b19);
+  for(let i=0;i<p.count;i++){
+    const x=p.getX(i),y=p.getY(i),z=p.getZ(i);p.setXYZ(i,x*.3*(.8+.22*y),y*.25,z*.21*(.92+.08*y));
+    c.copy(base).lerp(top,smoothstep(.3,1,y)*.6).lerp(low,smoothstep(-.2,-1,y)*.4);col.push(c.r,c.g,c.b);
+  }
+  g.setAttribute('color',colorArray(col));g.computeVertexNormals();return g;
 }
 // 겹눈: 머리 옆면에 붙은 콩팥 모양. notch 쪽(앞·안쪽)이 더듬이 뿌리를 감싸며 오목하다.
 function eyeGeometry(notch){
@@ -523,7 +538,9 @@ class Specimen{
     this.parts=new Map();this.loose=[];this.pins=[];this.fluid=[];this.wounds=[];this.fragments=0;this.life='alive';this.central=1;this.respiration=1;this.locomotion=1;
     this.shockImpulse=0;this.heatImpulse=0;this.recentPain=0;this.painImpulse=0;this.agony=0;this.agonyTarget=0;this.trauma=0;this.reaction=0;this.reactionTarget=0;this.crawlPhase=0;this.twistPhase=rand(TAU);this.intent=rand(TAU);this.intentT=0;
     this.totalCuts=0;this.totalDamage=0;this.fluidVolume=0;this.baseRootY=.43;this.floorOffset=0;this.floorTarget=0;this.floorT=0;this.systemT=0;this.materialT=0;
-    this.root=new THREE.Group();specimenGroup.add(this.root);this.root.position.set(0,this.baseRootY,.32);this.build();
+    this.root=new THREE.Group();specimenGroup.add(this.root);this.root.position.set(0,this.baseRootY,.32);
+    // 뒤집기 전용 축: 몸 전체를 긴 축 기준으로 굴린다 (root는 이동·방향·몸부림을 맡는다)
+    this.flipNode=new THREE.Group();this.root.add(this.flipNode);this.flip={on:false,t:1,from:0,to:0};this.build();
   }
   addPart(id,node,meshes,opts={}){
     const p=new BodyPart(id,node,meshes,opts);this.parts.set(id,p);
@@ -598,7 +615,7 @@ class Specimen{
   }
   build(){
     // ── 몸통 뼈대: 가운데가슴(날개 밑), 뒷가슴, 앞가슴 등판(방패), 머리(등판 밑으로 숙임) ──
-    const mid=this.ellipsoid('thorax_mid',this.root,v3(0,0,0),v3(.58,.16,.36),mat.body,{label:'중가슴',role:'core',fatal:.36,jointStrength:1});
+    const mid=this.ellipsoid('thorax_mid',this.flipNode,v3(0,0,0),v3(.58,.16,.36),mat.body,{label:'중가슴',role:'core',fatal:.36,jointStrength:1});
     const rear=this.ellipsoid('thorax_rear',mid.node,v3(0,-.01,-.42),v3(.62,.16,.34),mat.body,{label:'뒷가슴',role:'core',parentId:'thorax_mid',fatal:.24,jointStrength:.88,jointLocal:v3(0,.02,-.2)});
     const pro=this.customPart('pronotum',mid.node,v3(0,.2,.44),sharedGeometry('pronotum',pronotumGeometry),mat.pronotum,{label:'앞가슴 등판',role:'core',parentId:'thorax_mid',fatal:.38,jointStrength:.93,jointLocal:v3(0,.12,.12)});
     const head=this.customPart('head_core',pro.node,v3(0,-.23,.6),sharedGeometry('head',headGeometry),mat.head,{label:'머리',role:'core',parentId:'pronotum',fatal:.46,jointStrength:.86,jointLocal:v3(0,-.17,.36),meshRot:{x:.42}});
@@ -608,8 +625,7 @@ class Specimen{
       // 겹눈: 더듬이 뿌리를 감싸는 콩팥 모양. 뽑으면 그 자리에 연한 속살이 드러난다.
       const eyeGeo=sharedGeometry(`eye:${s}`,()=>eyeGeometry(s));
       const eyeRot={x:-.3,y:s>0?-.4:Math.PI+.4,z:0},eyePos=v3(s*.232,.05,.06);
-      const wound=new THREE.Mesh(eyeGeo,mat.eyeWound);wound.position.copy(eyePos);wound.rotation.set(eyeRot.x,eyeRot.y,eyeRot.z);wound.scale.set(.7,.92,.92);wound.translateX(-.012);wound.visible=false;head.node.add(wound);
-      const eye=this.customPart(`eye_${side}`,head.node,eyePos,eyeGeo,mat.eye,{rot:eyeRot,label:`${SIDE_NAME[side]} 겹눈`,role:'eye',parentId:'head_core',small:true,jointStrength:.34,socket:wound});eye.socket=wound;
+      const eye=this.customPart(`eye_${side}`,head.node,eyePos,eyeGeo,mat.eye,{rot:eyeRot,label:`${SIDE_NAME[side]} 겹눈`,role:'eye',parentId:'head_core',small:true,jointStrength:.34});
       // 큰턱: 입이 아래를 향한다
       const mandSock=this.socket(head.node,v3(s*.07,-.2,.1),v3(.06,.04,.06));
       this.chain(`mandible_${side}`,head.node,'head_core',v3(s*.085,-.19,.1),[v3(-s*.35,-.78,.45)],[.15],[[.065,.022]],mat.dark,()=>({id:`mandible_${side}`,label:`${SIDE_NAME[side]} 큰턱`,role:'jaw',small:true,jointStrength:.48,socket:mandSock,midCut:true}))[0].socket=mandSock;
@@ -738,6 +754,33 @@ Specimen.prototype.attachScar=function(targetNode,worldPoint,worldNormal,size=.0
   const flapN=opts.ragged===false?(IS_SMALL?2:3):(IS_SMALL?3:6);for(let i=0;i<flapN;i++){const a=rand(TAU),w=size*rand(.12,.25),h=size*rand(.22,.48);const sh=new THREE.Shape();sh.moveTo(-w*.5,0);sh.lineTo(w*.5,0);sh.lineTo(rand(-w*.15,w*.15),h);sh.closePath();const flap=new THREE.Mesh(new THREE.ShapeGeometry(sh),cloneWorkingMaterial(mat.tear));flap.position.set(Math.cos(a)*size*.62,Math.sin(a)*size*.62,.008);flap.rotation.z=a-Math.PI/2;flap.rotation.x=rand(-.45,.45);group.add(flap)}
   return group
 };
+// 눈을 뽑으면 머리 표면을 실제로 콩팥 모양으로 움푹 파낸다. 가장자리는 찢긴 껍질처럼 살짝 들리고 어둡게, 바닥은 젖은 속살 색.
+Specimen.prototype.carveEyeSocket=function(eye){
+  const head=this.parts.get('head_core'),mesh=head?.meshes?.[0];if(!mesh)return null;
+  if(mesh.geometry.userData.shared){const g=mesh.geometry.clone();g.userData={};mesh.geometry=g}
+  const g=mesh.geometry,pos=g.attributes.position,col=g.attributes.color;mesh.updateMatrix();
+  const eyeM=new THREE.Matrix4().compose(eye.basePos,eye.baseQuat,new THREE.Vector3(1,1,1));
+  const toEye=eyeM.clone().invert().multiply(mesh.matrix),back=mesh.matrix.clone().invert().multiply(eyeM);
+  const v=v3(),c=new THREE.Color(),cRim=new THREE.Color(0x1c0904),cWall=new THREE.Color(0x4a1d0c),cFlesh=new THREE.Color(0x8e5a33),cDeep=new THREE.Color(0xcdb07a),cClot=new THREE.Color(0x3a1a0c);
+  const D=.08,A=.235*.96,B=.13*.96,notch=eye.id.endsWith('_R')?1:-1;let deep=null,best=0;
+  for(let i=0;i<pos.count;i++){
+    v.fromBufferAttribute(pos,i).applyMatrix4(toEye);if(v.x<-.14)continue;
+    const yn=v.y/A,zn=(v.z+notch*.035*Math.exp(-((yn-.1)**2)/.12)*Math.max(0,v.z*notch/B))/B,r2=yn*yn+zn*zn;
+    if(r2>=1.4)continue;
+    const h=Math.abs(Math.sin(i*12.9898)*43758.5453)%1;
+    if(col)c.fromBufferAttribute(col,i);
+    if(r2<1){
+      const f=Math.pow(1-r2,.55);v.x-=D*f;
+      c.copy(cWall).lerp(cFlesh,smoothstep(.1,.55,f)).lerp(cDeep,smoothstep(.55,.95,f)*(.55+h*.45));if(h>.82)c.lerp(cClot,.5);
+      if(f>best){best=f;deep=v.clone()}
+    }else{
+      const k=(r2-1)/.4;v.x+=.009*Math.sin(k*Math.PI)*(.6+h*.8);c.lerp(cRim,(1-k)*.85);
+    }
+    v.applyMatrix4(back);pos.setXYZ(i,v.x,v.y,v.z);if(col)col.setXYZ(i,c.r,c.g,c.b);
+  }
+  pos.needsUpdate=true;if(col)col.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
+  if(!deep)return null;mesh.updateMatrixWorld(true);return deep.applyMatrix4(eyeM).applyMatrix4(mesh.parent.matrixWorld);
+};
 Specimen.prototype.addFluid=function(point,size=.08,count=1,dark=false){
   const n=Math.max(1,Math.floor(count));
   for(let i=0;i<n;i++){const s=clamp(size*rand(1.18,1.72),.014,.24);fluidField.add(point,s,dark);this.fluidVolume+=s*s}
@@ -776,9 +819,9 @@ Specimen.prototype.detachPart=function(part,worldPoint=null,force=.6,reason='pul
   const oldParent=part.node.parent,childCenter=part.worldPos(v3()),parentCenter=oldParent.getWorldPosition(v3());let axis=childCenter.clone().sub(parentCenter);if(axis.lengthSq()<1e-5)axis.set(0,1,0);axis.normalize();
   oldParent.updateWorldMatrix(true,false);
   const joint=part.jointLocal?oldParent.localToWorld(part.jointLocal.clone()):(part.segmentMesh||part.role==='eye')?oldParent.localToWorld(part.basePos.clone()):parentCenter.clone().lerp(childCenter,.6);
-  const pt=joint.clone(),eye=part.role==='eye';
+  const eye=part.role==='eye',pit=eye?this.carveEyeSocket(part):null,pt=pit||joint.clone();
   const ragged=reason==='pull';const scarSize=eye?.075:clamp((part.small?.06:.095)+force*.035,.055,.16);
-  this.attachScar(oldParent,pt,axis,scarSize,{moisture:ragged?.86:.7,ragged,pale:eye});if(part.socket)part.socket.visible=true;
+  if(!eye){this.attachScar(oldParent,pt,axis,scarSize,{moisture:ragged?.86:.7,ragged});if(part.socket)part.socket.visible=true}
   part.parentId=null;looseGroup.attach(part.node);this.markSubtreeDetached(part);this.refreshGraph();this.attachScar(part.node,part.segmentMesh?childCenter:pt,axis.clone().negate(),scarSize*.88,{moisture:ragged?.8:.64,ragged,pale:eye});
   const rec={part,node:part.node,vel:v3(rand(-.3,.3),rand(.3,.8),rand(-.3,.3)).multiplyScalar(force),rot:v3(rand(-5,5),rand(-5,5),rand(-5,5)),floor:boardTopY+.006,dragging:false};this.loose.push(rec);this.fragments++;
   part.state.integrity=Math.max(0,part.state.integrity-force*.22);part.state.severed=true;part.state.strain=0;
@@ -847,6 +890,7 @@ function objectWorldMinY(node){
 Specimen.prototype.resolveConnectedFloor=function(dt,force=false){
   // 바닥 보정을 프레임마다 즉시 켰다 끄면 몸 전체가 세로로 덜덜거린다.
   // 목표 보정량만 주기적으로 측정하고 실제 높이는 부드럽게 따라가게 한다.
+  if(this.flip&&this.flip.t<1&&!force)return;
   const before=this.floorOffset;
   if(force)this.floorOffset=this.floorTarget;
   else this.floorOffset=damp(this.floorOffset,this.floorTarget,18,dt);
@@ -860,7 +904,7 @@ Specimen.prototype.resolveConnectedFloor=function(dt,force=false){
     for(const mesh of p.meshes)if(mesh.visible&&objectInScene(mesh))min=Math.min(min,meshWorldMinY(mesh,TMP.localBox));
   }
   const floor=boardTopY+.012;
-  if(Number.isFinite(min))this.floorTarget=Math.max(0,this.floorOffset+floor-min+.001);
+  if(Number.isFinite(min))this.floorTarget=Math.max(this.flip?.on?-1.5:0,this.floorOffset+floor-min+.001);
   if(force){const delta=this.floorTarget-this.floorOffset;this.floorOffset=this.floorTarget;this.root.position.y+=delta;this.root.updateMatrixWorld(true)}
 };
 function resolveLooseFloor(rec){
@@ -868,24 +912,40 @@ function resolveLooseFloor(rec){
   if(rec.part?.flatOutline&&!rec.dragging){const r=rec.node.rotation,flat=a=>{const n=Math.round(a/Math.PI)*Math.PI;return n+(a-n)*.8};r.x=flat(r.x);r.z=flat(r.z);rec.rot.x*=.5;rec.rot.z*=.5}
   return true;
 }
+Specimen.prototype.toggleFlip=function(){
+  const F=this.flip;if(F.t<1)return false;
+  if(this.pins.length){toast('고정 핀부터 뺀다');return false}
+  cancelAction();F.on=!F.on;F.from=this.flipNode.rotation.z;F.to=F.on?(Math.random()<.5?Math.PI:-Math.PI):0;F.t=0;SFX.flipWhoosh();this.stimulate(.18);return true;
+};
+// 휙 들어 올려 공중에서 굴린 뒤 떨어뜨린다 (펼친 다리·더듬이가 판을 뚫지 않을 만큼 높이 띄운다)
+Specimen.prototype.updateFlip=function(dt){
+  const F=this.flip;if(F.t>=1)return;
+  F.t=Math.min(1,F.t+dt/.72);const k=F.t,e=smoothstep(.12,.88,k),dir=F.to>=F.from?1:-1;
+  this.flipNode.rotation.z=lerp(F.from,F.to,e);this.flipNode.rotation.y=Math.sin(k*Math.PI)*.35*dir;this.flipNode.position.y=Math.sin(k*Math.PI)*2.9;
+  if(F.t>=1){this.flipNode.rotation.z=F.to;this.flipNode.rotation.y=0;this.flipNode.position.y=0;this.floorT=0;this.resolveConnectedFloor(0,true);SFX.shellLand(F.on);this.stimulate(.3);this.addTrauma(.14)}
+};
 Specimen.prototype.update=function(dt){
   this.systemT-=dt;if(this.systemT<=0){this.systemT=.1;this.computeSystems()}
   this.updateAgony(dt);this.updateSeep(dt);this.materialT+=dt;if(this.materialT>=1/30){this.updateMaterials(this.materialT);this.materialT=0}
   const live=this.life==='still'?.05:this.life==='critical'?.58:1,ag=this.agony,imp=this.painImpulse,reaction=this.reaction;
-  const response=clamp(reaction*(.46+ag*.92+imp*.34+this.shockImpulse*.32+this.heatImpulse*.16),0,1.65);
-  const tempo=.32+response*(2.4+ag*6.4+this.shockImpulse*7.5+imp*4.2);this.crawlPhase+=dt*tempo;this.twistPhase+=dt*(.25+response*(1.2+ag*3.2+imp*2.8));this.shockImpulse=Math.max(0,this.shockImpulse-dt*2.8);this.heatImpulse=Math.max(0,this.heatImpulse-dt*1.2);
+  this.updateFlip(dt);
+  // 배를 드러내고 누우면 살아 있는 동안 다리를 허공에 미친 듯이 휘젓는다
+  const flipK=this.flip.on&&this.flip.t>=1&&this.life!=='still'?1:0;
+  const response=Math.max(clamp(reaction*(.46+ag*.92+imp*.34+this.shockImpulse*.32+this.heatImpulse*.16),0,1.65),flipK*(this.life==='critical'?.45:.85));
+  const tempo=.32+response*(2.4+ag*6.4+this.shockImpulse*7.5+imp*4.2)+flipK*4.5;this.crawlPhase+=dt*tempo;this.twistPhase+=dt*(.25+response*(1.2+ag*3.2+imp*2.8));this.shockImpulse=Math.max(0,this.shockImpulse-dt*2.8);this.heatImpulse=Math.max(0,this.heatImpulse-dt*1.2);
   const pinned=this.pins.length>0,pinLock=clamp(this.pins.length*.4,0,.94);
-  if(!pinned&&this.life!=='still'&&response>.012){
+  if(flipK&&!pinned)this.root.rotation.y+=Math.sin(this.twistPhase*.55)*dt*.55*response*this.locomotion;
+  if(!pinned&&this.life!=='still'&&response>.012&&!this.flip.on&&this.flip.t>=1){
     this.intentT-=dt;if(this.intentT<=0){this.intentT=rand(1.1,2.8)/(1+ag*.65);this.intent+=rand(-.75,.75)*(1+ag*.5)}
     const speed=(.005+.028*this.locomotion+ag*.024)*live*response*(1+this.heatImpulse*.25),nx=this.root.position.x+Math.sin(this.intent)*speed*dt,nz=this.root.position.z+Math.cos(this.intent)*speed*dt;
     if(Math.abs(nx)>.42){this.intent=-this.intent;this.intentT=.2}else this.root.position.x=nx;if(nz<.18||nz>.46){this.intent=Math.PI-this.intent;this.intentT=.2}else this.root.position.z=nz;
     const d=normalizeAngle(this.intent-this.root.rotation.y);this.root.rotation.y+=d*dt*(.14+ag*.32)*response;
   }
-  const restraint=1-pinLock*.9,bodyTwist=response*(.012+ag*.05+imp*.025)*live*Math.max(.08,restraint);this.root.rotation.x=Math.sin(this.twistPhase*.82)*bodyTwist*.15;this.root.rotation.z=Math.sin(this.twistPhase*1.08+1.1)*bodyTwist*.22;this.root.position.y=this.baseRootY+this.floorOffset+Math.abs(Math.sin(this.twistPhase*1.7))*imp*reaction*.0015;
+  const restraint=1-pinLock*.9,bodyTwist=(response*(.012+ag*.05+imp*.025)+flipK*.1)*live*Math.max(.08,restraint);this.root.rotation.x=Math.sin(this.twistPhase*.82)*bodyTwist*.15;this.root.rotation.z=Math.sin(this.twistPhase*1.08+1.1)*bodyTwist*.22;this.root.position.y=this.baseRootY+this.floorOffset+Math.abs(Math.sin(this.twistPhase*1.7))*imp*reaction*.0015;
   const frantic=1+response*(1.45+ag*1.55+this.shockImpulse*1.7+imp*.85),pinAmp=Math.max(.05,1-pinLock*.94);
   for(const L of this.legAnim){
     const [coxa,troch,fem,tib,t1,t2,t3]=L.parts,legPinned=L.parts.some(p=>p.state.pinned);if(legPinned){const lock=L.pinRot||L.baseRot;for(let j=0;j<L.parts.length;j++){const p=L.parts[j];if(!p.state.detached){p.node.rotation.x=damp(p.node.rotation.x,lock[j].x,14,dt);p.node.rotation.y=damp(p.node.rotation.y,lock[j].y,14,dt);p.node.rotation.z=damp(p.node.rotation.z,lock[j].z,14,dt)}}continue}
-    const phase=this.crawlPhase*frantic+L.phase,tri=(L.pair==='middle'?-1:1)*(L.side>0?1:-1),amp=response*(.028+ag*.18+imp*.055)*this.locomotion*live*pinAmp;
+    const phase=this.crawlPhase*frantic+L.phase,tri=(L.pair==='middle'?-1:1)*(L.side>0?1:-1),amp=(response*(.028+ag*.18+imp*.055)+flipK*(.3+ag*.25))*this.locomotion*live*pinAmp;
     if(coxa&&!coxa.state.detached&&!coxa.state.pinned){coxa.node.rotation.y=L.baseRot[0].y+Math.sin(phase)*amp*tri;coxa.node.rotation.z=L.baseRot[0].z+Math.max(0,Math.sin(phase))*amp*.42}
     if(troch&&!troch.state.detached&&!troch.state.pinned)troch.node.rotation.z=L.baseRot[1].z+Math.cos(phase*1.08)*amp*.34;
     if(fem&&!fem.state.detached&&!fem.state.pinned){fem.node.rotation.y=L.baseRot[2].y-Math.sin(phase+.25)*amp*.78;fem.node.rotation.z=L.baseRot[2].z+Math.max(0,-Math.sin(phase))*amp*.56}
@@ -902,10 +962,10 @@ Specimen.prototype.update=function(dt){
   const rear=this.parts.get('thorax_rear'),pro=this.parts.get('pronotum');if(rear&&!rear.state.detached){rear.node.rotation.y=rear.baseEuler.y+Math.sin(this.twistPhase*.86)*response*ag*.04*live;rear.node.rotation.z=rear.baseEuler.z+Math.cos(this.twistPhase*1.13)*response*(ag*.028+imp*.02)*live}if(pro&&!pro.state.detached)pro.node.rotation.z=pro.baseEuler.z-Math.sin(this.twistPhase*.94)*response*(ag*.018+imp*.016)*live;
   // 버둥댈수록 다리가 판을 긁고, 심하면 겉날개를 부르르 떤다
   if(this.life!=='still'&&response>.08){
-    this.scratchT=(this.scratchT??0)-dt*(response*(1+ag*1.6+imp*2))*this.locomotion;
+    this.scratchT=(this.scratchT??0)-dt*(response*(1+ag*1.6+imp*2))*this.locomotion*(this.flip.on?.35:1);
     if(this.scratchT<=0){this.scratchT=rand(.12,.34);SFX.scratch(clamp(response*.7+ag*.3))}
     const wingOn=['forewing_L','forewing_R'].some(id=>{const w=this.parts.get(id);return w&&!w.state.detached&&!w.state.pinned});
-    if(wingOn&&ag>.75){this.flutterT=(this.flutterT??rand(2,5))-dt*ag;if(this.flutterT<=0){this.flutterT=rand(1.6,4.5);SFX.flutter(clamp(ag-.5))}}
+    if(wingOn&&ag>.75&&!this.flip.on){this.flutterT=(this.flutterT??rand(2,5))-dt*ag;if(this.flutterT<=0){this.flutterT=rand(1.6,4.5);SFX.flutter(clamp(ag-.5))}}
   }
   this.resolvePinConstraints(dt);this.resolveConnectedFloor(dt);
   for(const rec of this.loose){
@@ -1097,8 +1157,60 @@ function updateStats(force=false){
 function prepBases(target=specimen){for(const p of target.parts.values()){p.baseEuler=p.node.rotation.clone();p.meshBaseScales=p.meshes.map(m=>m.scale.clone());p.meshBasePos=p.meshes.map(m=>m.position.clone())}}
 function settleBaseHeight(target=specimen){target.resolveConnectedFloor(0,true);target.baseRootY=target.root.position.y;target.floorOffset=0;target.floorTarget=0}
 function firstEnabledTool(){return ['tweezer','pin','camera'].find(toolEnabled)||'camera'}
+// ───────── 잔해: 새 바퀴벌레로 갈아도 앞의 시체·조각·진물은 판에 남는다 ─────────
+// 시체 하나를 통째로 한 덩어리 도형으로 굳혀서(그리기 1번) 남긴다. 최대 개수를 넘으면 가장 오래된 것부터 치운다.
+const REMAIN_SLOTS=[[-2.95,-1.8],[2.95,-1.8],[-2.95,1.8],[2.95,1.8]],REMAINS_CAP=REMAIN_SLOTS.length;
+const remains=[];let remainSlot=0;
+function bakeObjects(roots){
+  const geos=[],white=new THREE.Color(1,1,1),m4=new THREE.Matrix4();
+  const add=(src,matrix,material)=>{
+    const g=src.index?src.toNonIndexed():src.clone();
+    for(const k of Object.keys(g.attributes))if(!['position','normal','color'].includes(k))g.deleteAttribute(k);
+    g.morphAttributes={};if(!g.attributes.normal)g.computeVertexNormals();
+    const n=g.attributes.position.count,sc=g.attributes.color,base=material.color||white,arr=new Float32Array(n*3);
+    for(let i=0;i<n;i++){arr[i*3]=(sc?sc.getX(i):1)*base.r;arr[i*3+1]=(sc?sc.getY(i):1)*base.g;arr[i*3+2]=(sc?sc.getZ(i):1)*base.b}
+    g.setAttribute('color',new THREE.BufferAttribute(arr,3));g.applyMatrix4(matrix);geos.push(g);
+  };
+  for(const root of roots){
+    if(!root||!objectInScene(root))continue;root.updateMatrixWorld(true);
+    root.traverseVisible(o=>{
+      if(!o.isMesh||o.userData.pickProxy||o.userData.outline)return;const m=Array.isArray(o.material)?o.material[0]:o.material;if(!m||!m.visible||(m.transparent&&m.opacity<.6))return;
+      if(o.isInstancedMesh){for(let i=0;i<o.count;i++){o.getMatrixAt(i,m4);m4.premultiply(o.matrixWorld);add(o.geometry,m4,m)}}else add(o.geometry,o.matrixWorld,m);
+    });
+  }
+  if(!geos.length)return null;const merged=mergeGeometries(geos,false);for(const g of geos)g.dispose();if(!merged)return null;
+  merged.computeBoundingBox();const center=merged.boundingBox.getCenter(v3());merged.translate(-center.x,-center.y,-center.z);merged.computeBoundingBox();merged.computeBoundingSphere();
+  const mesh=new THREE.Mesh(merged,mat.remains);mesh.position.copy(center);mesh.castShadow=true;mesh.receiveShadow=true;mesh.userData.remains=true;scene.add(mesh);return mesh;
+}
+function specimenUsed(sp){return sp.fragments>0||sp.pins.length>0||sp.totalDamage>.02||sp.trauma>.08}
+function discardSpecimen(sp,keep){
+  cancelAction();clearPartOutline();hidePartLabel();
+  let body=null,debris=null;
+  if(keep){body=bakeObjects([sp.root,...sp.pins.map(r=>r.group)]);debris=bakeObjects(sp.loose.map(r=>r.node))}
+  for(const rec of sp.pins)disposeObject3D(rec.group);pinHeads.length=0;
+  disposeObject3D(sp.root);for(const rec of sp.loose)if(rec.node)disposeObject3D(rec.node);
+  sp.parts.clear();sp.loose.length=0;sp.pins.length=0;sp.wounds.length=0;interactiveMeshes.length=0;
+  if(!body&&!debris)return;
+  if(remains.length>=REMAINS_CAP){const old=remains.shift();disposeObject3D(old.body);disposeObject3D(old.debris)}
+  const rec={body,debris,t:body?0:1,landed:!body};
+  if(body){
+    // 뒤집어서(다리가 하늘로) 판 가장자리로 던져 둔다
+    const [sx,sz]=REMAIN_SLOTS[remainSlot++%REMAIN_SLOTS.length],yaw=(Math.random()<.5?0:Math.PI)+rand(-.35,.35);
+    rec.from=body.position.clone();rec.fromQ=body.quaternion.clone();rec.toQ=new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(-.08,.08),yaw,(sp.flip?.on?0:Math.PI)+rand(-.2,.2),'YXZ'));
+    const p=body.geometry.attributes.position,q=v3();let minY=Infinity;for(let i=0;i<p.count;i+=3){q.fromBufferAttribute(p,i).applyQuaternion(rec.toQ);if(q.y<minY)minY=q.y}
+    rec.to=v3(sx+rand(-.2,.2),boardTopY-minY+.003,sz+rand(-.25,.25));SFX.toss();
+  }
+  remains.push(rec);
+}
+function updateRemains(dt){
+  for(const r of remains){
+    if(r.landed||!r.body)continue;r.t=Math.min(1,r.t+dt/.6);const k=r.t,e=k*k*(3-2*k);
+    r.body.position.lerpVectors(r.from,r.to,e);r.body.position.y+=Math.sin(k*Math.PI)*1.1;r.body.quaternion.slerpQuaternions(r.fromQ,r.toQ,e);
+    if(r.t>=1){r.landed=true;SFX.corpseLand();const c=r.body.position;for(let i=0;i<3;i++)fluidField.add(v3(c.x+rand(-.5,.5),0,c.z+rand(-.8,.8)),rand(.05,.09),1,Math.random()<.35)}
+  }
+}
 function resetSpecimen({silent=false}={}){
-  cancelAction();specimen.clear();pinHeads.length=0;partSerial=0;specimen=new Specimen();prepBases(specimen);specimen.computeSystems();settleBaseHeight(specimen);lastStatsKey='';updateStats(true);setTool(firstEnabledTool());cameraHome();if(!silent)toast('새 실험체로 바꿨다');return specimen;
+  const old=specimen;discardSpecimen(old,specimenUsed(old));partSerial=0;specimen=new Specimen();prepBases(specimen);specimen.computeSystems();settleBaseHeight(specimen);lastStatsKey='';updateStats(true);setTool(firstEnabledTool());cameraHome();syncFlipLabel();if(!silent)toast('새 바퀴벌레로 교체했다');return specimen;
 }
 function cameraHome(){camera.position.set(0,6.9,7.1);controls.target.set(0,.35,-.1);controls.update()}
 function applyOptions(next={}){
@@ -1114,11 +1226,14 @@ for(const b of $$('.tool')){const fn=e=>{e.stopPropagation();e.preventDefault();
 function onUnpin(e){e.stopPropagation();e.preventDefault();removeAllPins()}
 function onCenter(e){e.stopPropagation();e.preventDefault();cameraHome()}
 function onReset(e){e.stopPropagation();e.preventDefault();SFX.ensure();resetSpecimen()}
+function syncFlipLabel(){$('#flipBtn').textContent=specimen.flip.on?'바로 놓기':'뒤집기'}
+function flipSpecimen(){SFX.ensure();if(specimen.toggleFlip())syncFlipLabel();return api}
+function onFlip(e){e.stopPropagation();e.preventDefault();flipSpecimen()}
 function onStart(e){e.stopPropagation();e.preventDefault();SFX.ensure();started=true;appPaused=false;UI.intro.classList.add('hide');showHint(TOOL_HINT[tool],5)}
-function onKeyDown(e){const map={Digit1:'tweezer',Digit2:'pin',Digit0:'camera'};if(map[e.code]&&toolEnabled(map[e.code])){e.preventDefault();setTool(map[e.code])}if(e.code==='Escape'){e.preventDefault();if(EMBEDDED)parent.postMessage({type:'specimen-lab-close',result:resultSnapshot()},location.origin);else cameraHome()}}
+function onKeyDown(e){if(e.code==='KeyF'){e.preventDefault();flipSpecimen();return}const map={Digit1:'tweezer',Digit2:'pin',Digit0:'camera'};if(map[e.code]&&toolEnabled(map[e.code])){e.preventDefault();setTool(map[e.code])}if(e.code==='Escape'){e.preventDefault();if(EMBEDDED)parent.postMessage({type:'specimen-lab-close',result:resultSnapshot()},location.origin);else cameraHome()}}
 function onBlur(){cancelAction()}
 function onVisibility(){pageHidden=document.hidden;last=now();if(pageHidden)cancelAction()}
-$('#unpinBtn').addEventListener('pointerdown',onUnpin);$('#centerBtn').addEventListener('pointerdown',onCenter);$('#resetBtn').addEventListener('pointerdown',onReset);$('#startBtn').addEventListener('pointerdown',onStart);window.addEventListener('keydown',onKeyDown);window.addEventListener('blur',onBlur);document.addEventListener('visibilitychange',onVisibility);
+$('#unpinBtn').addEventListener('pointerdown',onUnpin);$('#centerBtn').addEventListener('pointerdown',onCenter);$('#resetBtn').addEventListener('pointerdown',onReset);$('#flipBtn').addEventListener('pointerdown',onFlip);$('#startBtn').addEventListener('pointerdown',onStart);window.addEventListener('keydown',onKeyDown);window.addEventListener('blur',onBlur);document.addEventListener('visibilitychange',onVisibility);
 
 function hoverUpdate(){
   if(!started||appPaused||pointer.down||tool==='camera'||pointer.multi)return;const sel=pickPart(pointer.x,pointer.y);if(sel){showPartLabel(sel.part);updateTargetVisual(sel)}else{hidePartLabel();updateTargetVisual(null)}
@@ -1133,7 +1248,7 @@ let last=now(),hoverT=0,rafId=0;
 function frame(){
   if(disposed)return;rafId=requestAnimationFrame(frame);const t=now(),rawDt=t-last,dt=Math.min(.05,Math.max(.001,rawDt));last=t;if(pageHidden)return;
   controls.update();toolAction=Math.max(0,toolAction-dt*3.5);if(!appPaused)updateContactAction(dt);
-  if(started&&!appPaused){specimen.update(dt);updateFx(dt)}
+  if(started&&!appPaused){specimen.update(dt);updateFx(dt);updateRemains(dt)}
   if((toolVisible||contactAction)&&tool!=='camera'&&!appPaused)updateToolRig(pointer.x,pointer.y);
   hoverT-=dt;if(hoverT<=0){hoverT=.08;hoverUpdate()}statsT-=dt;if(statsT<=0){statsT=.15;updateStats()}updateAdaptiveQuality(rawDt);renderer.render(scene,camera);
 }
@@ -1152,11 +1267,11 @@ function exit(){const result=resultSnapshot();started=false;appPaused=true;cance
 function disposeApp(){
   if(disposed)return;disposed=true;cancelAnimationFrame(rafId);clearTimeout(hintTimer);clearTimeout(toastTimer);resizeObserver?.disconnect();
   canvas.removeEventListener('pointerdown',handleDown);canvas.removeEventListener('pointermove',handleMove);window.removeEventListener('pointerup',handleUp);window.removeEventListener('pointercancel',handleUp);canvas.removeEventListener('contextmenu',preventContext);canvas.removeEventListener('pointerleave',handlePointerLeave);
-  for(const [b,fn] of toolButtonHandlers)b.removeEventListener('pointerdown',fn);$('#unpinBtn').removeEventListener('pointerdown',onUnpin);$('#centerBtn').removeEventListener('pointerdown',onCenter);$('#resetBtn').removeEventListener('pointerdown',onReset);$('#startBtn').removeEventListener('pointerdown',onStart);window.removeEventListener('keydown',onKeyDown);window.removeEventListener('blur',onBlur);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('resize',onWindowResize);
+  for(const [b,fn] of toolButtonHandlers)b.removeEventListener('pointerdown',fn);$('#unpinBtn').removeEventListener('pointerdown',onUnpin);$('#centerBtn').removeEventListener('pointerdown',onCenter);$('#resetBtn').removeEventListener('pointerdown',onReset);$('#flipBtn').removeEventListener('pointerdown',onFlip);$('#startBtn').removeEventListener('pointerdown',onStart);window.removeEventListener('keydown',onKeyDown);window.removeEventListener('blur',onBlur);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('resize',onWindowResize);
   specimen.clear();clearPartOutline();controls.dispose();for(const child of [...scene.children])disposeObject3D(child,{force:true});for(const value of Object.values(mat))if(value?.isMaterial)disposeMaterial(value,true);disposeMaterial(pickMaterial,true);disposeMaterial(outlineSolidMat,true);disposeMaterial(outlineFlatMat,true);disposeMaterial(outlineLineMat,true);for(const g of geometryCache.values())g.dispose?.();geometryCache.clear();woodTexture.dispose();renderer.dispose();SFX.close();rootEl.remove();delete window.SpecimenLab;
 }
 const api={
-  mount,enter,pause,resume,sleep,wake,exit,dispose:disposeApp,reset:resetSpecimen,setTool,configure:applyOptions,setQuality,
+  mount,enter,pause,resume,sleep,wake,exit,dispose:disposeApp,flip:flipSpecimen,reset:resetSpecimen,setTool,configure:applyOptions,setQuality,
   result:resultSnapshot,
   debug:{
     select(id){const part=specimen.parts.get(id);return part?{part,hit:{point:part.worldPos(v3()),object:part.meshes[0],face:null}}:null},
