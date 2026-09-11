@@ -489,28 +489,21 @@ class FloorPaint{
     g.fillStyle='rgba(255,255,255,0.18)'; g.beginPath(); g.ellipse(cx-S*0.2,cy-S*0.25,S*0.25,S*0.12,-0.6,0,TAU); g.fill();
     g.restore(); this.dirty=true;
   }
+
+
+
   corpse(x,z,heading,L,mode='crushed'){
+    // 시체 몸통은 3D로 따로 남으므로(청소기로 빨아 갈 수 있게) 바닥에는 밴 얼룩과 진물만 그린다
     const g=this.g, [cx,cy]=this.px(x,z), S=ROACH_L*this.ppm;
     g.save(); g.translate(cx,cy); g.rotate(Math.PI-heading);
     const burnt=mode==='burnt';
-    const body=burnt?'#14100C':'#3F3428', wing=burnt?'#1D1814':'#584A3B', pro=burnt?'#100D0A':'#2C2520', rim=burnt?'#242019':'#6C5E48', leg=burnt?'#14100C':'#2E261F';
-    const P=(mx,mz)=>[mx*S,-mz*S];
-    const sp=mode==='crushed'?1.15:1.0;
-    const LEGS=[[[0.13,0.30],[0.40,0.50],[0.52,0.80]],[[0.13,0.06],[0.48,0.10],[0.74,-0.06]],[[0.13,-0.20],[0.46,-0.44],[0.62,-0.96]]];
-    g.strokeStyle=leg; g.lineCap='round';
-    for(const s of [1,-1]) for(const seg of LEGS){ g.lineWidth=S*0.05; g.beginPath(); let [px,py]=P(s*seg[0][0]*sp,seg[0][1]); g.moveTo(px,py); [px,py]=P(s*seg[1][0]*sp,seg[1][1]); g.lineTo(px,py); g.stroke(); g.lineWidth=S*0.03; g.beginPath(); g.moveTo(px,py); [px,py]=P(s*seg[2][0]*sp,seg[2][1]); g.lineTo(px,py); g.stroke(); }
-    g.lineWidth=S*0.02; for(const s of [1,-1]){ g.beginPath(); let [ax,ay]=P(s*0.04,0.48); g.moveTo(ax,ay); const [bx,by]=P(s*0.45,1.05), [ex,ey]=P(s*0.9,1.4); g.quadraticCurveTo(bx,by,ex,ey); g.stroke(); }
-    const sq=mode==='crushed'?1.3:1.0;
-    const drop=(w,len,zc,col)=>{ g.fillStyle=col; g.beginPath(); for(let i=0;i<=28;i++){ const a=i/28*TAU; const t=(Math.cos(a)+1)/2; const ww=w*(0.45+0.55*Math.pow(t,0.6)); const [qx,qy]=P(Math.sin(a)*ww*sq,zc+Math.cos(a)*len); i?g.lineTo(qx,qy):g.moveTo(qx,qy); } g.closePath(); g.fill(); };
-    drop(0.17,0.42,-0.10,body); drop(0.18,0.46,-0.08,wing);
-    g.strokeStyle='rgba(20,10,4,0.55)'; g.lineWidth=S*0.015; g.beginPath(); { const [a0,b0]=P(0,0.28), [a1,b1]=P(0,-0.5); g.moveTo(a0,b0); g.lineTo(a1,b1); } g.stroke();
-    g.fillStyle=rim; g.beginPath(); { const [ex,ey]=P(0,0.33); g.ellipse(ex,ey,0.215*S*sq,0.17*S,0,0,TAU); } g.fill();
-    g.fillStyle=pro; g.beginPath(); { const [ex,ey]=P(0,0.33); g.ellipse(ex,ey,0.17*S*sq,0.13*S,0,0,TAU); } g.fill();
-    g.fillStyle=pro; g.beginPath(); { const [ex,ey]=P(0,0.47); g.ellipse(ex,ey,0.07*S,0.05*S,0,0,TAU); } g.fill();
+    g.fillStyle=burnt?'rgba(18,12,8,0.34)':'rgba(52,34,18,0.2)'; g.beginPath(); g.ellipse(0,0.02*S,0.2*S,0.5*S,0,0,TAU); g.fill();
     if(mode==='crushed'){ const C=this.gooColors(L); g.fillStyle=C.goo(0.9); g.beginPath(); g.ellipse(rand(-0.08,0.08)*S,rand(-0.1,0.2)*S,0.17*S,0.11*S,rand(TAU),0,TAU); g.fill(); g.strokeStyle=C.gut(0.8); g.lineWidth=S*0.045; g.lineCap='round'; g.beginPath(); g.moveTo(-0.06*S,-0.15*S); g.quadraticCurveTo(0.06*S,0.05*S,0.03*S,0.3*S); g.stroke(); }
-    if(mode==='belly'){ g.fillStyle='#7A4A22'; g.beginPath(); g.ellipse(0,0.06*S,0.15*S,0.40*S,0,0,TAU); g.fill(); g.strokeStyle='#4A2A12'; g.lineWidth=S*0.02; for(let i=-2;i<=3;i++){ g.beginPath(); g.moveTo(-0.14*S,i*0.1*S); g.lineTo(0.14*S,i*0.1*S); g.stroke(); } }
     g.restore(); this.dirty=true;
   }
+
+
+
   drop(x,z,r,L,yellow=false,gut=false){ const g=this.g,[cx,cy]=this.px(x,z),C=this.gooColors(L); g.fillStyle=gut?C.gut(0.8):yellow?C.goo(0.85):C.coreA(0.85); g.beginPath(); g.ellipse(cx,cy,r*this.ppm*rand(1,1.8),r*this.ppm,rand(TAU),0,TAU); g.fill(); this.dirty=true; }
   scorch(x,z,r){ const g=this.g,[cx,cy]=this.px(x,z),S=r*this.ppm; const gr=g.createRadialGradient(cx,cy,0,cx,cy,S); gr.addColorStop(0,'rgba(20,12,6,0.55)'); gr.addColorStop(0.6,'rgba(30,18,8,0.25)'); gr.addColorStop(1,'rgba(30,18,8,0)'); g.fillStyle=gr; g.beginPath(); g.arc(cx,cy,S,0,TAU); g.fill(); this.dirty=true; }
   bait(kind,x,z){
@@ -675,7 +668,7 @@ function makeItem(kind){
     case 'pan':{ g.add(cyl(0.13,0.12,0.03,MAT.iron,0,0.015,0,28)); const rim=new THREE.Mesh(new THREE.TorusGeometry(0.125,0.008,8,32),MAT.iron); rim.rotation.x=Math.PI/2; rim.position.y=0.03; rim.castShadow=true; g.add(rim); const h=box(0.03,0.02,0.2,MAT.black,0,0.035,0.22); g.add(h); g.add(box(0.032,0.024,0.11,MAT.wood,0,0.035,0.27)); break; }
     case 'spray':{ const can=cyl(0.033,0.033,0.19,MAT.green); can.position.y=0.095; g.add(can); g.add(cyl(0.02,0.02,0.03,MAT.red,0,0.205,0)); g.add(box(0.012,0.012,0.03,MAT.red,0,0.215,0.02)); g.add(box(0.05,0.07,0.001,MAT.white,0,0.1,0.034)); break; }
     case 'flame':{ const can=cyl(0.033,0.033,0.19,MAT.grey); can.position.y=0.095; g.add(can); g.add(cyl(0.02,0.02,0.03,MAT.black,0,0.205,0)); g.add(box(0.012,0.012,0.03,MAT.black,0,0.215,0.02)); g.add(box(0.025,0.07,0.012,MAT.yellow,0.03,0.185,0.03)); g.add(box(0.02,0.012,0.012,MAT.steel,0.03,0.226,0.03)); break; }
-    case 'vacuum':{ g.add(box(0.26,0.06,0.12,M.std(0x8e8e96),0,0.03,0)); g.add(box(0.24,0.012,0.09,M.std(0x3a3a3f),0,0.004,0)); const tube=cyl(0.02,0.02,0.9,M.std(0xa5a5ad)); tube.position.set(0,0.42,-0.25); tube.rotation.x=0.55; g.add(tube); break; }
+    case 'vacuum':{ g.add(box(0.26,0.06,0.12,M.std(0x8e8e96),0,0.03,0)); g.add(box(0.24,0.012,0.09,M.std(0x3a3a3f),0,0.004,0)); const tube=cyl(0.02,0.02,0.9,M.std(0xa5a5ad)); tube.position.set(0,0.42,-0.25); tube.rotation.x=-0.55; g.add(tube); break; }
     case 'hand':{ const palm=box(0.09,0.028,0.1,MAT.skin,0,0.02,0); g.add(palm); for(let i=0;i<4;i++){ const f=cyl(0.011,0.012,0.075,MAT.skin,-0.033+i*0.022,0.02,0.085); f.rotation.x=Math.PI/2; g.add(f); } const th=cyl(0.011,0.013,0.06,MAT.skin,-0.06,0.02,0.02); th.rotation.z=Math.PI/2.4; g.add(th); const wrist=cyl(0.03,0.032,0.1,MAT.skin,0,0.02,-0.09); wrist.rotation.x=Math.PI/2; g.add(wrist); break; }
     case 'bone':{ const b=cyl(0.012,0.012,0.11,MAT.paper); b.rotation.z=Math.PI/2; b.position.y=0.012; g.add(b); g.add(sph(0.016,MAT.paper,-0.055,0.014,0)); g.add(sph(0.016,MAT.paper,0.055,0.014,0)); const meat=sph(0.03,M.std(0xc9773a,{roughness:0.6}),0.01,0.02,0); meat.scale.set(1.2,0.8,1); g.add(meat); break; }
     case 'cola':{ const can=cyl(0.033,0.033,0.12,M.std(0xb8232f,{roughness:0.35,metalness:0.4})); can.rotation.z=Math.PI/2; can.position.y=0.033; g.add(can); break; }
@@ -799,7 +792,7 @@ function makeHuman(){
 // ───────── 시체 (덩어리가 남는 3D, 인스턴스) ─────────
 class Corpses{
   constructor(scene,cap=420){
-    const L=ROACH_L; this.cap=cap; this.n=0; this.d=new THREE.Object3D(); this.col=new THREE.Color();
+    const L=ROACH_L; this.cap=cap; this.n=0; this.d=new THREE.Object3D(); this.col=new THREE.Color(); this.pos=[]; this.m4=new THREE.Matrix4();
     const body=RG.body.clone(); body.scale(0.19*L,0.03*L,0.47*L); this.pieces=new THREE.InstancedMesh(body,MAT.corpse,cap*2); this.pieces.castShadow=true; this.pieces.receiveShadow=true;
     const shard=new THREE.BoxGeometry(0.15*L,0.006*L,0.28*L); this.shards=new THREE.InstancedMesh(shard,MAT.corpseWing,cap); this.shards.castShadow=true;
     const pro=RG.sph.clone(); pro.scale(0.16*L,0.024*L,0.125*L); this.pro=new THREE.InstancedMesh(pro,MAT.corpse,cap);
@@ -807,7 +800,7 @@ class Corpses{
     this.grp=[this.pieces,this.shards,this.pro,this.legs];
     for(const m of this.grp){ m.count=0; m.frustumCulled=false; scene.add(m); }
   }
-  clear(){ this.n=0; for(const m of this.grp) m.count=0; }
+  clear(){ this.n=0; this.pos.length=0; for(const m of this.grp) m.count=0; }
   add(x,z,h,mode='crushed'){
     const L=ROACH_L, d=this.d, i=this.n%this.cap; this.n++;
     const belly=mode==='belly', burnt=mode==='burnt', crushed=!belly&&!burnt;
@@ -830,6 +823,23 @@ class Corpses{
       d.rotation.set(0,a-Math.PI/2+(loose?rand(-1.5,1.5):0),tilt); d.scale.set(len/(0.5*L),1,1); d.updateMatrix(); this.legs.setMatrixAt(i*6+k,d.matrix); }
     const c=Math.min(this.n,this.cap); this.pieces.count=c*2; this.shards.count=c; this.pro.count=c; this.legs.count=c*6;
     for(const m of this.grp){ m.instanceMatrix.needsUpdate=true; if(m.instanceColor) m.instanceColor.needsUpdate=true; }
+    this.pos[i]={x,z,alive:true};
+  }
+  // 시체 하나를 이루는 인스턴스들 (몸 2, 날개 1, 앞가슴 1, 다리 6)
+  parts(i){ const a=[[this.pieces,i*2],[this.pieces,i*2+1],[this.shards,i],[this.pro,i]]; for(let k=0;k<6;k++) a.push([this.legs,i*6+k]); return a; }
+  shift(i,mx,mz){ const m4=this.m4; for(const [mesh,idx] of this.parts(i)){ mesh.getMatrixAt(idx,m4); m4.elements[12]+=mx; m4.elements[14]+=mz; mesh.setMatrixAt(idx,m4); } }
+  hide(i){ this.pos[i].alive=false; this.m4.makeScale(0,0,0); for(const [mesh,idx] of this.parts(i)) mesh.setMatrixAt(idx,this.m4); }
+  // 청소기: 흡입 범위 안의 시체를 노즐 쪽으로 끌어오다가 가까우면 빨아들인다. 바닥에 밴 진물 자국은 남는다.
+  suck(hx,hz,inside,dt){
+    let eaten=0, moved=false; const c=Math.min(this.n,this.cap);
+    for(let i=0;i<c;i++){
+      const p=this.pos[i]; if(!p||!p.alive||!inside(p.x,p.z)) continue;
+      const dx=hx-p.x, dz=hz-p.z, d=Math.hypot(dx,dz);
+      if(d<0.07){ this.hide(i); eaten++; moved=true; continue; }
+      const step=Math.min(d,dt*(1.2+0.5/(d+0.08))), mx=dx/d*step, mz=dz/d*step; p.x+=mx; p.z+=mz; this.shift(i,mx,mz); moved=true;
+    }
+    if(moved) for(const m of this.grp) m.instanceMatrix.needsUpdate=true;
+    return eaten;
   }
 }
 
@@ -1735,6 +1745,9 @@ class Round1{
             else { q.x+=ddx/d*dt*2.2; q.z+=ddz/d*dt*2.2; q.h=Math.atan2(-ddx,-ddz); }
           }
         }
+        // 바닥에 널린 시체도 빨아들인다 (진물 자국은 못 치운다)
+        const eaten=G.corpses.suck(h.x,h.z,(x,z)=>!this.underCushion(x,z)&&this.inCone({x,z},h.x,h.z,yaw,c.len*1.1,c.ang),dt);
+        if(eaten){ SFX.vacuumSuck(); for(let i=0;i<2+eaten;i++) SFX.noise({t:0.03+i*0.035+Math.random()*0.02,dur:0.018,gain:0.3,freq:2000+Math.random()*3000,q:2.5}); }
                for(const o of [...this.oothecae]){
           if(this.underCushion(o.x,o.z)) continue;
 
@@ -3317,21 +3330,21 @@ clearTraps(){
   }
   footsteps(dt){ const A=this.ai, P=this.p, G=this.G; if(A.spd>0.1){ const ph=Math.floor(this.human.walk/Math.PI); if(ph!==A.footPhase){ A.footPhase=ph; const d=Math.hypot(P.x-A.x,P.z-A.z); SFX.footstep(d,clamp(Math.sin(wrapAng(Math.atan2(A.x-P.x,A.z-P.z)-this.camYaw)),-1,1)); G.shake(clamp(0.35/(0.4+d),0,0.5)); } } }
   // ── 카메라 ──
-  playCamera(dt){ const P=this.p, A=this.ai, G=this.G, H=this.human, inp=G.input;
+
+
+  playCamera(dt){ const P=this.p, G=this.G, inp=G.input;
+    // 카메라는 플레이어가 시선을 조작할 때만 돈다. 사람·무기·진행 방향을 저절로 따라가거나 고개를 되돌리지 않는다.
     const lk=inp.consumeLook(); const [lx,ly]=inp.lookKeys(); let moved=false;
     if(lk.dx||lk.dy){ this.camYaw-=lk.dx*0.0065; this.camPitch=clamp(this.camPitch-lk.dy*0.0055,-0.3,1.25); moved=true; }
     if(lx||ly){ this.camYaw-=lx*1.9*dt; this.camPitch=clamp(this.camPitch+ly*1.5*dt,-0.3,1.25); moved=true; }
     this.lookIdle=moved||inp.lookOn?0:this.lookIdle+dt;
-    const dH=this.distH(); const near=(A.awake||A.state==='sit')&&dH<2.4;
-    if(this.lookIdle>0.9&&P.spd>0.1&&this.camPitch<0.35&&!near){ const d=wrapAng(P.h-this.camYaw); this.camYaw+=clamp(d*(1-Math.exp(-1.0*dt)),-0.5*dt,0.5*dt); }
-    if(this.lookIdle>1.2&&this.camPitch>0.05&&!near&&!(A.state==='strike')) this.camPitch=damp(this.camPitch,0.05,1.2,dt);
-    let tgt=null, w=0;
-    if((A.awake||A.state==='sit')&&dH<2.8){ const a=wrapAng(Math.atan2(A.x-P.x,A.z-P.z)-this.camYaw); if(Math.abs(a)<0.8){ H.root.updateWorldMatrix(true,true); H.head.getWorldPosition(this.tmp3); tgt=this.tmp3; w=clamp((2.8-dH)/1.6,0,1)*clamp(1-Math.abs(a)/0.8,0,1); } }
-    if(A.state==='strike'&&A.strike&&!A.strike.hit&&this.strikeMesh){ const S=A.strike; const a=wrapAng(Math.atan2(S.x-P.x,S.z-P.z)-this.camYaw); if(Math.hypot(P.x-S.x,P.z-S.z)<A.W.r*2.2&&Math.abs(a)<1.0){ tgt=this.strikeMesh.position; w=Math.max(w,Math.min(1,S.t/0.15)); } }
-    w*=clamp((this.lookIdle-0.25)/0.5,0,1);
-    this.assistW=damp(this.assistW||0,w,6,dt); if(tgt){ if(!this.lookTgt) this.lookTgt=tgt.clone(); else this.lookTgt.lerp(tgt,1-Math.exp(-8*dt)); }
-    this.applyCam(P.x,P.z,this.camYaw,this.camPitch,this.lookTgt?this.assistW:0,this.lookTgt);
+    this.assistW=0; this.lookTgt=null;
+    this.applyCam(P.x,P.z,this.camYaw,this.camPitch,0,null);
   }
+
+
+
+
   applyCam(x,z,yaw,pitch,w,tgt){ const G=this.G, cam=G.camera; const fx=Math.sin(yaw), fz=Math.cos(yaw);
     let cx=x, cz=z, short=0.37;
     for(let back=0.42;back>=0.05;back-=0.04){ const tx=clamp(x-fx*back,-1.95,1.95), tz=clamp(z-fz*back,-2.95,2.95); let ok=true; for(const o of OBST){ if(!o.roach&&inObst(o,tx,tz,0.02)){ ok=false; break; } } if(ok){ cx=tx; cz=tz; short=0.42-back; break; } }
