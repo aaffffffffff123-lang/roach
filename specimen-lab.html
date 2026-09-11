@@ -1033,7 +1033,7 @@ Specimen.prototype.update=function(dt){
   if(!pinned&&this.life!=='still'&&response>.012&&!this.flip.on&&this.flip.t>=1){
     this.intentT-=dt;if(this.intentT<=0){this.intentT=rand(1.1,2.8)/(1+ag*.65);this.intent+=rand(-.75,.75)*(1+ag*.5)}
     const speed=(.005+.028*this.locomotion+ag*.024)*live*response*(1+this.heatImpulse*.25),nx=this.root.position.x+Math.sin(this.intent)*speed*dt,nz=this.root.position.z+Math.cos(this.intent)*speed*dt;
-    if(Math.abs(nx)>.42){this.intent=-this.intent;this.intentT=.2}else this.root.position.x=nx;if(nz<.18||nz>.46){this.intent=Math.PI-this.intent;this.intentT=.2}else this.root.position.z=nz;
+    const ox=this.root.position.x,oz=this.root.position.z;if(Math.abs(nx)>.42&&Math.abs(nx)>=Math.abs(ox)){this.intent=-this.intent;this.intentT=.2}else this.root.position.x=nx;if((nz<.18&&nz<=oz)||(nz>.46&&nz>=oz)){this.intent=Math.PI-this.intent;this.intentT=.2}else this.root.position.z=nz;
     const d=normalizeAngle(this.intent-this.root.rotation.y);this.root.rotation.y+=d*dt*(.14+ag*.32)*response;
   }
   const restraint=1-pinLock*.9,bodyTwist=(response*(.012+ag*.05+imp*.025)+flipK*.1)*live*Math.max(.08,restraint);this.root.rotation.x=Math.sin(this.twistPhase*.82)*bodyTwist*.15;this.root.rotation.z=Math.sin(this.twistPhase*1.08+1.1)*bodyTwist*.22;this.root.position.y=this.baseRootY+this.floorOffset+Math.abs(Math.sin(this.twistPhase*1.7))*imp*reaction*.0015;
@@ -1055,6 +1055,8 @@ Specimen.prototype.update=function(dt){
     else if(p.role!=='wing'&&p.baseScale)p.node.scale.y=p.baseScale.y*(1-s.surfacePress*.045-s.pinDepress*.055);
   }
   const rear=this.parts.get('thorax_rear'),pro=this.parts.get('pronotum');if(rear&&!rear.state.detached){rear.node.rotation.y=rear.baseEuler.y+Math.sin(this.twistPhase*.86)*response*ag*.04*live;rear.node.rotation.z=rear.baseEuler.z+Math.cos(this.twistPhase*1.13)*response*(ag*.028+imp*.02)*live}if(pro&&!pro.state.detached)pro.node.rotation.z=pro.baseEuler.z-Math.sin(this.twistPhase*.94)*response*(ag*.018+imp*.016)*live;
+  // 중가슴도 몸부림에 따라 비틀리고 들썩인다. 핀이 하나라도 박히면 멈춘다(중가슴이 움직이면 핀 박힌 다리까지 딸려 가므로).
+  const midP=this.parts.get('thorax_mid');if(midP&&!midP.state.detached&&!(grab&&grab.part===midP)){const mk=pinned?0:response*live;midP.node.rotation.x=midP.baseEuler.x+Math.sin(this.twistPhase*.71+.4)*mk*(.014+ag*.035);midP.node.rotation.y=midP.baseEuler.y+Math.sin(this.twistPhase*.63)*mk*(.025+ag*.06+imp*.035);midP.node.rotation.z=midP.baseEuler.z+Math.cos(this.twistPhase*.9)*mk*(.018+ag*.045)}
   // 버둥댈수록 다리가 판을 긁고, 심하면 겉날개를 부르르 떤다
   if(this.life!=='still'&&response>.08){
     this.scratchT=(this.scratchT??0)-dt*(response*(1+ag*1.6+imp*2))*this.locomotion*(this.flip.on?.35:1);
@@ -1204,6 +1206,8 @@ function dragGrab(x,y){
   if(grab.rec||p.parentId===null&&p.state.detached){
     const rec=grab.rec||specimen.findLooseRecord(p);if(rec){rec.node.position.x=clamp(tgt.x,-tray.x+.1,tray.x-.1);rec.node.position.z=clamp(tgt.z,-tray.z+.1,tray.z-.1);rec.node.position.y=Math.max(boardTopY+.03,tgt.y);rec.vel.set(0,0,0);rec.rot.multiplyScalar(.2);resolveLooseFloor(rec)}return;
   }
+  // 중가슴은 몸 전체의 뿌리라 뜯기지 않는다. 대신 집고 끌면 몸통째 끌려온다(핀이 박혀 있으면 애초에 집히지 않는다).
+  if(p.id==='thorax_mid'){const R=specimen.root;if(!grab.rootStart)grab.rootStart=R.position.clone();R.position.x=clamp(grab.rootStart.x+(tgt.x-grab.startWorld.x)*.85,-1.3,1.3);R.position.z=clamp(grab.rootStart.z+(tgt.z-grab.startWorld.z)*.85,-.9,1.4);p.state.strain=.45;SFX.strain(p,.45);specimen.stimulate(Math.min(.06,.012+dragStep*.12),p);specimen.addTrauma(Math.min(.012,.002+dragStep*.03));return}
   const dist=tgt.distanceTo(grab.startWorld),weak=clamp(1-p.state.cutDepth*.48-p.state.crack*.23-p.state.puncture*.18,.18,1),threshold=(.14+p.jointStrength*.3)*weak;
   p.state.strain=clamp(dist/Math.max(.04,threshold),0,2);SFX.strain(p,p.state.strain);p.state.shockPulse=Math.max(p.state.shockPulse,p.state.strain*.05);p.state.surfacePress=Math.max(p.state.surfacePress,.25+p.state.strain*.18);specimen.addTrauma(Math.min(.012,dragStep*.055+p.state.strain*.0012));specimen.stimulate(Math.min(.012,.003+p.state.strain*.003),p);
   if(grab.parent){const local=grab.parent.worldToLocal(GRAB_TMP.local.copy(tgt)),delta=GRAB_TMP.delta.copy(local).sub(grab.startLocal),max=.22+p.jointStrength*.11;if(delta.length()>max)delta.setLength(max);p.node.position.copy(grab.startLocal).addScaledVector(delta,.55)}
