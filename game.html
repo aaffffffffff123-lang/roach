@@ -667,6 +667,32 @@ function buildRoom(scene){
   return R;
 }
 
+
+// 알집(난협): 옆으로 납작한 강낭콩·동전지갑 모양. 등에는 톱니 진 솔기, 옆면엔 알 칸마다 희미한 골이 진다. 긴 쪽이 x축.
+let _ootheca=null;
+function oothecaGeo(){
+  if(_ootheca) return _ootheca;
+  const L=0.032, H=0.031, W=0.0135, U=44, Vn=28;
+  const cBody=rgb(0x8a4219), cDark=rgb(0x3e1908), cRib=rgb(0x4a1c09), cKeel=rgb(0x3a1406);
+  const P=(u,v)=>{ const t=u*2-1, e=Math.pow(Math.max(0,1-Math.pow(Math.abs(t),2.4)),0.5);
+    const th=v*TAU, c=Math.cos(th), s=Math.sin(th);
+    let z=W*e*Math.sign(c)*Math.pow(Math.abs(c),2/2.6), y=H*0.5*(1+Math.sign(s)*Math.pow(Math.abs(s),2/2.4));
+    const up=clamp(s,0,1); z*=1-0.6*Math.pow(up,1.8);                                  // 위로 갈수록 좁아져 솔기가 된다
+    y=y*(0.55+0.45*e);                                                                   // 양 끝은 둥글게 낮아진다
+    y+=0.0022*Math.pow(up,8)*Math.pow(Math.abs(Math.sin(t*Math.PI*8.5)),0.6)*e;          // 솔기의 톱니
+    z*=1-0.07*Math.pow(Math.abs(Math.cos(t*Math.PI*7.5)),8)*(1-up)*Math.abs(c);          // 알 칸 사이마다 옆면이 옴폭 팬 골
+    return [t*L,y,z]; };
+  const g=gridGeo(U,Vn,P,true,false);
+  const B=new GeoBuilder();
+  B.add(g,(p,w,i)=>{ const u=Math.floor(i/Vn)/U, v=(i%Vn)/Vn, t=u*2-1, s=Math.sin(v*TAU), up=clamp(s,0,1);
+    let c=rgbMix(cBody,cDark,sstep(0.7,1,Math.abs(t))*0.7); c=rgbMix(c,cKeel,sstep(0.75,0.98,up));
+    if(Math.pow(Math.abs(Math.cos(t*Math.PI*7.5)),8)>0.45&&up<0.75) c=rgbMix(c,cRib,0.65);
+    return c; });
+  _ootheca=B.build(); return _ootheca;
+}
+
+
+
 // ───────── 아이템 ─────────
 function makeItem(kind){
   const g=new THREE.Group();
@@ -686,7 +712,7 @@ function makeItem(kind){
     case 'bone':{ const b=cyl(0.012,0.012,0.11,MAT.paper); b.rotation.z=Math.PI/2; b.position.y=0.012; g.add(b); g.add(sph(0.016,MAT.paper,-0.055,0.014,0)); g.add(sph(0.016,MAT.paper,0.055,0.014,0)); const meat=sph(0.03,M.std(0xc9773a,{roughness:0.6}),0.01,0.02,0); meat.scale.set(1.2,0.8,1); g.add(meat); break; }
     case 'cola':{ const can=cyl(0.033,0.033,0.12,M.std(0xb8232f,{roughness:0.35,metalness:0.4})); can.rotation.z=Math.PI/2; can.position.y=0.033; g.add(can); break; }
     case 'rice':{ const bowl=new THREE.Mesh(new THREE.SphereGeometry(0.05,16,10,0,TAU,0,Math.PI/2),MAT.paper); bowl.rotation.x=Math.PI; bowl.position.y=0.05; bowl.castShadow=true; g.add(bowl); break; }
-    case 'egg':{ const e=new THREE.Mesh(new THREE.CapsuleGeometry(0.014,0.05,4,10),M.std(0x6e3e1b,{roughness:0.5})); e.rotation.z=Math.PI/2; e.position.y=0.014; e.castShadow=true; g.add(e); for(let i=-2;i<=2;i++){ const r=new THREE.Mesh(new THREE.TorusGeometry(0.0145,0.0018,6,12),M.std(0x4a2810)); r.rotation.y=Math.PI/2; r.position.set(i*0.011,0.014,0); g.add(r);} break; }
+    case 'egg':{ const e=new THREE.Mesh(oothecaGeo(),MAT.roachShell); e.castShadow=true; e.receiveShadow=true; g.add(e); break; }
     case 'suitcase':{ g.add(box(0.4,0.55,0.2,M.std(0x2f4a8a,{roughness:0.5}),0,0.275,0)); g.add(box(0.14,0.03,0.03,MAT.black,0,0.57,0)); break; }
   }
   return g;
@@ -696,10 +722,12 @@ function makeItem(kind){
 // 몸 좌표: +z 머리, +y 위, x 좌우. 몸길이 약 1.2단위 = 실제 ROACH_L×1.2.
 // 실험실 표본과 같은 종으로 맞춘다: 적갈색 광택, 앞가슴 등판은 옅은 테두리 안에 짙은 나비 무늬, 가시 돋친 납작한 다리.
 const ROACH_TOP=0.15;   // 등(날개 위) 높이 — 뒤집힌 바퀴를 바닥에 눕힐 때 쓴다
+// yaw: 넓적다리가 뻗는 방향(0=앞, π=뒤), ky: 무릎에서 종아리가 더 꺾이는 각도(+면 뒤로).
+// 앞다리는 앞으로, 가운데·뒷다리는 뒤로 꺾여야 바퀴 윤곽이 나온다.
 const LEG_DEF=[
-  {z:0.30, yaw:0.85, fl:0.28, tl:0.30, w:0.85, tar:0.15},
-  {z:0.06, yaw:1.62, fl:0.34, tl:0.40, w:1.0,  tar:0.19},
-  {z:-0.20,yaw:2.40, fl:0.44, tl:0.56, w:1.15, tar:0.27},
+  {z:0.30, yaw:0.75, ky:-0.35, fl:0.28, tl:0.30, w:0.85, tar:0.15},
+  {z:0.06, yaw:1.90, ky:0.60,  fl:0.34, tl:0.40, w:1.0,  tar:0.19},
+  {z:-0.20,yaw:2.25, ky:0.55,  fl:0.44, tl:0.56, w:1.15, tar:0.27},
 ];
 const HIP_Y=0.05, LEG_ELEV=0.3;
 for(const d of LEG_DEF){ const hK=HIP_Y+d.fl*Math.sin(LEG_ELEV); d.knee=-(LEG_ELEV+Math.asin(Math.min(0.98,hK/d.tl))); }
@@ -923,7 +951,8 @@ function makeRoach(kind='adult'){
       lg.hip.rotation.y=lg.s>0?(yw-Math.PI/2):(1.5*Math.PI-yw);
       const lift=Math.max(0,sw)*0.45*speedNorm*(1-dead);
       lg.fem.rotation.z=(LEG_ELEV+lift)*(1-dead)+dead*0.12;
-      lg.knee.rotation.z=(d.knee-lift*0.2)*(1-dead)-0.35*dead; }
+      lg.knee.rotation.z=(d.knee-lift*0.2)*(1-dead)-0.35*dead;
+      lg.knee.rotation.y=lg.s*d.ky*(1-dead*0.5); }
     for(const a of parts.ants){ const w=Math.sin(st.antT*1.7+a.s)*0.22; a.base.rotation.set(1.25+Math.sin(st.antT+a.s*2)*0.12,a.s*(0.42+w),0); a.segs.forEach((sg,i)=>{ sg.rotation.x=-0.1+Math.sin(st.antT*2.3+i+a.s)*0.1; }); }
     g.scale.set(L*(1+dead*0.3),L*(1-dead*0.7),L);
   }
