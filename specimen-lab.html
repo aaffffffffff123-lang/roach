@@ -52,6 +52,7 @@ button{font:inherit;border:0;color:inherit;-webkit-tap-highlight-color:transpare
     <button class="action" id="unpinBtn">핀 전부 빼기</button>
     <button class="action" id="centerBtn">시점 원위치</button>
     <button class="action" id="flipBtn">뒤집기</button>
+    <button class="action" id="wipeBtn">싹 치우기</button>
     <button class="action dark" id="resetBtn">새 바퀴벌레</button>
   </div>
   <div id="hint"></div>
@@ -240,6 +241,8 @@ class AudioFX{
   scratch(k=.5){if(!this.ready())return;const n=1+Math.round(k*2.5);for(let i=0;i<n;i++)this.noise({delay:i*rand(.012,.03),dur:rand(.006,.016),gain:.035+k*.09,freq:rand(3000,7000),q:2.4,pan:rand(-.6,.6)})}
   // 부르르 — 겉날개를 떠는 짧은 날갯짓
   flutter(k=.5){if(!this.ready())return;const d=rand(.08,.16);this.noise({dur:d,gain:.05+k*.06,freq:170,q:3,pan:rand(-.3,.3),attack:.01});this.tone({dur:d,gain:.025+k*.03,freq:rand(95,130),type:'sawtooth'})}
+  // 쓱싹 — 판을 걸레로 훔친다
+  wipe(){if(!this.ready())return;for(let i=0;i<3;i++)this.noise({delay:i*.15,dur:.13,gain:.22,freq:800+i*350,end:2600,q:.7,attack:.03});this.squish({delay:.06,size:.5,gain:.14})}
   // 휙 — 들어 올려 굴린다
   flipWhoosh(){if(!this.ready())return;this.noise({dur:.42,gain:.16,freq:320,end:2300,q:.7,attack:.08});this.crackle({dur:.3,n:6,gain:.07,fmin:3000,fmax:6500})}
   // 탁 — 등껍질(또는 다리)이 판에 떨어진다
@@ -1023,6 +1026,17 @@ function setTargetedPart(part){
   }
 }
 function updateTargetVisual(sel){if(tool==='camera'||!sel?.part){clearPartOutline();return}setTargetedPart(sel.part)}
+// 핀도 족집게로 뽑을 수 있으니 부위와 똑같은 윤곽선을 두른다
+function setTargetedPin(rec){
+  if(outlinedPart===rec)return;clearPartOutline();outlinedPart=rec;
+  for(const mesh of [rec.head,rec.shaft]){
+    if(!mesh?.parent)continue;const g=mesh.geometry;if(!g.boundingBox)g.computeBoundingBox();const c=g.boundingBox.getCenter(v3()),h=g.boundingBox.getSize(v3()).multiplyScalar(.5),sc=mesh.scale,T=OUTLINE_T;
+    const f=v3((h.x*sc.x+T)/Math.max(1e-5,h.x*sc.x),(h.y*sc.y+T)/Math.max(1e-5,h.y*sc.y),(h.z*sc.z+T)/Math.max(1e-5,h.z*sc.z));
+    const shell=new THREE.Mesh(g,outlineSolidMat);shell.quaternion.copy(mesh.quaternion);shell.scale.set(sc.x*f.x,sc.y*f.y,sc.z*f.z);
+    shell.position.copy(mesh.position).add(v3(c.x*sc.x*(1-f.x),c.y*sc.y*(1-f.y),c.z*sc.z*(1-f.z)).applyQuaternion(mesh.quaternion));
+    shell.renderOrder=79;shell.userData.outline=true;shell.raycast=()=>{};mesh.parent.add(shell);outlineRecords.push({object:shell,ownsGeometry:false});
+  }
+}
 
 function makeToolModel(kind){
   const g=new THREE.Group(),steel=mat.steel,sd=mat.steelDark;
@@ -1034,7 +1048,7 @@ function makeToolModel(kind){
   }else if(kind==='pin'){
     const q=cy(.012,1.35,steel,0,0,.675,8);q.rotation.x=Math.PI/2;const h=cy(.085,.065,mat.red,0,0,1.38,18);h.rotation.x=Math.PI/2;
   }
-  const scale=kind==='tweezer'?3.28:2.65;g.scale.setScalar(scale);g.userData.baseScale=scale;g.visible=false;return g;
+  const scale=kind==='tweezer'?3.28:2.65;g.scale.setScalar(scale);g.userData.baseScale=scale;g.visible=false;g.traverse(o=>{if(o.isMesh)o.visible=false});return g;
 }
 const toolModels=new Map();
 function getToolModel(kind){if(kind==='camera')return null;if(!toolModels.has(kind)){const model=makeToolModel(kind);toolModels.set(kind,model);scene.add(model)}return toolModels.get(kind)}
@@ -1056,7 +1070,7 @@ function updateToolRig(x,y){
   let sel=contactAction?.sel||(grab?grab.sel:null)||pickPart(x,y);const bp=boardPoint(x,y,TOOL_TMP.board);let point=sel?.hit.point||bp;
   if(grab){point=grab.last;sel={part:grab.part,hit:{point,object:grab.part.meshes[0],face:null}}}
   if(!point){toolRig.visible=false;toolVisible=false;updateTargetVisual(null);return}
-  toolHit=sel;toolPoint.copy(point);updateTargetVisual(sel);
+  toolHit=sel;toolPoint.copy(point);const pinHit=!grab&&!contactAction&&!pointer.down?pickPin(x,y):null;if(pinHit)setTargetedPin(pinHit);else updateTargetVisual(sel);
   if(hasLastToolWorld){const d=TOOL_TMP.delta.copy(point).sub(lastToolWorld);if(d.lengthSq()>.00003)toolMotion.lerp(d.normalize(),.55).normalize()}
   lastToolWorld.copy(point);hasLastToolWorld=true;toolRig.visible=true;toolVisible=true;orientToolAt(point,hitNormal(sel),tool,contactAction?contactAction.phase:toolAction);
 }
@@ -1071,13 +1085,16 @@ function placePinImmediate(hit){
   const p=hit?.part;if(!p||!objectInScene(p.node))return;const wp=hit.hit.point.clone();p.node.updateWorldMatrix(true,false);const localPoint=p.node.worldToLocal(wp.clone()),headY=Math.max(wp.y+.25,boardTopY+.43),len=headY-boardTopY,group=new THREE.Group();group.position.set(wp.x,0,wp.z);pinGroup.add(group);
   const shaftGeo=sharedGeometry('pin-shaft',()=>new THREE.CylinderGeometry(.015,.012,1,9));const shaft=new THREE.Mesh(shaftGeo,mat.steel);shaft.scale.y=len;shaft.position.y=boardTopY+len/2;shaft.castShadow=false;group.add(shaft);
   const headGeo=sharedGeometry('pin-head',()=>new THREE.SphereGeometry(.07,IS_SMALL?10:14,IS_SMALL?7:10));const head=new THREE.Mesh(headGeo,mat.red);head.scale.y=.55;head.position.y=headY+.01;head.castShadow=false;group.add(head);
-  const rec={group,head,part:p,localPoint,target:wp.clone(),point:wp.clone()};head.userData.pinRec=rec;pinHeads.push(head);specimen.pins.push(rec);p.pins.push(rec);p.state.pinned=true;p.state.pinDepress=1;
+  const rec={group,head,shaft,part:p,localPoint,target:wp.clone(),point:wp.clone()};head.userData.pinRec=rec;shaft.userData.pinRec=rec;
+  // 가는 핀 몸통도 잘 집히게 보이지 않는 굵은 손잡이를 겹친다
+  const grip=new THREE.Mesh(sharedGeometry('pin-grip',()=>new THREE.CylinderGeometry(.06,.06,1,8)),pickMaterial);grip.scale.y=len;grip.position.y=boardTopY+len/2;grip.userData.pinRec=rec;group.add(grip);rec.grip=grip;
+  pinHeads.push(head,shaft,grip);specimen.pins.push(rec);p.pins.push(rec);p.state.pinned=true;p.state.pinDepress=1;
   const leg=specimen.legAnim.find(L=>L.parts.includes(p));if(leg&&!leg.pinRot)leg.pinRot=leg.parts.map(q=>q.node.rotation.clone());
   const loose=specimen.findLooseRecord(p);if(loose){loose.vel.set(0,0,0);loose.rot.set(0,0,0)}
   SFX.pin();triggerToolAction();specimen.spawnFlakes(wp,Math.min(3,IS_SMALL?2:3),.25);specimen.addFluid(wp,.025,2,false);specimen.registerWound(p.node,wp,.14,false,9);specimen.addTrauma(.09);specimen.stimulate(.2,p);updateStats(true);
 }
 function removePin(rec,{silent=false,stimulate=true,ooze=true}={}){
-  if(!rec)return;const hole=rec.part&&objectInScene(rec.part.node)?partAnchorWorld(rec,v3()):rec.target.clone(),iHead=pinHeads.indexOf(rec.head);if(iHead>=0)pinHeads.splice(iHead,1);const iPin=specimen.pins.indexOf(rec);if(iPin>=0)specimen.pins.splice(iPin,1);const arr=rec.part?.pins||[],iPart=arr.indexOf(rec);if(iPart>=0)arr.splice(iPart,1);if(rec.part){rec.part.state.pinned=arr.length>0;rec.part.state.surfacePress=Math.max(rec.part.state.surfacePress,.25);const leg=specimen.legAnim.find(L=>L.parts.includes(rec.part));if(leg&&!leg.parts.some(q=>q.pins.length))leg.pinRot=null}disposeObject3D(rec.group);
+  if(!rec)return;const hole=rec.part&&objectInScene(rec.part.node)?partAnchorWorld(rec,v3()):rec.target.clone(),iHead=-1;for(const m of [rec.head,rec.shaft,rec.grip]){const k=pinHeads.indexOf(m);if(k>=0)pinHeads.splice(k,1)}const iPin=specimen.pins.indexOf(rec);if(iPin>=0)specimen.pins.splice(iPin,1);const arr=rec.part?.pins||[],iPart=arr.indexOf(rec);if(iPart>=0)arr.splice(iPart,1);if(rec.part){rec.part.state.pinned=arr.length>0;rec.part.state.surfacePress=Math.max(rec.part.state.surfacePress,.25);const leg=specimen.legAnim.find(L=>L.parts.includes(rec.part));if(leg&&!leg.parts.some(q=>q.pins.length))leg.pinRot=null}disposeObject3D(rec.group);
   if(ooze&&rec.part&&objectInScene(rec.part.node)){specimen.addFluid(hole,.022,2,false);specimen.registerWound(rec.part.node,hole,.2,false,12);specimen.addTrauma(.035)}if(stimulate&&rec.part){specimen.stimulate(.12,rec.part);specimen.painImpulse=Math.max(specimen.painImpulse,.14)}if(!silent)SFX.unpin();updateStats(true);
 }
 function removePinsForSubtree(part,opts={}){if(!part)return;const parts=new Set(specimen.collectSubtree(part));for(const rec of [...specimen.pins])if(parts.has(rec.part))removePin(rec,opts)}
@@ -1209,8 +1226,15 @@ function updateRemains(dt){
     if(r.t>=1){r.landed=true;SFX.corpseLand();const c=r.body.position;for(let i=0;i<3;i++)fluidField.add(v3(c.x+rand(-.5,.5),0,c.z+rand(-.8,.8)),rand(.05,.09),1,Math.random()<.35)}
   }
 }
-function resetSpecimen({silent=false}={}){
-  const old=specimen;discardSpecimen(old,specimenUsed(old));partSerial=0;specimen=new Specimen();prepBases(specimen);specimen.computeSystems();settleBaseHeight(specimen);lastStatsKey='';updateStats(true);setTool(firstEnabledTool());cameraHome();syncFlipLabel();if(!silent)toast('새 바퀴벌레로 교체했다');return specimen;
+function resetSpecimen({silent=false,wipe=false}={}){
+  const old=specimen;discardSpecimen(old,!wipe&&specimenUsed(old));
+  if(wipe){
+    // 싹 치우기: 쌓인 시체·조각·진물 자국까지 전부 닦아 낸다
+    for(const r of remains){disposeObject3D(r.body);disposeObject3D(r.debris)}remains.length=0;remainSlot=0;
+    fluidField.reset();clearDynamicGroup(fxGroup);SFX.wipe();
+  }
+  partSerial=0;specimen=new Specimen();prepBases(specimen);specimen.computeSystems();settleBaseHeight(specimen);lastStatsKey='';updateStats(true);setTool(firstEnabledTool());cameraHome();syncFlipLabel();
+  if(!silent)toast(wipe?'판을 싹 닦고 새 바퀴벌레를 올렸다':'새 바퀴벌레로 교체했다');return specimen;
 }
 function cameraHome(){camera.position.set(0,6.9,7.1);controls.target.set(0,.35,-.1);controls.update()}
 function applyOptions(next={}){
@@ -1226,6 +1250,13 @@ for(const b of $$('.tool')){const fn=e=>{e.stopPropagation();e.preventDefault();
 function onUnpin(e){e.stopPropagation();e.preventDefault();removeAllPins()}
 function onCenter(e){e.stopPropagation();e.preventDefault();cameraHome()}
 function onReset(e){e.stopPropagation();e.preventDefault();SFX.ensure();resetSpecimen()}
+// 실수로 쌓아 둔 잔해를 날리지 않게 두 번 눌러야 치운다
+let wipeArmT=0;
+function onWipe(e){
+  e.stopPropagation();e.preventDefault();SFX.ensure();const b=$('#wipeBtn');
+  if(performance.now()<wipeArmT){wipeArmT=0;b.textContent='싹 치우기';resetSpecimen({wipe:true});return}
+  wipeArmT=performance.now()+2200;b.textContent='한 번 더 누르면 치움';setTimeout(()=>{if(performance.now()>=wipeArmT)b.textContent='싹 치우기'},2300);
+}
 function syncFlipLabel(){$('#flipBtn').textContent=specimen.flip.on?'바로 놓기':'뒤집기'}
 function flipSpecimen(){SFX.ensure();if(specimen.toggleFlip())syncFlipLabel();return api}
 function onFlip(e){e.stopPropagation();e.preventDefault();flipSpecimen()}
@@ -1233,10 +1264,13 @@ function onStart(e){e.stopPropagation();e.preventDefault();SFX.ensure();started=
 function onKeyDown(e){if(e.code==='KeyF'){e.preventDefault();flipSpecimen();return}const map={Digit1:'tweezer',Digit2:'pin',Digit0:'camera'};if(map[e.code]&&toolEnabled(map[e.code])){e.preventDefault();setTool(map[e.code])}if(e.code==='Escape'){e.preventDefault();if(EMBEDDED)parent.postMessage({type:'specimen-lab-close',result:resultSnapshot()},location.origin);else cameraHome()}}
 function onBlur(){cancelAction()}
 function onVisibility(){pageHidden=document.hidden;last=now();if(pageHidden)cancelAction()}
-$('#unpinBtn').addEventListener('pointerdown',onUnpin);$('#centerBtn').addEventListener('pointerdown',onCenter);$('#resetBtn').addEventListener('pointerdown',onReset);$('#flipBtn').addEventListener('pointerdown',onFlip);$('#startBtn').addEventListener('pointerdown',onStart);window.addEventListener('keydown',onKeyDown);window.addEventListener('blur',onBlur);document.addEventListener('visibilitychange',onVisibility);
+$('#unpinBtn').addEventListener('pointerdown',onUnpin);$('#centerBtn').addEventListener('pointerdown',onCenter);$('#resetBtn').addEventListener('pointerdown',onReset);$('#wipeBtn').addEventListener('pointerdown',onWipe);$('#flipBtn').addEventListener('pointerdown',onFlip);$('#startBtn').addEventListener('pointerdown',onStart);window.addEventListener('keydown',onKeyDown);window.addEventListener('blur',onBlur);document.addEventListener('visibilitychange',onVisibility);
 
 function hoverUpdate(){
-  if(!started||appPaused||pointer.down||tool==='camera'||pointer.multi)return;const sel=pickPart(pointer.x,pointer.y);if(sel){showPartLabel(sel.part);updateTargetVisual(sel)}else{hidePartLabel();updateTargetVisual(null)}
+  if(!started||appPaused||pointer.down||tool==='camera'||pointer.multi)return;
+  const pr=pickPin(pointer.x,pointer.y);
+  if(pr){setTargetedPin(pr);labelPart=null;lastLabelText='';UI.partLabel.textContent='고정 핀 · 족집게로 누르면 뽑힌다';UI.partLabel.classList.add('show');return}
+  const sel=pickPart(pointer.x,pointer.y);if(sel){showPartLabel(sel.part);updateTargetVisual(sel)}else{hidePartLabel();updateTargetVisual(null)}
 }
 function resize(){
   if(disposed)return;const r=rootEl.getBoundingClientRect(),w=Math.max(1,Math.round(r.width||innerWidth)),h=Math.max(1,Math.round(r.height||innerHeight)),dpr=Math.max(.6,Math.min(devicePixelRatio||1,qualityState.dprCap)*qualityState.dprScale);renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();
@@ -1267,7 +1301,7 @@ function exit(){const result=resultSnapshot();started=false;appPaused=true;cance
 function disposeApp(){
   if(disposed)return;disposed=true;cancelAnimationFrame(rafId);clearTimeout(hintTimer);clearTimeout(toastTimer);resizeObserver?.disconnect();
   canvas.removeEventListener('pointerdown',handleDown);canvas.removeEventListener('pointermove',handleMove);window.removeEventListener('pointerup',handleUp);window.removeEventListener('pointercancel',handleUp);canvas.removeEventListener('contextmenu',preventContext);canvas.removeEventListener('pointerleave',handlePointerLeave);
-  for(const [b,fn] of toolButtonHandlers)b.removeEventListener('pointerdown',fn);$('#unpinBtn').removeEventListener('pointerdown',onUnpin);$('#centerBtn').removeEventListener('pointerdown',onCenter);$('#resetBtn').removeEventListener('pointerdown',onReset);$('#flipBtn').removeEventListener('pointerdown',onFlip);$('#startBtn').removeEventListener('pointerdown',onStart);window.removeEventListener('keydown',onKeyDown);window.removeEventListener('blur',onBlur);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('resize',onWindowResize);
+  for(const [b,fn] of toolButtonHandlers)b.removeEventListener('pointerdown',fn);$('#unpinBtn').removeEventListener('pointerdown',onUnpin);$('#centerBtn').removeEventListener('pointerdown',onCenter);$('#resetBtn').removeEventListener('pointerdown',onReset);$('#wipeBtn').removeEventListener('pointerdown',onWipe);$('#flipBtn').removeEventListener('pointerdown',onFlip);$('#startBtn').removeEventListener('pointerdown',onStart);window.removeEventListener('keydown',onKeyDown);window.removeEventListener('blur',onBlur);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('resize',onWindowResize);
   specimen.clear();clearPartOutline();controls.dispose();for(const child of [...scene.children])disposeObject3D(child,{force:true});for(const value of Object.values(mat))if(value?.isMaterial)disposeMaterial(value,true);disposeMaterial(pickMaterial,true);disposeMaterial(outlineSolidMat,true);disposeMaterial(outlineFlatMat,true);disposeMaterial(outlineLineMat,true);for(const g of geometryCache.values())g.dispose?.();geometryCache.clear();woodTexture.dispose();renderer.dispose();SFX.close();rootEl.remove();delete window.SpecimenLab;
 }
 const api={
