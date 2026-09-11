@@ -230,7 +230,9 @@ const OBST=[
   {n:'desk',x1:-1.6,z1:-3,x2:-0.2,z2:-2.4,h:0.72,roach:true,human:false},
   {n:'chair',x1:-1.1,z1:-2.3,x2:-0.7,z2:-1.9,h:0.45,roach:true,human:false},
   {n:'shelf',x1:0.2,z1:-3,x2:0.9,z2:-2.7,h:1.8,roach:false,human:false},
-  {n:'trash',x1:0.55,z1:2.45,x2:0.95,z2:2.85,h:0.5,roach:false,human:false},
+  {n:'trash',x1:0.43,z1:2.36,x2:1.0,z2:2.85,h:0.5,roach:false,human:false},   // 봉지 두 개가 삐져나온 만큼까지
+  {n:'slippers',x1:0.46,z1:-1.42,x2:0.74,z2:-0.92,h:0.04,roach:false,human:true},   // 침대 앞 슬리퍼 — 바퀴가 뚫고 지나가지 않게
+  {n:'door',x1:1.02,z1:2.9,x2:2,z2:3,h:2.1,roach:false,human:true},   // 문짝·문틀 두께 — 바퀴가 문 속으로 파고들지 않게
 ];
 // 숨는 자리: 구멍 5곳 + 방석 밑 + 책상 밑. 사람은 이 자리들을 차례로 뒤진다.
 const HOLES=[
@@ -3250,6 +3252,7 @@ clearTraps(){
  // ── 죽음과 그 뒤 ──
   killPlayer(type){
     if(this.phase!=='play') return;
+    this.roach.g.visible=true;   // 숨어서 내다보던 중이면 몸이 꺼져 있으므로 죽는 장면을 위해 되살린다
 
     const P=this.p;
     const A=this.ai;
@@ -3689,14 +3692,20 @@ clearTraps(){
     this.lookIdle=moved||inp.lookOn?0:this.lookIdle+dt;
     this.assistW=0; this.lookTgt=null;
     this.applyCam(P.x,P.z,this.camYaw,this.camPitch,0,null);
+    this.roach.g.visible=!this.camPeek;   // 바닥에 붙어 내다볼 때는 카메라가 내 몸 속이라 내 몸을 숨긴다
   }
 
 
 
-
   applyCam(x,z,yaw,pitch,w,tgt){ const G=this.G, cam=G.camera; const fx=Math.sin(yaw), fz=Math.cos(yaw);
-    let cx=x, cz=z, short=0.37;
-    for(let back=0.42;back>=0.05;back-=0.04){ const tx=clamp(x-fx*back,-1.95,1.95), tz=clamp(z-fz*back,-2.95,2.95); let ok=true; for(const o of OBST){ if(!o.roach&&inObst(o,tx,tz,0.02)){ ok=false; break; } } if(ok){ cx=tx; cz=tz; short=0.42-back; break; } }
+    let cx=x, cz=z, short=0.37, found=false;
+    // 방 경계는 ±1.9 / ±2.9 — 벽에 붙은 문짝·문틀 두께 안으로 카메라가 들어가지 않게
+    for(let back=0.42;back>=0.05;back-=0.04){ const tx=clamp(x-fx*back,-1.9,1.9), tz=clamp(z-fz*back,-2.9,2.9); let ok=true; for(const o of OBST){ if(!o.roach&&inObst(o,tx,tz,0.02)){ ok=false; break; } } if(ok){ cx=tx; cz=tz; short=0.42-back; found=true; break; } }
+    // 뒤에 카메라 놓을 자리가 없으면(냉장고·싱크대 밑에 숨었을 때) 가구 몸통 속에 박히지 않게 바닥에 바짝 붙어 밖을 내다본다
+    this.camPeek=!found;
+    if(!found){ G.camBase.set(x-fx*0.03,0.042,z-fz*0.03); this.tmp.set(x+fx*0.6,0.042+0.6*Math.tan(clamp(pitch,-0.2,0.5)),z+fz*0.6);
+      cam.position.copy(G.camBase); cam.up.set(0,1,0); cam.lookAt(this.tmp); cam.updateMatrixWorld();
+      G.camRight.set(1,0,0).applyQuaternion(cam.quaternion); G.camRight.y=0; G.camRight.normalize(); G.camFwd.set(fx,0,fz); return; }
     const cy=0.16+short*0.8;   // 벽에 몰려 카메라가 붙을수록 위로 올라가 내려다본다
     G.camBase.set(cx,cy,cz);
     const pit=pitch-short*0.42;
@@ -3705,7 +3714,9 @@ clearTraps(){
     cam.position.copy(G.camBase); cam.up.set(0,1,0); cam.lookAt(this.tmp); cam.updateMatrixWorld();
     G.camRight.set(1,0,0).applyQuaternion(cam.quaternion); G.camRight.y=0; G.camRight.normalize(); G.camFwd.set(fx,0,fz); }
   
-  
+
+
+
   
     deathCamera(dt){
     const P=this.p;
@@ -3842,8 +3853,12 @@ clearTraps(){
   watchCamera(dt){ const E=this.egg, cam=this.G.camera, A=this.ai;
     if(!E){ this.applyCam(this.p.x,this.p.z,this.camYaw,this.camPitch,0,null); return; }
     const yaw=Math.atan2(A.x-E.x,A.z-E.z); this.watchYaw=angleDamp(this.watchYaw===undefined?yaw:this.watchYaw,yaw,2.2,dt);
-    const bx=clamp(E.x-Math.sin(this.watchYaw)*0.5,-1.95,1.95), bz=clamp(E.z-Math.cos(this.watchYaw)*0.5,-2.95,2.95);
-    cam.position.set(bx,0.25,bz); this.tmp.set(E.x*0.62+A.x*0.38,0.16,E.z*0.62+A.z*0.38); cam.lookAt(this.tmp); }
+    // 알집 뒤 0.5m에 두되, 가구·문 속이면 거리를 줄이고, 그래도 없으면 옆으로 돌려 빈자리를 찾는다. 자리가 바뀔 때 튀지 않게 부드럽게 옮긴다.
+    let bx=clamp(E.x-Math.sin(this.watchYaw)*0.5,-1.9,1.9), bz=clamp(E.z-Math.cos(this.watchYaw)*0.5,-2.9,2.9), found=false;
+    for(const off of [0,0.5,-0.5,1,-1,1.6,-1.6,Math.PI]){ const a=this.watchYaw+off; for(let back=0.5;back>=0.14;back-=0.06){ const tx=clamp(E.x-Math.sin(a)*back,-1.9,1.9), tz=clamp(E.z-Math.cos(a)*back,-2.9,2.9); let ok=true; for(const o of OBST){ if(!o.roach&&inObst(o,tx,tz,0.03)){ ok=false; break; } } if(ok){ bx=tx; bz=tz; found=true; break; } } if(found) break; }
+    if(!this.watchCam||this.watchCamT!==this.egg){ this.watchCam=new THREE.Vector3(bx,0.25,bz); this.watchCamT=this.egg; } else this.watchCam.lerp(this.tmp3.set(bx,0.25,bz),1-Math.exp(-5*dt));
+    if(!found) this.tmp3.set(bx,0.75,bz), this.watchCam.copy(this.tmp3);   // 침대 뒤 틈처럼 둘 데가 전혀 없으면 위에서 내려다본다
+    cam.position.copy(this.watchCam); this.tmp.set(E.x*0.62+A.x*0.38,0.16,E.z*0.62+A.z*0.38); cam.lookAt(this.tmp); }
   leaveCamera(dt){ const L=this.leaveCam; const cam=this.G.camera; cam.position.set(L.x,0.1,L.z); this.tmp.set(L.x+Math.sin(L.yaw)*1,0.1,L.z+Math.cos(L.yaw)*1); cam.lookAt(this.tmp); }
 }
 
