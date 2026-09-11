@@ -4098,7 +4098,7 @@ G.showRank=function(gen,ended){
     `${generations}<small>세대</small>`;
 
   rk.querySelector('.sub').textContent=
-    (ended?'사람은 방을 비웠다.':`${generations}세대가 이어졌다.`)+
+    (ended?'사람은 방을 떠났다.':`${generations}세대가 이어졌다.`)+
     (me>=0?` 이번이 ${me+1}위.`:'');
 
   const row=(o,i)=>`<div class="${o.t===now?'me':''}">${i+1}위 · ${o.g+1}세대${o.e?' · 엔딩':''}</div>`;
