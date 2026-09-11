@@ -406,25 +406,26 @@ function installTweezerMode(){
   const originalCancel=G.input.onCancel;
   const originalKey=G.input.onKey;
 
-  G.input.onPress=(x,y,type)=>{
+  // 손가락 번호(id)까지 그대로 넘겨야 게임 쪽에서 양손 연타·뿌리며 두드리기를 구분한다
+  G.input.onPress=(x,y,type,id)=>{
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
       lastPointer={x,y,type};
       captureAt(x,y,type);
       return;
     }
-    originalPress?.(x,y,type);
+    originalPress?.(x,y,type,id);
   };
-  G.input.onDrag=(x,y)=>{
+  G.input.onDrag=(x,y,id)=>{
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
       lastPointer={x,y,type:G.input.lastType||'touch'};
       pointTweezerAt(x,y,G.input.lastType==='mouse');
       return;
     }
-    originalDrag?.(x,y);
+    originalDrag?.(x,y,id);
   };
-  G.input.onRelease=()=>{
+  G.input.onRelease=(id)=>{
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap))return;
-    originalRelease?.();
+    originalRelease?.(id);
   };
   G.input.onCancel=()=>{
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
