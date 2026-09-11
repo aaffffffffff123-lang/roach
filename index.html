@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>바퀴</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#17110e;touch-action:none;-webkit-user-select:none;user-select:none}
+iframe{display:block;width:100%;height:100%;border:0;background:#17110e}
+#gameFrame{position:fixed;inset:0;z-index:1;transition:opacity .14s linear}
+#gameFrame.covered{opacity:0;pointer-events:none}
+#labLayer{position:fixed;inset:0;z-index:20;background:#211b17;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .14s linear,visibility 0s linear .14s}
+#labLayer.open{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .14s linear}
+#labFrame{position:absolute;inset:0}
+#labBack{position:absolute;z-index:2;left:calc(12px + env(safe-area-inset-left));top:calc(12px + env(safe-area-inset-top));min-width:44px;height:44px;padding:0 15px;border:0;border-radius:999px;background:rgba(248,240,220,.94);color:#302017;font:900 13px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 2px 0 rgba(114,76,43,.7),0 7px 20px rgba(0,0,0,.3);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#labBack:active{transform:translateY(2px)}
+#boot{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:#211b17;transition:opacity .25s;pointer-events:none}
+#boot.done{opacity:0}
+#boot::after{content:"";width:28px;height:28px;border:3px solid rgba(248,240,220,.2);border-top-color:rgba(248,240,220,.85);border-radius:50%;animation:spin .75s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#error{position:fixed;z-index:50;inset:auto 16px calc(18px + env(safe-area-inset-bottom));display:none;padding:12px 15px;border-radius:14px;background:rgba(83,25,18,.94);color:#f8f0dc;font:700 13px/1.5 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center}
+#error.show{display:block}
+</style>
+</head>
+<body>
+<iframe id="gameFrame" title="바퀴 게임" allow="autoplay"></iframe>
+<div id="labLayer" aria-hidden="true">
+  <iframe id="labFrame" title="잡은 바퀴벌레" allow="autoplay"></iframe>
+  <button id="labBack" type="button" aria-label="게임으로 돌아가기">돌아가기</button>
+</div>
+<div id="boot" aria-hidden="true"></div>
+<div id="error" role="alert"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const gameFrame=document.getElementById('gameFrame');
+const labLayer=document.getElementById('labLayer');
+const labFrame=document.getElementById('labFrame');
+const labBack=document.getElementById('labBack');
+const boot=document.getElementById('boot');
+const errorEl=document.getElementById('error');
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+let gameWindow=null;
+let G=null;
+let installed=false;
+let labOpen=false;
+let captureSerial=0;
+let pausedBeforeLab=false;
+let tweezerRig=null;
+let tweezerJaws=[];
+let lastPointer=null;
+let closeBusy=false;
+
+const showError=text=>{
+  errorEl.textContent=text;
+  errorEl.classList.add('show');
+};
+
+function forwardedGameUrl(){
+  const q=new URLSearchParams(location.search);
+  q.delete('lab');
+  const query=q.toString();
+  return `game.html${query?`?${query}`:''}${location.hash||''}`;
+}
+
+gameFrame.src=forwardedGameUrl();
+
+async function waitForGame(){
+  for(let i=0;i<500;i++){
+    try{
+      const w=gameFrame.contentWindow;
+      if(w?.__g?.r1?.roaches&&w.__g.ui?.slotEls){
+        gameWindow=w;
+        G=w.__g;
+        installTweezerMode();
+        boot.classList.add('done');
+        setTimeout(()=>boot.remove(),300);
+        return;
+      }
+    }catch(err){}
+    await delay(20);
+  }
+  boot.classList.add('done');
+  showError('게임 연결에 실패했다. game.html과 index.html이 같은 폴더에 있는지 확인한다.');
+}
+
+gameFrame.addEventListener('load',()=>{
+  installed=false;
+  waitForGame();
+});
+
+function steelMaterial(color=0xb9bec2){
+  return new THREE.MeshStandardMaterial({color,roughness:.26,metalness:.9});
+}
+
+function makeTweezerRig(){
+  const root=new THREE.Group();
+  root.name='capture-tweezer';
+  const steel=steelMaterial();
+  const dark=steelMaterial(0x666d72);
+  const arms=[];
+  for(const side of [-1,1]){
+    const jaw=new THREE.Group();
+    jaw.position.x=side*.024;
+    const arm=new THREE.Mesh(new THREE.BoxGeometry(.018,.018,.36),steel);
+    arm.position.z=.05;
+    arm.rotation.y=-side*.035;
+    jaw.add(arm);
+    const tip=new THREE.Mesh(new THREE.BoxGeometry(.011,.014,.105),dark);
+    tip.position.set(-side*.006,-.002,-.176);
+    tip.rotation.y=side*.08;
+    jaw.add(tip);
+    root.add(jaw);
+    arms.push(jaw);
+  }
+  const bridge=new THREE.Mesh(new THREE.BoxGeometry(.078,.025,.07),dark);
+  bridge.position.z=.245;
+  root.add(bridge);
+  root.scale.setScalar(1.25);
+  root.visible=false;
+  root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
+  root.userData.setGrip=value=>{
+    const gap=.024-(Math.max(0,Math.min(1,value))*.016);
+    arms[0].position.x=-gap;
+    arms[1].position.x=gap;
+  };
+  root.userData.setGrip(0);
+  tweezerJaws=arms;
+  return root;
+}
+
+function pointTweezerAt(sx,sy,visible=true){
+  if(!G||!tweezerRig||G.state!=='r1'||G.r1.item!=='tweezer'||labOpen){
+    if(tweezerRig)tweezerRig.visible=false;
+    return;
+  }
+  const p=G.r1.floorPoint(sx,sy);
+  if(!p){tweezerRig.visible=false;return;}
+  tweezerRig.visible=visible;
+  tweezerRig.position.set(p.x,.19,p.z);
+  const up=G.camUp||{x:0,z:-1};
+  tweezerRig.rotation.set(0,Math.atan2(up.x,up.z),0);
+}
+
+function selectTweezer(){
+  if(!G||G.state!=='r1')return;
+  G.r1.cancel?.();
+  G.r1.selectItem('tweezer');
+  G.ui.hint?.('살아 있는 바퀴벌레 한 마리를 누르면 집는다.',2.2,0,true);
+  if(lastPointer)pointTweezerAt(lastPointer.x,lastPointer.y,lastPointer.type==='mouse');
+}
+
+function captureCandidateAt(sx,sy,pointerType='touch'){
+  if(!G||G.state!=='r1'||G.r1.item!=='tweezer'||labOpen)return null;
+  const w=gameWindow.innerWidth||gameFrame.clientWidth||innerWidth;
+  const h=gameWindow.innerHeight||gameFrame.clientHeight||innerHeight;
+  const limit=pointerType==='mouse'?34:50;
+  const tmp=new THREE.Vector3();
+  let best=null;
+  let bestD=limit*limit;
+
+  for(const r of G.r1.roaches){
+    if(!r||r.gone||r.state==='dead'||!r.m?.g?.visible)continue;
+    if(G.r1.underCushion?.(r.x,r.z))continue;
+    tmp.set(r.x,.035,r.z).project(G.camera);
+    if(tmp.z<-1||tmp.z>1)continue;
+    const px=(tmp.x*.5+.5)*w;
+    const py=(-tmp.y*.5+.5)*h;
+    const d=(px-sx)**2+(py-sy)**2;
+    if(d<bestD){bestD=d;best=r;}
+  }
+  return best;
+}
+
+function removeCapturedRoach(r){
+  if(!r)return;
+  const i=G.r1.roaches.indexOf(r);
+  if(i>=0)G.r1.roaches.splice(i,1);
+  r.gone=true;
+  if(r.m?.g){r.m.g.visible=false;G.r1.grp.remove(r.m.g);}
+  G.r1.used?.add('tweezer');
+  G.r1.touch?.();
+}
+
+function captureAt(sx,sy,pointerType){
+  const r=captureCandidateAt(sx,sy,pointerType);
+  if(!r){
+    tweezerRig?.userData.setGrip?.(1);
+    setTimeout(()=>tweezerRig?.userData.setGrip?.(0),110);
+    G.ui.hint?.('바퀴벌레 몸통을 정확히 누른다.',1.35,0,true);
+    return;
+  }
+  tweezerRig?.userData.setGrip?.(1);
+  removeCapturedRoach(r);
+  openLab({heading:r.h||0,state:r.state||'wander'});
+}
+
+function addTweezerSlot(){
+  const doc=gameWindow.document;
+  if(doc.getElementById('tweezer-slot'))return;
+  const slot=doc.createElement('div');
+  slot.id='tweezer-slot';
+  slot.className='slot';
+  slot.textContent='족집게';
+  slot.title='족집게 (T)';
+  slot.addEventListener('pointerdown',e=>{
+    e.stopPropagation();
+    e.preventDefault();
+    selectTweezer();
+  });
+  const col=doc.getElementById('wcol');
+  const hand=G.ui.slotEls.hand;
+  col.insertBefore(slot,hand?.nextSibling||col.firstChild);
+  G.ui.slotEls.tweezer=slot;
+}
+
+function installTweezerMode(){
+  if(installed||!G)return;
+  installed=true;
+  addTweezerSlot();
+
+  tweezerRig=makeTweezerRig();
+  G.r1.grp.add(tweezerRig);
+
+  const originalUpdate=G.r1.update.bind(G.r1);
+  G.r1.update=function(dt){
+    if(this.item!=='tweezer'){
+      if(tweezerRig)tweezerRig.visible=false;
+      return originalUpdate(dt);
+    }
+    const mouse=this.G.input?.mouse;
+    const oldLive=mouse?.live;
+    this.item='hand';
+    if(mouse)mouse.live=false;
+    try{
+      return originalUpdate(dt);
+    }finally{
+      this.item='tweezer';
+      if(mouse)mouse.live=oldLive;
+      if(this.itemMeshes?.hand)this.itemMeshes.hand.visible=false;
+      if(lastPointer&&oldLive)pointTweezerAt(lastPointer.x,lastPointer.y,true);
+      else if(tweezerRig)tweezerRig.visible=false;
+    }
+  };
+
+  const originalSelect=G.r1.selectItem.bind(G.r1);
+  G.r1.selectItem=function(kind){
+    const result=originalSelect(kind);
+    if(kind!=='tweezer'&&tweezerRig)tweezerRig.visible=false;
+    return result;
+  };
+
+  const originalStop=G.r1.stop.bind(G.r1);
+  G.r1.stop=function(){
+    if(tweezerRig)tweezerRig.visible=false;
+    return originalStop();
+  };
+
+  const originalPress=G.input.onPress;
+  const originalDrag=G.input.onDrag;
+  const originalRelease=G.input.onRelease;
+  const originalCancel=G.input.onCancel;
+  const originalKey=G.input.onKey;
+
+  G.input.onPress=(x,y,type)=>{
+    if(G.state==='r1'&&G.r1.item==='tweezer'){
+      lastPointer={x,y,type};
+      captureAt(x,y,type);
+      return;
+    }
+    originalPress?.(x,y,type);
+  };
+  G.input.onDrag=(x,y)=>{
+    if(G.state==='r1'&&G.r1.item==='tweezer'){
+      lastPointer={x,y,type:G.input.lastType||'touch'};
+      pointTweezerAt(x,y,G.input.lastType==='mouse');
+      return;
+    }
+    originalDrag?.(x,y);
+  };
+  G.input.onRelease=()=>{
+    if(G.state==='r1'&&G.r1.item==='tweezer')return;
+    originalRelease?.();
+  };
+  G.input.onCancel=()=>{
+    if(G.state==='r1'&&G.r1.item==='tweezer'){
+      tweezerRig?.userData.setGrip?.(0);
+      return;
+    }
+    originalCancel?.();
+  };
+  G.input.onKey=(code,down)=>{
+    if(G.state==='r1'&&down&&code==='KeyT'){
+      selectTweezer();
+      return;
+    }
+    originalKey?.(code,down);
+  };
+
+  gameWindow.addEventListener('pointermove',e=>{
+    lastPointer={x:e.clientX,y:e.clientY,type:e.pointerType==='mouse'?'mouse':'touch'};
+    if(G.state==='r1'&&G.r1.item==='tweezer'&&e.pointerType==='mouse')pointTweezerAt(e.clientX,e.clientY,true);
+  },{passive:true});
+  gameWindow.addEventListener('pointerleave',()=>{if(tweezerRig)tweezerRig.visible=false;});
+}
+
+function enterLoadedLab(){
+  try{
+    labFrame.contentWindow?.SpecimenLab?.enter?.({
+      reset:true,
+      showIntro:false,
+      showHUD:true,
+      showToolbar:true,
+      showActions:true,
+      enabledTools:['tweezer','pin','camera'],
+      quality:'auto'
+    });
+  }catch(err){console.error(err);}
+}
+
+function openLab(meta={}){
+  if(labOpen||!G)return;
+  labOpen=true;
+  closeBusy=false;
+  pausedBeforeLab=!!G.paused;
+  G.paused=true;
+  G.r1.cancel?.();
+  G.input.reset?.();
+  if(tweezerRig)tweezerRig.visible=false;
+  captureSerial++;
+  labFrame.src=`specimen-lab.html?embed=1&capture=${captureSerial}`;
+  labLayer.classList.add('open');
+  labLayer.setAttribute('aria-hidden','false');
+  gameFrame.classList.add('covered');
+}
+
+function closeLab(){
+  if(!labOpen||closeBusy)return;
+  closeBusy=true;
+  try{
+    labFrame.contentWindow?.SpecimenLab?.exit?.();
+    labFrame.contentWindow?.SpecimenLab?.dispose?.();
+  }catch(err){console.warn(err);}
+  labLayer.classList.remove('open');
+  labLayer.setAttribute('aria-hidden','true');
+  gameFrame.classList.remove('covered');
+  labFrame.src='about:blank';
+  labOpen=false;
+  if(G){
+    G.paused=pausedBeforeLab;
+    G.r1.touch?.();
+    G.ui.hint?.('족집게로 다른 바퀴벌레도 집을 수 있다.',1.6,.1,true);
+  }
+  setTimeout(()=>{closeBusy=false;},160);
+}
+
+labBack.addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  e.stopPropagation();
+  closeLab();
+});
+
+window.addEventListener('message',e=>{
+  if(e.source!==labFrame.contentWindow)return;
+  if(e.data?.type==='specimen-lab-ready')enterLoadedLab();
+  if(e.data?.type==='specimen-lab-close')closeLab();
+});
+
+window.addEventListener('keydown',e=>{
+  if(e.code==='Escape'&&labOpen){e.preventDefault();closeLab();}
+});
+</script>
+</body>
+</html>
