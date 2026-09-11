@@ -241,6 +241,10 @@ class AudioFX{
   scratch(k=.5){if(!this.ready())return;const n=1+Math.round(k*2.5);for(let i=0;i<n;i++)this.noise({delay:i*rand(.012,.03),dur:rand(.006,.016),gain:.035+k*.09,freq:rand(3000,7000),q:2.4,pan:rand(-.6,.6)})}
   // 부르르 — 겉날개를 떠는 짧은 날갯짓
   flutter(k=.5){if(!this.ready())return;const d=rand(.08,.16);this.noise({dur:d,gain:.05+k*.06,freq:170,q:3,pan:rand(-.3,.3),attack:.01});this.tone({dur:d,gain:.025+k*.03,freq:rand(95,130),type:'sawtooth'})}
+  // 끼이익 — 늘어나는 내장
+  gutStretch(k=.7){if(!this.allow('gutStretch',.05))return;this.noise({dur:rand(.05,.1),gain:.06+k*.08,freq:rand(380,700)*(1.3-k*.4),end:rand(250,450),q:7});if(Math.random()<.4)this.squish({size:.15,gain:.06})}
+  // 툭 — 내장이 끊어진다
+  gutSnap(){if(!this.ready())return;this.tone({dur:.06,gain:.26,freq:340,end:90});this.squish({delay:.01,size:.8,gain:.4});this.crackle({dur:.05,n:4,gain:.08,fmin:1500,fmax:3500})}
   // 쓱싹 — 판을 걸레로 훔친다
   wipe(){if(!this.ready())return;for(let i=0;i<3;i++)this.noise({delay:i*.15,dur:.13,gain:.22,freq:800+i*350,end:2600,q:.7,attack:.03});this.squish({delay:.06,size:.5,gain:.14})}
   // 휙 — 들어 올려 굴린다
@@ -324,6 +328,13 @@ const mat={
   eyeWound:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xc4a66e,roughness:.24,metalness:0})),
   eyeWoundDeep:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xb08e58,roughness:.36})),
   vein:markSharedMaterial(new THREE.LineBasicMaterial({color:0x2a1206,transparent:true,opacity:.32,depthWrite:false})),
+  ooze:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xd8c393,emissive:0x4a3a1c,roughness:.2,metalness:0})),
+  fat:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xf1e6c6,emissive:0x544a34,roughness:.34,metalness:0})),
+  fat2:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xe3cd92,emissive:0x4c3c18,roughness:.3,metalness:0})),
+  gut:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x8a5a30,roughness:.26,metalness:0})),
+  gutDark:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x2e1809,roughness:.4,metalness:0})),
+  tubule:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xd9ad3f,roughness:.35,metalness:0})),
+  trachea:markSharedMaterial(new THREE.MeshStandardMaterial({color:0xe9e7dc,roughness:.25,metalness:.15})),
   veinHind:markSharedMaterial(new THREE.LineBasicMaterial({color:0x6b5236,transparent:true,opacity:.3,depthWrite:false})),
   rim:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x765535,roughness:.88})),
   dark:markSharedMaterial(new THREE.MeshStandardMaterial({color:0x190d08,roughness:.9})),
@@ -355,6 +366,7 @@ const specimenGroup=new THREE.Group();scene.add(specimenGroup);
 const looseGroup=new THREE.Group();scene.add(looseGroup);
 const pinGroup=new THREE.Group();scene.add(pinGroup);
 const fxGroup=new THREE.Group();scene.add(fxGroup);
+const strandGroup=new THREE.Group();scene.add(strandGroup);
 
 // 낙하한 진물은 사라지지 않고 작업판에 계속 쌓인다.
 const FLOOR_FLUID_CAP=IS_SMALL?300:520;
@@ -538,7 +550,7 @@ class BodyPart{
 
 class Specimen{
   constructor(){
-    this.parts=new Map();this.loose=[];this.pins=[];this.fluid=[];this.wounds=[];this.fragments=0;this.life='alive';this.central=1;this.respiration=1;this.locomotion=1;
+    this.parts=new Map();this.loose=[];this.pins=[];this.fluid=[];this.wounds=[];this.strands=[];this.fragments=0;this.life='alive';this.central=1;this.respiration=1;this.locomotion=1;
     this.shockImpulse=0;this.heatImpulse=0;this.recentPain=0;this.painImpulse=0;this.agony=0;this.agonyTarget=0;this.trauma=0;this.reaction=0;this.reactionTarget=0;this.crawlPhase=0;this.twistPhase=rand(TAU);this.intent=rand(TAU);this.intentT=0;
     this.totalCuts=0;this.totalDamage=0;this.fluidVolume=0;this.baseRootY=.43;this.floorOffset=0;this.floorTarget=0;this.floorT=0;this.systemT=0;this.materialT=0;
     this.root=new THREE.Group();specimenGroup.add(this.root);this.root.position.set(0,this.baseRootY,.32);
@@ -715,7 +727,7 @@ class Specimen{
     clearPartOutline();
     for(const rec of this.pins){const i=pinHeads.indexOf(rec.head);if(i>=0)pinHeads.splice(i,1);disposeObject3D(rec.group)}
     const roots=new Set([this.root]);for(const rec of this.loose)if(rec.node?.parent)roots.add(rec.node);for(const r of roots)disposeObject3D(r);
-    clearDynamicGroup(fxGroup);fluidField.reset();
+    clearDynamicGroup(fxGroup);fluidField.reset();for(const s of this.strands)disposeObject3D(s.mesh);this.strands.length=0;
     this.parts.clear();this.loose.length=0;this.pins.length=0;this.fluid.length=0;this.wounds.length=0;interactiveMeshes.length=0;
   }
 }
@@ -784,6 +796,75 @@ Specimen.prototype.carveEyeSocket=function(eye){
   pos.needsUpdate=true;if(col)col.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
   if(!deep)return null;mesh.updateMatrixWorld(true);return deep.applyMatrix4(eyeM).applyMatrix4(mesh.parent.matrixWorld);
 };
+// ───────── 몸통 단면 ─────────
+// 뜯긴 자리의 단면 크기 (마디 모양에 맞춘 가로·세로 반지름)
+Specimen.prototype.sectionRadii=function(part,parentPart){
+  const d=part.abdDims,pd=parentPart?.abdDims;
+  let rx,ry;
+  if(d){rx=d.w*.8;ry=(d.hd+d.hv)*.42}
+  else if(part.id==='head_core'){rx=.19;ry=.15}
+  else if(part.id==='pronotum'){rx=.42;ry=.3}
+  else{const s=part.meshes[0].scale;rx=s.x*.62;ry=s.y*.8}
+  if(pd){rx=Math.min(rx,pd.w*.8);ry=Math.min(ry,(pd.hd+pd.hv)*.42)}
+  return [rx,ry];
+};
+// 뜯긴 면: 바깥에서 몸 쪽으로 광선을 쏴서 표면을 찾고, 그 자리에 진물 막·지방 덩어리·내장 단면·가는 관을 붙인다.
+// dir: 몸 안쪽에서 뜯긴 쪽을 향하는 방향(월드). 반환값의 gut은 내장 줄이 이어질 점(node 기준).
+Specimen.prototype.attachBodyWound=function(node,mesh,dir,rx,ry,{gut=true,big=1}={}){
+  if(!node||!mesh||!objectInScene(node))return null;
+  mesh.updateWorldMatrix(true,false);if(!mesh.geometry.boundingSphere)mesh.geometry.computeBoundingSphere();
+  const n=dir.clone().normalize(),center=mesh.geometry.boundingSphere.center.clone().applyMatrix4(mesh.matrixWorld);
+  const rc=new THREE.Raycaster(center.clone().addScaledVector(n,6),n.clone().negate(),0,12);const hit=rc.intersectObject(mesh,false)[0];
+  const at=hit?hit.point.clone():center.clone().addScaledVector(n,Math.max(rx,ry));
+  // 면 방향: z = 바깥, x = 몸의 좌우
+  const side=v3(1,0,0).applyQuaternion(this.root.getWorldQuaternion(new THREE.Quaternion()));side.addScaledVector(n,-side.dot(n));if(side.lengthSq()<1e-4)side.set(0,0,1).cross(n);side.normalize();
+  const up=new THREE.Vector3().crossVectors(n,side).normalize(),g=new THREE.Group();
+  g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side,up,n));g.position.copy(at).addScaledVector(n,.004);g.userData.bodyWound=true;scene.add(g);node.attach(g);
+  const add=(geo,m,x,y,z,sx,sy,sz)=>{const q=new THREE.Mesh(geo,m);q.position.set(x,y,z);q.scale.set(sx,sy,sz);q.castShadow=false;q.receiveShadow=false;g.add(q);return q};
+  // 진물 막 + 찢긴 껍질 테
+  add(irregularDiscGeometry(1,.3,19,.008),mat.ooze,0,0,.012,rx*.95,ry*.95,1).renderOrder=5;
+  add(raggedRingGeometry(1,19,.02),mat.tear,0,0,.008,rx,ry,1).renderOrder=6;
+  // 지방 덩어리: 크림색 뭉치가 단면 밖으로 비어져 나온다
+  const lump=sharedGeometry('fat-lump',()=>new THREE.SphereGeometry(1,IS_SMALL?7:9,IS_SMALL?5:7)),nf=Math.round((IS_SMALL?9:14)*big);
+  for(let i=0;i<nf;i++){const a=rand(TAU),r=Math.sqrt(Math.random())*.82,s=rand(.028,.07)*big*(1.1-r*.4);add(lump,Math.random()<.62?mat.fat:mat.fat2,Math.cos(a)*r*rx,Math.sin(a)*r*ry,.012+s*rand(.1,.55),s*rand(.9,1.4),s*rand(.8,1.2),s*rand(.45,.8))}
+  // 가는 관: 노란 말피기관, 은빛 기관
+  const nt=Math.round((IS_SMALL?3:5)*big);
+  for(let i=0;i<nt;i++){const a=rand(TAU),r=rand(.1,.7),p0=v3(Math.cos(a)*r*rx,Math.sin(a)*r*ry,.01),len=rand(.08,.22)*big,pts=[p0];for(let k=1;k<=4;k++){const t=k/4;pts.push(v3(p0.x+Math.cos(a+rand(-1,1))*len*t*.7,p0.y+Math.sin(a+rand(-1,1))*len*t*.7-len*t*t*.3,.01+len*t*.55))}
+    const q=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),10,rand(.004,.007),4,false),Math.random()<.6?mat.tubule:mat.trachea);q.castShadow=false;g.add(q)}
+  let gutLocal=null;
+  if(gut){
+    // 내장 단면: 갈색 관 + 속의 검은 내용물
+    const gx=rand(-.15,.15)*rx,gy=-.12*ry,gr=.055*big;
+    add(sharedGeometry('gut-ring',()=>new THREE.TorusGeometry(1,.38,IS_SMALL?6:8,IS_SMALL?12:16)),mat.gut,gx,gy,.02,gr,gr,gr*.9);
+    add(sharedGeometry('gut-core',()=>new THREE.CircleGeometry(1,IS_SMALL?10:14)),mat.gutDark,gx,gy,.024,gr*.75,gr*.75,1);
+    g.updateWorldMatrix(true,false);gutLocal=node.worldToLocal(g.localToWorld(v3(gx,gy,.03)));
+  }
+  g.updateWorldMatrix(true,false);return {group:g,node,gut:gutLocal,world:g.localToWorld(v3(0,0,.02))};
+};
+// 떨어져 나간 조각과 몸통 사이에 내장이 줄처럼 늘어나다가 끊어진다
+Specimen.prototype.addStrand=function(nodeA,localA,nodeB,localB,snap=1.4,r=.03){
+  this.strands.push({a:nodeA,la:localA.clone(),b:nodeB,lb:localB.clone(),snap,r,mesh:null,creakT:0});
+};
+Specimen.prototype.updateStrands=function(dt){
+  for(let i=this.strands.length-1;i>=0;i--){
+    const s=this.strands[i];
+    if(!objectInScene(s.a)||!objectInScene(s.b)){disposeObject3D(s.mesh);this.strands.splice(i,1);continue}
+    s.a.updateWorldMatrix(true,false);s.b.updateWorldMatrix(true,false);
+    const pa=s.a.localToWorld(s.la.clone()),pb=s.b.localToWorld(s.lb.clone()),d=pa.distanceTo(pb),k=clamp(d/s.snap);
+    if(d>s.snap){
+      // 툭 끊어지며 양쪽에 짧은 끄트머리가 늘어진다
+      disposeObject3D(s.mesh);this.strands.splice(i,1);
+      for(const [node,p,q] of [[s.a,pa,pb],[s.b,pb,pa]]){const dirv=q.clone().sub(p).normalize(),e1=p.clone().addScaledVector(dirv,.08).add(v3(0,-.05,0)),e2=p.clone().addScaledVector(dirv,.13).add(v3(0,-.12,0));e2.y=Math.max(e2.y,boardTopY+.01);
+        const stub=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([p,e1,e2]),8,s.r*.8,6,false),mat.gut);scene.add(stub);node.attach(stub)}
+      const mid=pa.clone().lerp(pb,.5);this.spawnDroplets(mid,Math.floor(8*FX_BUDGET)+3,.5,false);this.addFluid(v3(mid.x,0,mid.z),.07,2,false);SFX.gutSnap();this.stimulate(.2);continue;
+    }
+    const mid=pa.clone().lerp(pb,.5);mid.y-=clamp(.42-d*.3,.03,.4);mid.y=Math.max(mid.y,boardTopY+s.r+.008);
+    const q1=pa.clone().lerp(mid,.5),q2=pb.clone().lerp(mid,.5);q1.y-=.02;q2.y-=.02;
+    const geo=new THREE.TubeGeometry(new THREE.CatmullRomCurve3([pa,q1,mid,q2,pb]),IS_SMALL?12:18,s.r*(1-.5*k),6,false);
+    if(s.mesh){s.mesh.geometry.dispose();s.mesh.geometry=geo}else{s.mesh=new THREE.Mesh(geo,mat.gut);s.mesh.castShadow=true;strandGroup.add(s.mesh)}
+    if(k>.55){s.creakT-=dt;if(s.creakT<=0){s.creakT=rand(.06,.14)*(1.4-k);SFX.gutStretch(k)}}
+  }
+};
 Specimen.prototype.addFluid=function(point,size=.08,count=1,dark=false){
   const n=Math.max(1,Math.floor(count));
   for(let i=0;i<n;i++){const s=clamp(size*rand(1.18,1.72),.014,.24);fluidField.add(point,s,dark);this.fluidVolume+=s*s}
@@ -824,8 +905,19 @@ Specimen.prototype.detachPart=function(part,worldPoint=null,force=.6,reason='pul
   const joint=part.jointLocal?oldParent.localToWorld(part.jointLocal.clone()):(part.segmentMesh||part.role==='eye')?oldParent.localToWorld(part.basePos.clone()):parentCenter.clone().lerp(childCenter,.6);
   const eye=part.role==='eye',pit=eye?this.carveEyeSocket(part):null,pt=pit||joint.clone();
   const ragged=reason==='pull';const scarSize=eye?.075:clamp((part.small?.06:.095)+force*.035,.055,.16);
-  if(!eye){this.attachScar(oldParent,pt,axis,scarSize,{moisture:ragged?.86:.7,ragged});if(part.socket)part.socket.visible=true}
-  part.parentId=null;looseGroup.attach(part.node);this.markSubtreeDetached(part);this.refreshGraph();this.attachScar(part.node,part.segmentMesh?childCenter:pt,axis.clone().negate(),scarSize*.88,{moisture:ragged?.8:.64,ragged,pale:eye});
+  const body=!eye&&(part.role==='core'||part.role==='abdomen'),parentPart=this.parts.get(part.parentId);let pw=null;
+  if(body){
+    // 몸마디끼리 뜯기면 양쪽 단면에 진물·지방·내장이 드러난다
+    const [rx,ry]=this.sectionRadii(part,parentPart),withGut=part.id!=='pronotum',big=part.role==='abdomen'?1:part.id==='head_core'?.7:.85;
+    if(parentPart?.meshes?.[0])pw=this.attachBodyWound(oldParent,parentPart.meshes[0],axis,rx,ry,{gut:withGut,big});
+    if(pw)pt.copy(pw.world);
+  }else if(!eye){this.attachScar(oldParent,pt,axis,scarSize,{moisture:ragged?.86:.7,ragged});if(part.socket)part.socket.visible=true}
+  part.parentId=null;looseGroup.attach(part.node);this.markSubtreeDetached(part);this.refreshGraph();
+  if(body){
+    const [rx,ry]=this.sectionRadii(part,parentPart),withGut=part.id!=='pronotum',big=part.role==='abdomen'?1:part.id==='head_core'?.7:.85;
+    const cw=this.attachBodyWound(part.node,part.meshes[0],axis.clone().negate(),rx,ry,{gut:withGut,big});
+    if(pw&&cw&&pw.gut&&cw.gut)this.addStrand(pw.node,pw.gut,cw.node,cw.gut,part.role==='abdomen'?1.5:1.1,part.role==='abdomen'?.034:.026);
+  }else this.attachScar(part.node,part.segmentMesh?childCenter:pt,axis.clone().negate(),scarSize*.88,{moisture:ragged?.8:.64,ragged,pale:eye});
   const rec={part,node:part.node,vel:v3(rand(-.3,.3),rand(.3,.8),rand(-.3,.3)).multiplyScalar(force),rot:v3(rand(-5,5),rand(-5,5),rand(-5,5)),floor:boardTopY+.006,dragging:false};this.loose.push(rec);this.fragments++;
   part.state.integrity=Math.max(0,part.state.integrity-force*.22);part.state.severed=true;part.state.strain=0;
   const fluidScale=ragged?1.35:1.12;this.addFluid(pt,(.065+force*.052)*fluidScale,ragged?3:2,false);this.spawnDroplets(pt,Math.max(7,Math.floor((11+force*15)*fluidScale*FX_BUDGET)),.68+force*.38,Math.random()<.25);this.spawnFlakes(pt,Math.max(3,Math.floor((4+force*7)*FX_BUDGET)),.52+force*.23);
@@ -970,7 +1062,7 @@ Specimen.prototype.update=function(dt){
     const wingOn=['forewing_L','forewing_R'].some(id=>{const w=this.parts.get(id);return w&&!w.state.detached&&!w.state.pinned});
     if(wingOn&&ag>.75&&!this.flip.on){this.flutterT=(this.flutterT??rand(2,5))-dt*ag;if(this.flutterT<=0){this.flutterT=rand(1.6,4.5);SFX.flutter(clamp(ag-.5))}}
   }
-  this.resolvePinConstraints(dt);this.resolveConnectedFloor(dt);
+  this.resolvePinConstraints(dt);this.resolveConnectedFloor(dt);this.updateStrands(dt);
   for(const rec of this.loose){
     const p=rec.part;if(!p||!rec.node.parent||rec.dragging||p.state.pinned)continue;const reflex=(this.life==='still'?.18:1)*p.state.reflex*(.12+response*(.42+ag*.55+imp*.4));rec.vel.y-=3.4*dt;rec.node.position.addScaledVector(rec.vel,dt);rec.node.rotation.x+=rec.rot.x*dt;rec.node.rotation.y+=rec.rot.y*dt;rec.node.rotation.z+=rec.rot.z*dt;resolveLooseFloor(rec);
     if(reflex>.03){rec.node.position.x+=Math.sin(this.crawlPhase*1.7+p.serial)*dt*.012*reflex;rec.node.rotation.z+=Math.sin(this.crawlPhase*2.1+p.serial)*dt*.09*reflex}rec.node.position.x=clamp(rec.node.position.x,-tray.x+.12,tray.x-.12);rec.node.position.z=clamp(rec.node.position.z,-tray.z+.12,tray.z-.12);
@@ -1203,7 +1295,8 @@ function specimenUsed(sp){return sp.fragments>0||sp.pins.length>0||sp.totalDamag
 function discardSpecimen(sp,keep){
   cancelAction();clearPartOutline();hidePartLabel();
   let body=null,debris=null;
-  if(keep){body=bakeObjects([sp.root,...sp.pins.map(r=>r.group)]);debris=bakeObjects(sp.loose.map(r=>r.node))}
+  if(keep){body=bakeObjects([sp.root,...sp.pins.map(r=>r.group)]);debris=bakeObjects([...sp.loose.map(r=>r.node),...sp.strands.map(s=>s.mesh).filter(Boolean)])}
+  for(const s of sp.strands)disposeObject3D(s.mesh);sp.strands.length=0;
   for(const rec of sp.pins)disposeObject3D(rec.group);pinHeads.length=0;
   disposeObject3D(sp.root);for(const rec of sp.loose)if(rec.node)disposeObject3D(rec.node);
   sp.parts.clear();sp.loose.length=0;sp.pins.length=0;sp.wounds.length=0;interactiveMeshes.length=0;
