@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>바퀴벌레</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#211b17}
+body{display:grid;place-items:center;color:#eadcbc;font:700 13px/1.5 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+#spin{width:28px;height:28px;border:3px solid rgba(248,240,220,.18);border-top-color:rgba(248,240,220,.84);border-radius:50%;animation:spin .75s linear infinite}
+#err{display:none;max-width:80vw;text-align:center}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="spin" aria-label="불러오는 중"></div><div id="err"></div>
+<script>
+(async()=>{
+  try{
+    const urls=['assets/specimen-lab.0?v=5','assets/specimen-lab.1?v=5','assets/specimen-lab.2?v=5','assets/specimen-lab.3?v=5'];
+    const parts=await Promise.all(urls.map(async url=>{
+      const response=await fetch(url,{cache:'no-store'});
+      if(!response.ok)throw new Error(`${url} ${response.status}`);
+      return response.text();
+    }));
+    const packed=parts.join('');
+    const BASE=0x3400,BYTE_LENGTH=28188;
+    let acc=0,bits=0,index=0;
+    const bytes=new Uint8Array(BYTE_LENGTH);
+    for(const ch of packed){
+      const value=ch.codePointAt(0)-BASE;
+      if(value<0||value>=32768)throw new Error('payload 형식 오류');
+      acc=acc*32768+value;
+      bits+=15;
+      while(bits>=8&&index<BYTE_LENGTH){
+        bits-=8;
+        const divisor=2**bits;
+        bytes[index++]=Math.floor(acc/divisor)&255;
+        acc%=divisor;
+      }
+    }
+    if(index!==BYTE_LENGTH)throw new Error(`payload 길이 오류 ${index}`);
+    if(!('DecompressionStream'in window))throw new Error('이 브라우저는 압축 해제를 지원하지 않는다.');
+    const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    const html=await new Response(stream).text();
+    document.open();
+    document.write(html);
+    document.close();
+  }catch(err){
+    console.error(err);
+    document.getElementById('spin').style.display='none';
+    const el=document.getElementById('err');
+    el.style.display='block';
+    el.textContent='작업대를 불러오지 못했다: '+err.message;
+  }
+})();
+</script>
+</body>
+</html>
