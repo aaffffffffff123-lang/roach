@@ -2694,7 +2694,8 @@ clearTraps(){
   // ── 보임/빛 ──
   litAt(x,z){ return this.ai.lightsOn||x>0.6; }   // 불이 꺼져 있으면 커튼 틈으로 들어오는 창가 쪽만 밝다
   canSeeAt(x,z,hidden){ const A=this.ai; if(hidden||!(A.state==='sit'||A.awake)) return false; const dx=x-A.x, dz=z-A.z, d=Math.hypot(dx,dz); if(d>3.2||!this.litAt(x,z)) return false; const a=Math.atan2(dx,dz); return Math.abs(wrapAng(a-A.h-this.human.headYaw))<(A.state==='sit'?1.3:0.95)+(d<0.55?1.2:0); }
-  canSee(){ return this.phase==='play'&&this.canSeeAt(this.p.x,this.p.z,this.p.hidden); }
+  // 트인 바닥에 가만히 서 있으면 사람이 곁눈으로도 알아챈다 (1.4m 안, 0.6초 이상 멈춤)
+  canSee(){ const P=this.p, A=this.ai; if(this.phase!=='play') return false; if(this.canSeeAt(P.x,P.z,P.hidden)) return true; return A.awake&&!P.hidden&&(P.stillT||0)>0.6&&this.litAt(P.x,P.z)&&Math.hypot(P.x-A.x,P.z-A.z)<1.4; }
   visibleTargets(){ const out=[]; const P=this.p; if(this.canSee()) out.push({ref:'player',x:P.x,z:P.z,vx:P.vx,vz:P.vz}); for(const n of this.npcs){ if(n.state==='dead'||n.state==='poison'||n.hidden) continue; if(this.canSeeAt(n.x,n.z,false)) out.push({ref:n,x:n.x,z:n.z,vx:n.vx,vz:n.vz}); } return out; }
   distH(){ return Math.hypot(this.p.x-this.ai.x,this.p.z-this.ai.z); }
   goTo(x,z){ const A=this.ai; A.path=this.nav.path(A.x,A.z,x,z); A.wp=0; A.target=[x,z]; }
@@ -2732,7 +2733,7 @@ clearTraps(){
     if(A.rec>0){ A.rec-=dt; }
     if(alive&&P.dash>0&&A.state!=='strike'&&A.state!=='use'){ A.noiseT=0.9; A.noiseDir=Math.atan2(P.x-A.x,P.z-A.z); }
     const targets=this.visibleTargets(); const see=targets.length>0;
-    if(see){ let best=null,bd=1e9; for(const t of targets){ let d=Math.hypot(t.x-A.x,t.z-A.z); if(A.prey&&A.prey.ref===t.ref) d*=0.7; if(d<bd){bd=d;best=t;} } A.prey=best; A.lastSeen={x:best.x,z:best.z,t:0,vx:best.vx,vz:best.vz,ref:best.ref}; } else A.prey=null;
+    if(see){ let best=null,bd=1e9; for(const t of targets){ let d=Math.hypot(t.x-A.x,t.z-A.z); if(A.prey&&A.prey.ref===t.ref) d*=0.7; if(t.ref==='player'&&Math.hypot(t.vx,t.vz)<0.08) d*=0.35; if(d<bd){bd=d;best=t;} } A.prey=best; A.lastSeen={x:best.x,z:best.z,t:0,vx:best.vx,vz:best.vz,ref:best.ref}; } else A.prey=null;
     if(A.lastSeen) A.lastSeen.t+=dt;
     if(this.egg&&!this.ready&&!A.eggKnown&&!this.egg.spot&&A.awake){ const E=this.egg; const dx=E.x-A.x, dz=E.z-A.z, dE=Math.hypot(dx,dz); if(dE<1.0&&this.litAt(E.x,E.z)&&Math.abs(wrapAng(Math.atan2(dx,dz)-A.h))<0.8){ A.eggKnown=true; A.lastSeen=null; } }
     if(A.state==='strike'){ this.updateStrike(dt); this.humanPos(); H.pose(dt,0); return; }
@@ -2756,7 +2757,7 @@ clearTraps(){
     if(see){
       const T=A.prey; const dT=Math.hypot(T.x-A.x,T.z-A.z);
       if(W.cone){ const trig=W.sweep?W.nozzle+0.25:W.cone.len*0.75; if(dT<trig&&A.rec<=0){ A.state='use'; A.useT=0; A.burstOn=false; A.burstT=W.sweep?0:W.gap-0.45; A.aimHole=null; return; } }
-      else if(dT<W.reach&&A.rec<=0){ const wu=W.windup+A.windupAdd; this.beginStrike(T.x+T.vx*wu*0.5+rand(-A.aimErr,A.aimErr),T.z+T.vz*wu*0.5+rand(-A.aimErr,A.aimErr),false); return; }
+      else if(dT<W.reach&&A.rec<=0){ const wu=W.windup+A.windupAdd; const err=Math.hypot(T.vx||0,T.vz||0)<0.08?A.aimErr*0.15:A.aimErr; this.beginStrike(T.x+T.vx*wu*0.5+rand(-err,err),T.z+T.vz*wu*0.5+rand(-err,err),false); return; }
       if(!A.target||dist2(A.target[0],A.target[1],T.x,T.z)>0.09||A.repathT<=0){ this.goTo(T.x,T.z); A.repathT=0.4; } A.repathT-=dt; this.walk(dt);
     } else if(A.lastSeen&&A.lastSeen.t<7){
       if(!A.target||dist2(A.target[0],A.target[1],A.lastSeen.x,A.lastSeen.z)>0.04){ this.goTo(A.lastSeen.x,A.lastSeen.z); }
@@ -3104,8 +3105,8 @@ clearTraps(){
     const P=this.p;
     const spot=spotAt(P.x,P.z);
 
-    const ex=P.x-Math.sin(P.h)*0.06;
-    const ez=P.z-Math.cos(P.h)*0.06;
+    // 알은 꽁무니 쪽에 놓되, 벽이나 가구 안으로 파고들지 않게 바퀴가 갈 수 있는 자리까지만 (다음 세대가 거기서 태어나므로)
+    const [ex,ez]=roachMove(P.x,P.z,P.x-Math.sin(P.h)*0.06,P.z-Math.cos(P.h)*0.06);
 
     this.egg={
       spot,
@@ -3631,7 +3632,7 @@ clearTraps(){
     let spd=mag*0.95; if(P.dash>0) spd=1.9*(0.6+0.4*(P.dash/0.4));
     if(mag>0.05){ P.h=angleDamp(P.h,Math.atan2(mx,mz),P.dash>0?18:11,dt); }
     if(spd>0.01){ const nx=P.x+Math.sin(P.h)*spd*dt, nz=P.z+Math.cos(P.h)*spd*dt; const [px,pz]=roachMove(P.x,P.z,nx,nz); P.vx=(px-P.x)/Math.max(dt,1e-4); P.vz=(pz-P.z)/Math.max(dt,1e-4); P.x=px; P.z=pz; } else { P.vx=P.vz=0; }
-    P.spd=spd; P.noise=spd>0.3?spd:0;
+    P.spd=spd; P.noise=spd>0.3?spd:0; P.stillT=spd<0.05?(P.stillT||0)+dt:0;
     const wasHidden=P.hidden; const hh=spotAt(P.x,P.z); P.hidden=!!hh; if(P.hidden&&!wasHidden) this.lastHideHole=hh; if(P.hidden!==wasHidden) G.ui.vignette(P.hidden);
     if(hh!==this.curSpot){ if(P.hidden!==wasHidden) this.hintHide(this.curSpot,hh); this.curSpot=hh; } this.hintTrap();
     if(P.expo>0&&!(A.state==='use'&&A.burstOn)){ P.expo=Math.max(0,P.expo-dt*0.5); if(P.tox<=0) G.ui.tox(clamp(P.expo/1.7,0,1)); }
