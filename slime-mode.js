@@ -55,7 +55,7 @@ function buttonSvg(label){
   return `<svg viewBox="-2 -2 ${Math.ceil(run.width)+4} 36" aria-hidden="true"><defs><filter id="slimeBtnSh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="1.5" stdDeviation="0" flood-color="#b06a10" flood-opacity=".55"/></filter></defs><g filter="url(#slimeBtnSh)">${run.svg}</g></svg>`;
 }
 
-export function createSlimeMode({gameFrame}){
+export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
   let env=null;                  // {G,gameWindow,THREE,GSFX}
   let ball=null, geos=null, mats=null;
   let count=0, complete=false, cardOpen=false, hintShown=false;
@@ -138,12 +138,30 @@ export function createSlimeMode({gameFrame}){
   const labApi=()=>{ try{return frame.contentWindow?.SlimeLab||null;}catch(err){return null;} };
   function preloadLab(){ if(labState!=='none')return; labState='loading'; frame.src='slime-lab.html?embed=1'; }
   function enterLab(){
-    const L=labApi(); if(!L)return;
-    try{ if(!labEntered){ L.enter({
-  geos:env?geos:null,
-  roaches:roachPayload?.roaches,
-  rollQ:roachPayload?.rollQ
-}); labEntered=true; } else L.wake(); }catch(err){ console.error(err); }
+    const L=labApi();
+    if(!L) return;
+
+    try{
+      if(!labEntered){
+        const payload=Array.isArray(roachPayload)
+          ?{roaches:roachPayload}
+          :(roachPayload||{});
+
+        L.enter({geos:env?geos:null,...payload});
+        labEntered=true;
+
+        onEnter?.({
+          pause:()=>L.sleep(),
+          resume:()=>{
+            if(labOpen&&labEntered) L.wake();
+          }
+        });
+      }else{
+        L.wake();
+      }
+    }catch(err){
+      console.error(err);
+    }
   }
   function openLab(){
     if(labOpen||!env)return;
@@ -158,7 +176,7 @@ export function createSlimeMode({gameFrame}){
     if(labState==='ready')enterLab(); else labPendingOpen=true;
   }
   function closeLab(){
-    if(!labOpen||closeBusy||discarding)return;
+    if(!labOpen||closeBusy||discarding||isBlocked())return;
     disarm();
     closeBusy=true; labPendingOpen=false;
     try{labApi()?.sleep?.();}catch(err){}
