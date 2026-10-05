@@ -139,12 +139,17 @@ export function createSlimeMode({gameFrame}){
   function preloadLab(){ if(labState!=='none')return; labState='loading'; frame.src='slime-lab.html?embed=1'; }
   function enterLab(){
     const L=labApi(); if(!L)return;
-    try{ if(!labEntered){ L.enter({geos:env?geos:null,roaches:roachPayload}); labEntered=true; } else L.wake(); }catch(err){ console.error(err); }
+    try{ if(!labEntered){ L.enter({
+  geos:env?geos:null,
+  roaches:roachPayload?.roaches,
+  rollQ:roachPayload?.rollQ
+}); labEntered=true; } else L.wake(); }catch(err){ console.error(err); }
   }
   function openLab(){
     if(labOpen||!env)return;
     const {G}=env; labOpen=true; closeBusy=false;
     cancelHand(true);
+        if(!labEntered&&complete&&ball) buildPayload();
     pausedBefore=!!G.paused; G.paused=true; G.sleep=true;
     G.r1.cancel?.(); G.input.reset?.();
     if(ball)ball.group.visible=false;
@@ -332,7 +337,19 @@ export function createSlimeMode({gameFrame}){
     if(count>=ROACH_COUNT&&!complete){ complete=true; updateSlot(); buildPayload(); }
   }
   function finishAllCaps(){ for(let i=caps.length-1;i>=0;i--)finishCap(caps[i],i); }
-  function buildPayload(){ roachPayload=ball.roaches.map(r=>r.used?{anchor:r.anchor,spin:r.spin,legs:Array.from(r.legs),antPhase:r.antPhase}:null); }
+
+
+  function buildPayload(){
+    roachPayload={
+      rollQ:ball.rollQ.toArray(),
+      roaches:ball.roaches.map(r=>r.used?{
+        anchor:r.anchor,spin:r.spin,
+        legs:Array.from(r.legs),antPhase:r.antPhase
+      }:null)
+    };
+  }
+
+
 
   function update(dt){
     if(!ball)return;
