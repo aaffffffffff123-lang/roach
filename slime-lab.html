@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>바뿌볼</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#e9e0d0;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+#err{position:fixed;z-index:5;inset:auto 16px calc(18px + env(safe-area-inset-bottom));display:none;padding:12px 15px;border-radius:14px;background:rgba(83,25,18,.94);color:#f8f0dc;font:700 13px/1.5 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center}
+#err.show{display:block}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="err" role="alert"></div>
+<script type="module">
+import * as THREE from 'three';
+import {BappuBall,FLOOR,ROACH_COUNT} from './bappu-ball.js';
+
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const rand=(a=1,b)=>b===undefined?Math.random()*a:a+Math.random()*(b-a);
+const canvas=document.getElementById('gl');
+const errEl=document.getElementById('err');
+const IS_SMALL=matchMedia('(pointer:coarse)').matches||Math.min(innerWidth,innerHeight)<760;
+const ROACH_SCALE=0.13/0.25;            // 1라운드와 같은 비율: 바퀴 0.13배율 모델 / 공 반지름 0.25
+const BOARD_TOP=0;
+
+// ───────── 소리 ─────────
+// 마른 곤충 껍질을 한꺼번에 으깨는 소리: 날개 쪼개지는 고음, 등껍질 내려앉는 저음, 다리·조각이 연달아 부러지는 잔파열음을
+// 매번 다른 개수·간격으로 겹친다. 조각 단계는 축축한 소리가 바탕이고 조각이 눌릴 때만 아삭 소리가 섞인다.
+class SlimeSfx{
+  constructor(){this.ctx=null;this.lastWet=0;this.lastTiny=0;this.rubLevel=0;}
+  ensure(){
+    if(!this.ctx){
+      const C=window.AudioContext||window.webkitAudioContext; if(!C)return;
+      try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){}
+      const c=this.ctx=new C();
+      this.master=c.createGain(); this.master.gain.value=0.9;
+      const comp=c.createDynamicsCompressor(); comp.threshold.value=-15; comp.knee.value=6; comp.ratio.value=6; comp.attack.value=0.002; comp.release.value=0.14;
+      this.master.connect(comp); comp.connect(c.destination);
+      const n=c.sampleRate*2, buf=c.createBuffer(1,n,c.sampleRate), d=buf.getChannelData(0);
+      for(let i=0;i<n;i++)d[i]=Math.random()*2-1;
+      this.noiseBuf=buf;
+      // 손가락으로 문지르는 동안 이어지는 축축한 소리
+      const src=c.createBufferSource(); src.buffer=buf; src.loop=true;
+      const f=c.createBiquadFilter(); f.type='lowpass'; f.frequency.value=260; f.Q.value=0.8;
+      const f2=c.createBiquadFilter(); f2.type='bandpass'; f2.frequency.value=900; f2.Q.value=2.5;
+      this.rubGain=c.createGain(); this.rubGain.gain.value=0;
+      this.rubGain2=c.createGain(); this.rubGain2.gain.value=0;
+      src.connect(f); f.connect(this.rubGain); this.rubGain.connect(this.master);
+      src.connect(f2); f2.connect(this.rubGain2); this.rubGain2.connect(this.master);
+      src.start();
+      // 문지르는 소리에 우물거리는 변조
+      const lfo=c.createOscillator(); lfo.type='sine'; lfo.frequency.value=7; const lg=c.createGain(); lg.gain.value=120; lfo.connect(lg); lg.connect(f.frequency); lfo.start();
+    }
+    if(this.ctx.state==='suspended')this.ctx.resume().catch(()=>{});
+  }
+  suspend(){ if(this.ctx&&this.ctx.state==='running')this.ctx.suspend().catch(()=>{}); }
+  resume(){ if(this.ctx&&this.ctx.state==='suspended')this.ctx.resume().catch(()=>{}); }
+  env(g,t,att,dur,peak){ g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(Math.max(peak,0.0002),t+att); g.gain.exponentialRampToValueAtTime(0.0001,t+att+dur); }
+  burst({t=0,dur=0.03,gain=0.2,type='bandpass',freq=2000,q=1,freqEnd=null,att=0.001,pan=0,rate=1}={}){
+    const c=this.ctx; if(!c)return; const t0=c.currentTime+t;
+    const s=c.createBufferSource(); s.buffer=this.noiseBuf; s.loop=true; s.playbackRate.value=rate; s.start(t0,Math.random()*1.6);
+    const f=c.createBiquadFilter(); f.type=type; f.frequency.setValueAtTime(freq,t0); f.Q.value=q; if(freqEnd)f.frequency.exponentialRampToValueAtTime(Math.max(30,freqEnd),t0+att+dur);
+    const g=c.createGain(); this.env(g,t0,att,dur,gain);
+    const p=c.createStereoPanner(); p.pan.value=clamp(pan,-1,1);
+    s.connect(f); f.connect(g); g.connect(p); p.connect(this.master); s.stop(t0+att+dur+0.05);
+  }
+  ping({t=0,dur=0.03,gain=0.1,freq=3000,freqEnd=null,type='sine',att=0.001,pan=0}={}){
+    const c=this.ctx; if(!c)return; const t0=c.currentTime+t;
+    const o=c.createOscillator(); o.type=type; o.frequency.setValueAtTime(freq,t0); if(freqEnd)o.frequency.exponentialRampToValueAtTime(Math.max(20,freqEnd),t0+att+dur);
+    const g=c.createGain(); this.env(g,t0,att,dur,gain);
+    const p=c.createStereoPanner(); p.pan.value=clamp(pan,-1,1);
+    o.connect(g); g.connect(p); p.connect(this.master); o.start(t0); o.stop(t0+att+dur+0.05);
+  }
+  // 잔파열음 알갱이들: span 동안 count개, 앞쪽에 몰리고 뒤로 갈수록 성기고 작아진다
+  grains(t0,span,count,gain,lo,hi,q=1.6){
+    for(let i=0;i<count;i++){ const k=Math.pow(Math.random(),0.6); this.burst({t:t0+k*span,dur:rand(0.003,0.011),gain:gain*rand(0.4,1.1)*(1-k*0.55),freq:rand(lo,hi),q:rand(q*0.6,q*1.6),pan:rand(-0.6,0.6)}); }
+  }
+  /** 세게 눌러 부수기. kind 0 빠드득 / 1 와드득 / 2 까드득. parts: {wings,shells,legs} 이번에 부서진 것 수 */
+  crunch(kind,power,parts={}){
+    this.ensure(); if(!this.ctx)return; const p=clamp(power,0.5,1.3);
+    const wings=clamp(parts.wings||0,0,8), shells=clamp(parts.shells||0,0,6), legs=clamp(parts.legs||0,0,12);
+    if(kind===0){ // 빠드득: 날카롭게 터지고 빠르게 사그라든다
+      this.burst({dur:0.009,gain:0.5*p,freq:2900,q:1.1,freqEnd:1100}); this.ping({dur:0.022,gain:0.16*p,freq:3300,freqEnd:800,type:'triangle'});
+      for(const [i,d] of [0.035,0.082,0.138].entries()) this.burst({t:d,dur:rand(0.012,0.02),gain:(0.36-i*0.07)*p,freq:rand(1300,2000),q:1.3,freqEnd:rand(400,700),pan:rand(-0.3,0.3)});
+      this.burst({t:0.01,dur:0.09,gain:0.32*p,type:'lowpass',freq:520,freqEnd:140,att:0.004}); this.ping({t:0.012,dur:0.07,gain:0.22*p,freq:112,freqEnd:46,type:'triangle'});
+      this.grains(0.05,0.3,22+Math.round(legs*1.5),0.17*p,900,5500);
+    }else if(kind===1){ // 와드득: 덜 날카롭고 넓게 으깨지며 길다
+      this.burst({dur:0.03,gain:0.3*p,type:'lowpass',freq:1100,freqEnd:400,att:0.004}); this.burst({t:0.02,dur:0.07,gain:0.3*p,freq:rand(700,1000),q:0.9,freqEnd:300,att:0.008,rate:0.8});
+      for(const [i,d] of [0.03,0.085,0.14,0.2].entries()) this.burst({t:d,dur:rand(0.015,0.028),gain:(0.3-i*0.045)*p,freq:rand(900,1700),q:1.1,freqEnd:rand(300,600),pan:rand(-0.35,0.35)});
+      this.burst({t:0.015,dur:0.12,gain:0.42*p,type:'lowpass',freq:460,freqEnd:120,att:0.006}); this.ping({t:0.02,dur:0.09,gain:0.26*p,freq:96,freqEnd:40,type:'triangle'});
+      this.grains(0.06,0.42,30+Math.round(legs*1.5),0.15*p,700,4600);
+    }else{ // 까드득: 딱딱한 것이 걸리며 톡톡 깨진다
+      this.ping({dur:0.012,gain:0.18*p,freq:4300,freqEnd:1800,type:'square'}); this.ping({t:0.006,dur:0.012,gain:0.14*p,freq:5200,freqEnd:2200,type:'triangle'});
+      this.burst({dur:0.011,gain:0.42*p,freq:3600,q:1.4,freqEnd:1500});
+      for(const [i,d] of [0.03,0.072,0.118,0.165].entries()) this.burst({t:d,dur:rand(0.008,0.016),gain:(0.3-i*0.05)*p,freq:rand(2000,3100),q:1.6,freqEnd:rand(600,1100),pan:rand(-0.4,0.4)});
+      this.burst({t:0.01,dur:0.07,gain:0.24*p,type:'lowpass',freq:600,freqEnd:170,att:0.003}); this.ping({t:0.01,dur:0.06,gain:0.18*p,freq:130,freqEnd:52,type:'triangle'});
+      this.grains(0.04,0.24,18+Math.round(legs*1.5),0.16*p,1500,7000,2.2);
+    }
+    // 얇은 날개가 쪼개지는 고음
+    for(let i=0;i<Math.round(wings*0.6)+1;i++) this.ping({t:rand(0.01,0.16),dur:rand(0.008,0.015),gain:rand(0.05,0.11)*p,freq:rand(3800,6600),freqEnd:rand(1500,2500),type:'triangle',pan:rand(-0.5,0.5)});
+    // 단단한 등껍질이 내려앉는 저음
+    for(let i=0;i<Math.round(shells*0.5)+1;i++) this.burst({t:rand(0.02,0.2),dur:rand(0.03,0.05),gain:rand(0.12,0.22)*p,type:'lowpass',freq:rand(350,620),freqEnd:rand(90,160),att:0.003,pan:rand(-0.3,0.3)});
+    // 잔여 다리 마디가 늦게 부러지는 작은 소리
+    for(let i=0;i<Math.round(legs*0.4);i++) this.burst({t:rand(0.15,0.5),dur:rand(0.005,0.009),gain:rand(0.05,0.1)*p,freq:rand(1800,2800),q:2,pan:rand(-0.6,0.6)});
+  }
+  /** 축축한 슬라임 */
+  wet(strength=0.5,force=false){
+    this.ensure(); if(!this.ctx)return; const t=this.ctx.currentTime; if(!force&&t-this.lastWet<0.13)return; this.lastWet=t; const s=clamp(strength,0.15,1);
+    this.burst({dur:0.13+s*0.16,gain:0.14+s*0.2,type:'lowpass',freq:330-s*120,freqEnd:110+s*70,q:0.7,att:0.022,pan:rand(-0.2,0.2),rate:0.7});
+    this.burst({t:0.012,dur:0.07+s*0.08,gain:0.05+s*0.06,freq:rand(620,1100),q:4.5,freqEnd:rand(240,380),att:0.012,pan:rand(-0.35,0.35)});
+    const n=2+Math.round(s*4); for(let i=0;i<n;i++){ const f=rand(240,780); this.ping({t:0.02+i*rand(0.02,0.055),dur:rand(0.025,0.05),gain:0.025+s*0.03,freq:f,freqEnd:f*rand(1.3,1.9),type:'sine',att:0.004,pan:rand(-0.5,0.5)}); }
+    this.ping({t:0.005,dur:0.09,gain:0.1+s*0.06,freq:72,freqEnd:48,type:'sine',att:0.006});
+  }
+  /** 조각이 손가락 사이에서 눌릴 때의 은은한 아삭 */
+  tiny(strength=0.5){
+    this.ensure(); if(!this.ctx)return; const t=this.ctx.currentTime; if(t-this.lastTiny<0.1)return; this.lastTiny=t; const s=clamp(strength,0.2,1);
+    this.grains(0,0.06+s*0.08,2+Math.round(s*3),0.04+s*0.06,1700,4600,2);
+    if(Math.random()<0.5) this.burst({dur:0.02,gain:0.05+s*0.05,type:'lowpass',freq:500,freqEnd:200,att:0.002});
+  }
+  /** 손가락이 닿는 순간 */
+  touch(wetStage){
+    this.ensure(); if(!this.ctx)return;
+    if(wetStage) this.wet(0.3,true);
+    else { this.burst({dur:0.012,gain:0.09,freq:1500,q:1.2,freqEnd:700}); this.burst({t:0.004,dur:0.05,gain:0.07,type:'lowpass',freq:320,freqEnd:150,att:0.006}); }
+  }
+  /** 손 뗄 때 */
+  release(wetStage,k){
+    if(!this.ctx)return;
+    if(wetStage) this.wet(Math.max(0.3,k),true);
+    else this.burst({dur:0.035,gain:0.06+k*0.05,freq:620,q:1,freqEnd:220,att:0.004});
+  }
+  /** 문지르기 세기 (매 프레임) */
+  rub(level){
+    if(!this.ctx)return; const l=clamp(level,0,1); if(Math.abs(l-this.rubLevel)<0.01&&l===0)return; this.rubLevel=l;
+    const t=this.ctx.currentTime; this.rubGain.gain.setTargetAtTime(l*0.28,t,0.05); this.rubGain2.gain.setTargetAtTime(l*0.05,t,0.05);
+  }
+}
+const SFX=new SlimeSfx();
+for(const ev of ['pointerdown','pointerup','touchend','click','keydown']) window.addEventListener(ev,()=>SFX.ensure(),{capture:true,passive:true});
+
+// ───────── 장면 ─────────
+let renderer;
+try{ renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',alpha:false}); }
+catch(e){ errEl.textContent='이 기기에서는 3D 화면을 열 수 없습니다.'; errEl.classList.add('show'); throw e; }
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.02;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xe9e0d0);
+const camera=new THREE.PerspectiveCamera(38,1,0.05,60);
+const hemi=new THREE.HemisphereLight(0xfff5e2,0x6b4a33,1.25); scene.add(hemi);
+const key=new THREE.DirectionalLight(0xfff1d7,2.9); key.position.set(-3.4,7.2,4.2); key.castShadow=true; key.shadow.mapSize.set(1024,1024);
+Object.assign(key.shadow.camera,{left:-3.2,right:3.2,top:3.2,bottom:-3.2,near:1,far:18}); key.shadow.bias=-0.0004; key.shadow.normalBias=0.02; scene.add(key);
+const fill=new THREE.DirectionalLight(0xd9e8ff,0.75); fill.position.set(4.5,3.2,-3); scene.add(fill);
+const rim=new THREE.PointLight(0xffffff,14,14,2); rim.position.set(2.6,4.4,3.2); scene.add(rim);
+
+function makeWoodTexture(){
+  const size=512,c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
+  const gr=g.createLinearGradient(0,0,size,0); gr.addColorStop(0,'#6b4730'); gr.addColorStop(0.5,'#95643c'); gr.addColorStop(1,'#5e3d2a'); g.fillStyle=gr; g.fillRect(0,0,size,size);
+  for(let i=0;i<120;i++){ const y=rand(size); g.strokeStyle=`rgba(${rand(40,90)|0},${rand(18,48)|0},${rand(8,28)|0},${rand(0.04,0.14)})`; g.lineWidth=rand(0.5,2.2); g.beginPath(); g.moveTo(0,y); for(let x=0;x<=size;x+=40)g.lineTo(x,y+Math.sin(x*0.015+i)*rand(2,12)+rand(-3,3)); g.stroke(); }
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(3,2.4); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; return t;
+}
+const table=new THREE.Mesh(new THREE.PlaneGeometry(24,18),new THREE.MeshStandardMaterial({map:makeWoodTexture(),roughness:0.82})); table.rotation.x=-Math.PI/2; table.position.y=BOARD_TOP-0.3; table.receiveShadow=true; scene.add(table);
+const board=new THREE.Mesh(new THREE.BoxGeometry(5.6,0.18,4.6),new THREE.MeshStandardMaterial({color:0xe9e0cc,roughness:0.6})); board.position.y=BOARD_TOP-0.09; board.castShadow=true; board.receiveShadow=true; scene.add(board);
+
+// ───────── 공 ─────────
+let ball=null, geos=null, started=false, appPaused=false, disposed=false, pageHidden=document.hidden, wetStage=false, rafId=0;
+function makeBall(){
+  if(ball){ scene.remove(ball.group); ball.dispose(); }
+  ball=new BappuBall(THREE,{geos,radius:1,roachScale:ROACH_SCALE,segments:IS_SMALL?[44,30]:[56,38],crumbSize:0.07,castShadow:!IS_SMALL});
+  ball.group.position.set(0,BOARD_TOP+FLOOR,0);
+  scene.add(ball.group);
+  window.__labBall=ball;   // 점검용
+}
+
+// ───────── 손가락 ─────────
+const pointers=new Map();
+const raycaster=new THREE.Raycaster(), ndc=new THREE.Vector2(), hitLocal=new THREE.Vector3(), tmpV=new THREE.Vector3(), tmpV2=new THREE.Vector3();
+function hitBall(x,y){
+  if(!ball)return null;
+  const r=canvas.getBoundingClientRect(); ndc.set((x-r.left)/Math.max(1,r.width)*2-1,-((y-r.top)/Math.max(1,r.height)*2-1));
+  raycaster.setFromCamera(ndc,camera);
+  const h=raycaster.intersectObject(ball.slime,false)[0];
+  if(!h)return null;
+  return ball.group.worldToLocal(hitLocal.copy(h.point));
+}
+// 손가락이 공을 벗어나도 압입은 공 위 가장 가까운 자리로 이어진다
+function dirFromScreen(x,y){
+  const r=canvas.getBoundingClientRect(); ndc.set((x-r.left)/Math.max(1,r.width)*2-1,-((y-r.top)/Math.max(1,r.height)*2-1));
+  raycaster.setFromCamera(ndc,camera);
+  const o=raycaster.ray.origin, d=raycaster.ray.direction, c=ball.group.position;
+  const t=Math.max(0,tmpV.copy(c).sub(o).dot(d)); tmpV2.copy(o).addScaledVector(d,t).sub(c);
+  if(tmpV2.lengthSq()<1e-6)tmpV2.set(0,0,1); return tmpV2.normalize();
+}
+function onDown(e){
+  if(!started||appPaused)return;
+  if(pointers.has(e.pointerId)){ pointers.delete(e.pointerId); ball.release(e.pointerId); } // 같은 번호가 다시 오면 이전 것은 뗀 것으로
+  const h=hitBall(e.clientX,e.clientY); if(!h)return;
+  e.preventDefault();
+  const dir=h.clone().normalize();
+  const d=ball.press(e.pointerId,dir,{depth:0.3,width:0.5});
+  pointers.set(e.pointerId,{dent:d,x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,start:h.clone(),held:0,travel:0,strong:false,lastX:e.clientX,lastY:e.clientY,speed:0});
+  try{canvas.setPointerCapture(e.pointerId);}catch(err){}
+  SFX.touch(wetStage);
+}
+function onMove(e){
+  const p=pointers.get(e.pointerId); if(!p||appPaused)return;
+  e.preventDefault();
+  const dx=e.clientX-p.lastX, dy=e.clientY-p.lastY; p.lastX=e.clientX; p.lastY=e.clientY; p.x=e.clientX; p.y=e.clientY;
+  const mv=Math.hypot(dx,dy)/Math.max(1,Math.min(innerWidth,innerHeight)); p.travel+=mv; p.speed=p.speed*0.6+mv*40;
+  const h=hitBall(e.clientX,e.clientY);
+  const dir=h?tmpV.copy(h).normalize():dirFromScreen(e.clientX,e.clientY);
+  // 끌면 슬라임이 그 방향으로 늘어난다
+  const shear=tmpV2.copy(h||p.start).sub(p.start).multiplyScalar(0.55);
+  ball.move(e.pointerId,dir,shear);
+  p.dent.target=Math.min(1,p.dent.target+mv*2.2);
+}
+function onUp(e){
+  const p=pointers.get(e.pointerId); if(!p)return;
+  pointers.delete(e.pointerId);
+  const d=ball.release(e.pointerId);
+  SFX.release(wetStage,d?Math.abs(d.k):0.2);
+  try{if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}catch(err){}
+}
+function cancelAll(){ for(const id of [...pointers.keys()]){ pointers.delete(id); ball?.release(id); } SFX.rub(0); }
+canvas.addEventListener('pointerdown',onDown,{passive:false});
+canvas.addEventListener('pointermove',onMove,{passive:false});
+window.addEventListener('pointerup',onUp); window.addEventListener('pointercancel',onUp);
+canvas.addEventListener('lostpointercapture',onUp);
+window.addEventListener('blur',cancelAll);
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('keydown',e=>{ if(e.code==='Escape'){ e.preventDefault(); sendClose(); } });
+
+const crunchKinds=[0,1,2]; let lastKind=-1;
+function strongPress(p){
+  p.strong=true;
+  if(!wetStage){
+    const res=ball.crush(p.dent.dir,1);
+    let kind; do{ kind=crunchKinds[Math.floor(Math.random()*3)]; }while(kind===lastKind&&Math.random()<0.7); lastKind=kind;
+    SFX.crunch(kind,0.85+res.near*0.03,{wings:res.near*2,shells:res.near,legs:res.near*3+4});
+    ball.kick(1.1);
+    if(ball.allBroken()){ wetStage=true; }
+  }else{
+    SFX.wet(0.95,true); if(Math.random()<0.75)SFX.tiny(0.8); ball.kick(0.8);
+  }
+}
+
+// ───────── 프레임 ─────────
+let last=performance.now()/1000;
+function frame(){
+  if(disposed)return; rafId=requestAnimationFrame(frame);
+  const t=performance.now()/1000, dt=Math.min(0.05,Math.max(0.001,t-last)); last=t;
+  if(pageHidden||appPaused||!ball)return;
+  // 누르고 있는 동안 점점 깊이 들어간다. 깊이가 어느 선을 넘으면 '세게 누른 것'
+  let rubLevel=0, pinch=0;
+  if(pointers.size>=2){ const ps=[...pointers.values()]; const d0=Math.hypot(ps[0].x0-ps[1].x0,ps[0].y0-ps[1].y0)||1, d1=Math.hypot(ps[0].x-ps[1].x,ps[0].y-ps[1].y); pinch=clamp((d0-d1)/d0*2.2,0,1); }
+  for(const p of pointers.values()){
+    const d=p.dent; p.held+=dt; d.target=Math.min(1,Math.max(d.target,0.3+p.held*1.25+pinch*0.8));
+    if(!p.strong&&d.k>0.74) strongPress(p);
+    if(p.speed>0.02){ rubLevel=Math.max(rubLevel,Math.min(1,p.speed*0.6)*Math.max(0.35,d.k)); if(wetStage&&Math.random()<dt*p.speed*0.9) SFX.tiny(0.4+p.speed*0.3); else if(!wetStage&&Math.random()<dt*p.speed*0.5) SFX.tiny(0.3); }
+    p.speed*=Math.exp(-6*dt);
+  }
+  SFX.rub(wetStage?rubLevel:rubLevel*0.35);
+  ball.update(dt);
+  renderer.render(scene,camera);
+}
+function resize(){
+  if(disposed)return;
+  const w=Math.max(1,innerWidth), h=Math.max(1,innerHeight), dpr=Math.min(devicePixelRatio||1,1.5);
+  renderer.setPixelRatio(dpr); renderer.setSize(w,h,false); camera.aspect=w/h;
+  const portrait=h>=w; camera.fov=portrait?38:30;
+  const half=camera.fov*Math.PI/360, hh=Math.atan(Math.tan(half)*camera.aspect);
+  const dist=portrait?clamp((1.22/0.86)/Math.tan(hh),4.6,16):clamp((1.22/0.8)/Math.tan(half),4.6,16);
+  camera.position.set(0,dist*0.4,dist*0.92); camera.lookAt(0,BOARD_TOP+0.55,0); camera.updateProjectionMatrix();
+}
+window.addEventListener('resize',resize);
+document.addEventListener('visibilitychange',()=>{ pageHidden=document.hidden; last=performance.now()/1000; if(pageHidden){ cancelAll(); SFX.suspend(); } else if(!appPaused) SFX.resume(); });
+
+// ───────── 바깥(index.html)에서 쓰는 API ─────────
+function init(payload){ geos=payload.geos; makeBall(); return api; }
+/** 완성된 공을 받는다: roaches [{anchor,spin,legs,antPhase}] 또는 state(getState 결과) */
+function enter(payload={}){
+  if(!geos&&payload.geos) geos=payload.geos;
+  if(!ball) makeBall();
+  if(payload.state){ ball.setState(payload.state); }
+  else if(payload.roaches){ ball.reset(); payload.roaches.forEach((r,i)=>{ if(r) ball.attach(i,r.anchor,r.spin,{legs:Float32Array.from(r.legs),antPhase:r.antPhase}); }); }
+  wetStage=ball.allBroken(); started=true; appPaused=false; cancelAll(); wake(); ball.kick(0.6); return api;
+}
+function sleep(){ appPaused=true; cancelAll(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } SFX.suspend(); return api; }
+function wake(){ if(disposed)return api; appPaused=false; last=performance.now()/1000; resize(); if(!rafId)rafId=requestAnimationFrame(frame); SFX.resume(); return api; }
+function reset(){ cancelAll(); if(ball)ball.reset(); wetStage=false; started=false; return api; }
+function getState(){ return ball?ball.getState():null; }
+function sendClose(){ if(window.parent!==window)parent.postMessage({type:'slime-lab-close'},location.origin); }
+const api={init,enter,sleep,wake,reset,getState,isWet:()=>wetStage,
+  _debugStrong(x,y){ const h=hitBall(x,y); if(!h)return false; const d=ball.press('dbg',h.clone().normalize(),{depth:0.9}); d.k=0.9; strongPress({dent:d,strong:false}); ball.release('dbg'); return true; }}; // 점검용
+window.SlimeLab=api;
+resize();
+rafId=requestAnimationFrame(frame);
+if(window.parent!==window)parent.postMessage({type:'slime-lab-ready'},location.origin);
+</script>
+</body>
+</html>
