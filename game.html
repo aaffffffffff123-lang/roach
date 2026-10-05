@@ -208,6 +208,7 @@ button{font-family:inherit;color:inherit;border:0;background:none;padding:0;marg
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 <script type="module">
 import * as THREE from 'three';
+import { makeFoodBait } from './food-detail.js';
 
 // ───────── 공통 ─────────
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1699,7 +1700,10 @@ class Round1{
   flipCushion(x,z){ const f=this.cushionF; if(f.flipped) return; let dx=CUSHION.x-x, dz=CUSHION.z-z; const d=Math.hypot(dx,dz); if(d<0.05){ dx=this.G.camUp.x; dz=this.G.camUp.z; } else { dx/=d; dz/=d; } f.flipped=true; f.t=0; f.dx=dx; f.dz=dz; SFX.cushionFlip(); this.G.shake(0.2);
     for(const r of this.roaches){ if(r.state==='dead'||r.gone) continue; if(dist2(r.x,r.z,CUSHION.x,CUSHION.z)<CUSHION.r*CUSHION.r){ r.startle={t:rand(0.15,0.55),ax:CUSHION.x,az:CUSHION.z}; } } }
   updateCushion(dt){ const f=this.cushionF, c=this.G.room.cushion; if(!f.flipped&&f.k<=0) return; f.t+=dt; let k; if(f.flipped){ k=Math.min(1,f.t/0.35); if(f.t>4.2){ f.flipped=false; f.t=0; } } else { k=Math.max(0,1-f.t/0.35); } f.k=k; const e=k<0.5?2*k*k:1-Math.pow(-2*k+2,2)/2; c.position.set(CUSHION.x+f.dx*0.5*e,0.022+Math.sin(e*Math.PI)*0.22,CUSHION.z+f.dz*0.5*e); c.quaternion.setFromAxisAngle(new THREE.Vector3(f.dz,0,-f.dx).normalize(),e*Math.PI); }
-  stop(){ this.active=false; document.getElementById('r1ui').style.display='none'; this.stopHold(); this.clearStrikes(); this.resetCushion(); for(const r of this.roaches) this.grp.remove(r.m.g); this.roaches.length=0; this.clearNymphs(); this.clearOothecae(); for(const b of this.baitMeshes) this.grp.remove(b); this.baitMeshes.length=0; this.baits.length=0; for(const k in this.itemMeshes) this.itemMeshes[k].visible=false; this.puffs.clear(); this.splat.hideAll(); this.G.ui.setKills(null); }
+  stop(){ this.active=false; document.getElementById('r1ui').style.display='none'; this.stopHold(); this.clearStrikes(); this.resetCushion(); for(const r of this.roaches) this.grp.remove(r.m.g); this.roaches.length=0; this.clearNymphs(); this.clearOothecae(); for(const b of this.baitMeshes){
+  this.grp.remove(b);
+  b.userData.food?.dispose();
+} this.baitMeshes.length=0; this.baits.length=0; for(const k in this.itemMeshes) this.itemMeshes[k].visible=false; this.puffs.clear(); this.splat.hideAll(); this.G.ui.setKills(null); }
   selectItem(k){ if(this.hold) this.stopHold(); this.item=k; this.G.ui.selectSlot(k); this.touch(); }
   level(){ return clamp(this.kills/80,0,1); }
   touch(){ this.lastAction=this.time; }
@@ -1971,11 +1975,74 @@ class Round1{
     if(this.item==='spray') SFX.startSpray(); if(this.item==='flame'){ SFX.lighterClick(); SFX.startFlame(); } if(this.item==='vacuum') SFX.startVacuum(); }
   stopHold(){ if(!this.hold) return; this.itemMeshes[this.hold.item].visible=false; this.hold=null; SFX.stopLoop('spray'); SFX.stopLoop('flame'); SFX.stopLoop('vacuum'); }
   placeBait(kind,x,z){
-    const it=ITEMS[kind].bait; this.used.add(kind); this.baitsUsed.add(kind); this.touch(); SFX.spawnBait();
-    { const dx=x-CUSHION.x, dz=z-CUSHION.z, d=Math.hypot(dx,dz); if(d<CUSHION.r+0.06){ const k=(CUSHION.r+0.06)/Math.max(d,0.01); x=CUSHION.x+(d<0.01?0:dx*k); z=CUSHION.z+(d<0.01?CUSHION.r+0.06:dz*k); } }
-    const b={kind,x,z,amount:it.amount,radius:it.radius,spread:it.spread,t:0}; this.baits.push(b); this.boost+=it.boost;
-    this.G.paint.bait(kind,x,z);
-    if(kind!=='cola'){ const m=makeItem(kind); m.position.set(x,0,z); m.rotation.y=rand(TAU); this.grp.add(m); this.baitMeshes.push(m); b.mesh=m; }
+    const it=ITEMS[kind].bait;
+    this.used.add(kind);
+    this.baitsUsed.add(kind);
+    this.touch();
+    SFX.spawnBait();
+
+    {
+      const dx=x-CUSHION.x,dz=z-CUSHION.z,d=Math.hypot(dx,dz);
+      if(d<CUSHION.r+0.06){
+        const k=(CUSHION.r+0.06)/Math.max(d,0.01);
+        x=CUSHION.x+(d<0.01?0:dx*k);
+        z=CUSHION.z+(d<0.01?CUSHION.r+0.06:dz*k);
+      }
+    }
+
+    const b={
+      kind,x,z,
+      amount:it.amount,
+      initialAmount:it.amount,
+      radius:it.radius,
+      spread:it.spread,
+      t:0
+    };
+    this.baits.push(b);
+    this.boost+=it.boost;
+
+    const detailed=makeFoodBait(THREE,kind);
+    if(detailed){
+      b.mesh=detailed;
+      b.food=detailed.userData.food;
+    }else{
+      this.G.paint.bait(kind,x,z);
+      if(kind!=='cola') b.mesh=makeItem(kind);
+    }
+
+    if(b.mesh){
+      b.mesh.position.set(x,0,z);
+      b.mesh.rotation.y=rand(TAU);
+      this.grp.add(b.mesh);
+      this.baitMeshes.push(b.mesh);
+    }
+  }
+
+  aimBait(r,b){
+    if(!b.food){
+      r.tx=b.x+rand(-b.spread,b.spread);
+      r.tz=b.z+rand(-b.spread,b.spread);
+      return;
+    }
+
+    const yaw=b.mesh.rotation.y;
+    const c=Math.cos(yaw),s=Math.sin(yaw);
+    const dx=r.x-b.x,dz=r.z-b.z;
+    const angle=Math.hypot(dx,dz)<0.001
+      ?rand(TAU)
+      :Math.atan2(s*dx+c*dz,c*dx-s*dz);
+
+    const tip=b.food.mouthTarget(angle);
+    const nx=Math.cos(angle),nz=Math.sin(angle);
+
+    r.foodMouth={
+      x:b.x+c*tip.x+s*tip.z,
+      z:b.z-s*tip.x+c*tip.z
+    };
+
+    const mouthOffset=ROACH_L*0.452;
+    r.tx=r.foodMouth.x+(c*nx+s*nz)*mouthOffset;
+    r.tz=r.foodMouth.z+(-s*nx+c*nz)*mouthOffset;
   }
   inCone(q,x,z,h,len,ang){ const dx=q.x-x, dz=q.z-z; const d=Math.hypot(dx,dz); if(d>len||d<0.001) return d<0.001; const a=Math.atan2(dx,dz); return Math.abs(wrapAng(a-h))<ang*(1-0.35*d/len); }
   update(dt){
@@ -2107,7 +2174,36 @@ class Round1{
     }
 
 
-    for(let i=this.baits.length-1;i>=0;i--){ const b=this.baits[i]; b.t+=dt; if(b.amount<=0){ if(b.mesh){ this.grp.remove(b.mesh); this.baitMeshes.splice(this.baitMeshes.indexOf(b.mesh),1);} this.baits.splice(i,1); for(const q of this.roaches) if(q.bait===b){ q.bait=null; if(q.state==='feed'){ q.state='wander'; q.t=0.1; } } } }
+    for(let i=this.baits.length-1;i>=0;i--){
+      const b=this.baits[i];
+      b.t+=dt;
+
+      if(b.food){
+        b.food.update(
+          Math.max(0,b.amount)/b.initialAmount,
+          b.t
+        );
+      }
+
+      if(b.amount<=0){
+        if(b.mesh&&!b.food){
+          this.grp.remove(b.mesh);
+          this.baitMeshes.splice(this.baitMeshes.indexOf(b.mesh),1);
+        }
+
+        this.baits.splice(i,1);
+
+        for(const q of this.roaches){
+          if(q.bait===b){
+            q.bait=null;
+            if(q.state==='feed'){
+              q.state='wander';
+              q.t=0.1;
+            }
+          }
+        }
+      }
+    }
     this.boost=Math.max(0,this.boost-dt*1.2);
     let vis=0, alive=0; for(const r of this.roaches){ if(r.state==='dead'||r.gone) continue; alive++; if(this.inView(r.x,r.z,0.15)){ vis++; r.offT=0; } else if(!this.inView(r.x,r.z,0.6)&&r.state!=='feed'){ r.offT+=dt; if(r.offT>3) r.remove=true; } }
     const target=Math.min(24,12+this.time/60*4+this.boost*0.5);
@@ -2163,12 +2259,77 @@ class Round1{
 
     if(r.state==='wander'){ if(r.underGoal&&dist2(r.x,r.z,CUSHION.x,CUSHION.z)>0.8*0.8) r.underGoal=false; r.t-=dt; if(r.t<0){ if(r.spd>0){ r.spd=0; r.t=rand(0.4,1.8); } else if(Math.random()<0.15){ r.spd=rand(0.6,0.9); r.t=rand(0.25,0.5); r.turn=rand(-0.5,0.5); } else { r.spd=rand(0.12,0.32); r.t=rand(0.6,2.2); r.turn=rand(-1.2,1.2); } }
       if(r.spd>0){ r.h+=r.turn*dt; spd=r.spd; }
-      if(!r.bait){ for(const b of this.baits){ if(b.amount>0&&dist2(r.x,r.z,b.x,b.z)<b.radius*b.radius&&Math.random()<dt*1.5){ r.bait=b; r.state='feed'; r.tx=b.x+rand(-b.spread,b.spread); r.tz=b.z+rand(-b.spread,b.spread); break; } } }
+      if(!r.bait){
+        for(const b of this.baits){
+          if(
+            b.amount>0&&
+            dist2(r.x,r.z,b.x,b.z)<b.radius*b.radius&&
+            Math.random()<dt*1.5
+          ){
+            r.bait=b;
+            r.state='feed';
+            this.aimBait(r,b);
+            break;
+          }
+        }
+      }
       { const hh=nearHole(r.x,r.z,0.09); if(hh&&!hh.cushion&&r.spd===0&&Math.random()<dt*0.12){ r.remove=true; return; } }
       if(!this.cushionF.flipped&&r.spd>0&&!r.underGoal&&dist2(r.x,r.z,CUSHION.x,CUSHION.z)<0.7*0.7&&Math.random()<dt*0.25){ r.state='toCushion'; r.tx=CUSHION.x+rand(-0.12,0.12); r.tz=CUSHION.z+rand(-0.12,0.12); r.underGoal=true; }
-    } else if(r.state==='feed'){ const b=r.bait; if(!b||b.amount<=0){ r.bait=null; r.state='wander'; r.t=0; return; }
-      const dx=r.tx-r.x, dz=r.tz-r.z, d=Math.hypot(dx,dz);
-      if(d>0.03){ r.h=angleDamp(r.h,Math.atan2(dx,dz),6,dt); spd=0.5; } else { b.amount-=dt*1.0; r.t-=dt; if(r.t<0){ r.t=rand(0.5,1.5); r.tx=b.x+rand(-b.spread,b.spread); r.tz=b.z+rand(-b.spread,b.spread); } r.h+=Math.sin(this.time*9+r.x*30)*dt*1.5; spd=0.02; }
+    } else if(r.state==='feed'){
+      const b=r.bait;
+      if(!b||b.amount<=0){
+        r.bait=null;
+        r.state='wander';
+        r.t=0;
+        return;
+      }
+
+      const dx=r.tx-r.x,dz=r.tz-r.z,d=Math.hypot(dx,dz);
+
+      if(d>(b.food?0.01:0.03)){
+        r.h=angleDamp(r.h,Math.atan2(dx,dz),6,dt);
+        spd=b.food
+          ?Math.min(0.5,d*4,d/Math.max(dt,0.001))
+          :0.5;
+      }else{
+        let touching=true;
+
+        if(b.food){
+          const tip=r.foodMouth;
+          r.h=angleDamp(
+            r.h,
+            Math.atan2(tip.x-r.x,tip.z-r.z),
+            15,dt
+          );
+
+          const mx=r.x+Math.sin(r.h)*ROACH_L*0.452;
+          const mz=r.z+Math.cos(r.h)*ROACH_L*0.452;
+          touching=Math.hypot(mx-tip.x,mz-tip.z)<0.014;
+
+          if(touching){
+            const c=Math.cos(b.mesh.rotation.y);
+            const s=Math.sin(b.mesh.rotation.y);
+            b.food.bite(
+              c*(mx-b.x)-s*(mz-b.z),
+              s*(mx-b.x)+c*(mz-b.z),
+              dt
+            );
+          }
+        }
+
+        if(touching) b.amount-=dt;
+        r.t-=dt;
+
+        if(r.t<0){
+          r.t=rand(0.5,1.5);
+          this.aimBait(r,b);
+        }
+
+        if(!b.food){
+          r.h+=Math.sin(this.time*9+r.x*30)*dt*1.5;
+          spd=0.02;
+        }
+      }
     } else if(r.state==='toCushion'){ const dx=r.tx-r.x, dz=r.tz-r.z, d=Math.hypot(dx,dz); if(d>0.03){ r.h=angleDamp(r.h,Math.atan2(dx,dz),6,dt); spd=0.3; } else { r.state='wander'; r.spd=0; r.t=rand(3,10); }
       if(this.cushionF.flipped){ r.state='wander'; r.spd=0.2; r.t=0.5; }
     } else if(r.state==='flee'){ r.t+=dt; spd=r.fleeSpd;
