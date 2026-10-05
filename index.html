@@ -181,7 +181,16 @@ let lastPointer=null;
 let closeBusy=false;
 let cap=null;               // 집어 드는 중인 바퀴
 
-const slime=createSlimeMode({gameFrame});
+const slime=createSlimeMode({
+  gameFrame,
+  isBlocked:()=>mailOpen,
+  onEnter:({pause,resume})=>{
+    setTimeout(()=>{
+      if(!slime.isOpen()) return;
+      if(showLetter('slime',()=>setTimeout(resume,280))) pause();
+    },450);
+  }
+});
 
 const showError=text=>{
   errorEl.textContent=text;
@@ -231,6 +240,10 @@ gameFrame.addEventListener('load',()=>{
 
 // ───────── 인트로 · 바퀴벌레에게서 온 편지 ─────────
 const LETTER={
+  slime:{
+    color:'#9fdccd',
+    lines:['촉감 놀이를 통해','바퀴벌레와 친해져요~']
+  },
   feed:{color:'#8fd1b8',lines:['바퀴벌레의 삶을','내 자식들에게도 물려줘야지']},
   death:{color:'#f5a8b8',lines:['하지만,','사랑이 이긴다']},
   lab:{color:'#9cc8f0',lines:['우리를 더 잘 알게 되면,','더 이상 무섭지 않을걸요?'],facts:[
