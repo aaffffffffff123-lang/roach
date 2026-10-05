@@ -12,11 +12,12 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#efe8dc;tou
 iframe{display:block;width:100%;height:100%;border:0;background:#efe8dc}
 #gameFrame{position:fixed;inset:0;z-index:1;transition:opacity .14s linear}
 #gameFrame.covered{opacity:0;pointer-events:none}
-#labLayer{position:fixed;inset:0;z-index:20;background:#efe8dc;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .22s ease-out,visibility 0s linear .22s}
-#labLayer.open{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .22s ease-out}
+#labLayer,#slimeLayer{position:fixed;inset:0;z-index:20;background:#efe8dc;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .22s ease-out,visibility 0s linear .22s}
+#labLayer.open,#slimeLayer.open{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .22s ease-out}
 #labFrame{position:absolute;inset:0}
-#labBack{position:absolute;z-index:3;left:calc(12px + env(safe-area-inset-left));top:calc(12px + env(safe-area-inset-top));min-width:44px;height:44px;padding:0 15px;border:0;border-radius:999px;background:rgba(248,240,220,.94);color:#302017;font:900 13px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 2px 0 rgba(114,76,43,.7),0 7px 20px rgba(0,0,0,.3);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-#labBack:active{transform:translateY(2px)}
+#slimeFrame{position:absolute;inset:0}
+#labBack,#slimeBack{position:absolute;z-index:3;left:calc(12px + env(safe-area-inset-left));top:calc(12px + env(safe-area-inset-top));min-width:44px;height:44px;padding:0 15px;border:0;border-radius:999px;background:rgba(248,240,220,.94);color:#302017;font:900 13px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 2px 0 rgba(114,76,43,.7),0 7px 20px rgba(0,0,0,.3);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#labBack:active,#slimeBack:active{transform:translateY(2px)}
 #boot{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:#efe8dc;transition:opacity .25s;pointer-events:none}
 #boot.done{opacity:0}
 #boot::after{content:"";width:28px;height:28px;border:3px solid rgba(48,32,23,.15);border-top-color:rgba(48,32,23,.8);border-radius:50%;animation:spin .75s linear infinite}
@@ -30,6 +31,10 @@ iframe{display:block;width:100%;height:100%;border:0;background:#efe8dc}
 <div id="labLayer" aria-hidden="true">
   <iframe id="labFrame" title="잡은 바퀴벌레" allow="autoplay"></iframe>
   <button id="labBack" type="button" aria-label="게임으로 돌아가기">돌아가기</button>
+</div>
+<div id="slimeLayer" aria-hidden="true">
+  <iframe id="slimeFrame" title="바뿌볼" allow="autoplay"></iframe>
+  <button id="slimeBack" type="button" aria-label="게임으로 돌아가기">돌아가기</button>
 </div>
 
 <!-- ───────── 인트로 · 바퀴벌레에게서 온 편지 ───────── -->
@@ -158,6 +163,9 @@ const gameFrame=document.getElementById('gameFrame');
 const labLayer=document.getElementById('labLayer');
 const labFrame=document.getElementById('labFrame');
 const labBack=document.getElementById('labBack');
+const slimeLayer=document.getElementById('slimeLayer');
+const slimeFrame=document.getElementById('slimeFrame');
+const slimeBack=document.getElementById('slimeBack');
 const boot=document.getElementById('boot');
 const errorEl=document.getElementById('error');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -177,6 +185,26 @@ let tweezerRig=null;
 let lastPointer=null;
 let closeBusy=false;
 let cap=null;               // 집어 드는 중인 바퀴
+
+const SLIME_TARGET=80;       // 바뿌볼 한 개를 완성하는 바퀴 수. 난이도 조절은 이 값만 바꾼다.
+const SLIME_RADIUS=.225;     // 게임 속 바퀴가 실물보다 약 3배 크므로 실제 15cm 안팎의 양손 크기로 보정
+let slimeRig=null;
+let slimeBody=null;
+let slimeCount=0;
+let slimeCollected=[];
+let slimeAttachments=[];
+let slimePress=null;
+let slimeComplete=false;
+let slimeOpenAfterSquash=false;
+let slimeSeed=(Math.random()*0x7fffffff)|0;
+let slimeLabState='none';    // none → loading → ready
+let slimeLabOpen=false;
+let slimeLabPendingOpen=false;
+let slimeLabEntered=false;
+let slimeLabResult=null;
+let pausedBeforeSlimeLab=false;
+let sleepBeforeSlimeLab=false;
+let slimeCloseBusy=false;
 
 const showError=text=>{
   errorEl.textContent=text;
@@ -311,7 +339,7 @@ function showLetter(kind,onDone){
   document.getElementById('mailFactText').textContent=factText;
   // 게임 중이면 멈춘다
   mailPausedGame=false;
-  if(G&&G.state==='r1'&&!labOpen&&!introActive){
+  if(G&&G.state==='r1'&&!labOpen&&!slimeLabOpen&&!introActive){
     mailPausedGame=!G.paused;
     G.r1.cancel?.();
     G.input.reset?.();
@@ -331,7 +359,11 @@ function closeLetter(){
   lastLetterAt=performance.now()/1000;
   sfxMailOut();
   mailEl.classList.add('closing');
-  setTimeout(()=>{mailEl.classList.remove('show','open','closing');mailEl.setAttribute('aria-hidden','true');},280);
+  setTimeout(()=>{
+    mailEl.classList.remove('show','open','closing');
+    mailEl.setAttribute('aria-hidden','true');
+    if(slimeLabPendingOpen)openSlimeLab();
+  },280);
   if(mailPausedGame&&G){G.paused=false;G.r1.touch?.();}
   mailPausedGame=false;
   const done=mailDone;mailDone=null;done?.();
@@ -339,7 +371,7 @@ function closeLetter(){
 mailOk.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeLetter();});
 mailEl.addEventListener('pointerdown',()=>{if(mailOpen)mailEl.classList.add('open');});
 
-const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!mailOpen&&!introActive&&!cap;
+const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slimeLabOpen&&!mailOpen&&!introActive&&!cap;
 const sinceLetter=()=>performance.now()/1000-lastLetterAt;
 let deathSeen=false, killsSinceLetter=0;
 
@@ -649,6 +681,242 @@ function finishCapture(){
   openLab({heading:c.h,state:r.state||'wander'});
 }
 
+// ───────── 클리어 슬라임 · 바뿌볼 수집 ─────────
+let slimeRoachGeo=null,slimeRoachMat=null;
+
+function makeSlimeRoachTexture(){
+  const c=gameWindow.document.createElement('canvas');
+  c.width=160;c.height=80;
+  const x=c.getContext('2d');
+  x.clearRect(0,0,c.width,c.height);
+  x.lineCap='round';x.lineJoin='round';
+  x.strokeStyle='#32170b';x.lineWidth=4;
+  for(const side of [-1,1]){
+    for(const [px,py,dx,dy] of [[62,27,-30,-18],[61,40,-36,0],[62,53,-29,19]]){
+      x.beginPath();x.moveTo(px,40+side*(py-40));x.quadraticCurveTo(px+dx*.45,40+side*(py-40+dy*.35),px+dx,40+side*(py-40+dy));x.stroke();
+    }
+    x.beginPath();x.moveTo(108,34+side*3);x.quadraticCurveTo(136,24+side*17,155,12+side*25);x.stroke();
+  }
+  const wing=x.createLinearGradient(42,0,116,0);wing.addColorStop(0,'#9b6737');wing.addColorStop(.5,'#5b2d13');wing.addColorStop(1,'#261208');
+  x.fillStyle=wing;x.beginPath();x.ellipse(77,40,43,20,0,0,Math.PI*2);x.fill();
+  x.strokeStyle='#231006';x.lineWidth=3;x.beginPath();x.moveTo(76,21);x.quadraticCurveTo(82,40,77,59);x.stroke();
+  x.fillStyle='#b78954';x.beginPath();x.ellipse(112,40,20,18,0,0,Math.PI*2);x.fill();
+  x.fillStyle='#35180a';x.beginPath();x.ellipse(131,40,10,8,0,0,Math.PI*2);x.fill();
+  x.globalAlpha=.45;x.strokeStyle='#f2c38d';x.lineWidth=2;x.beginPath();x.moveTo(50,31);x.quadraticCurveTo(72,23,97,31);x.stroke();
+  x.globalAlpha=1;
+  const t=new THREE.CanvasTexture(c);
+  if(THREE.SRGBColorSpace)t.colorSpace=THREE.SRGBColorSpace;
+  t.needsUpdate=true;
+  return t;
+}
+
+function makeSlimeRig(){
+  const root=new THREE.Group();
+  root.name='clear-slime-collector';
+  const mat=new THREE.MeshPhysicalMaterial({
+    color:0xbef8ec,roughness:.12,metalness:0,transparent:true,opacity:.42,
+    transmission:.38,thickness:.18,clearcoat:1,clearcoatRoughness:.08,
+    depthWrite:false,side:THREE.DoubleSide
+  });
+  const body=new THREE.Mesh(new THREE.SphereGeometry(SLIME_RADIUS,36,24),mat);
+  body.renderOrder=3;
+  root.add(body);
+  const core=new THREE.Mesh(
+    new THREE.SphereGeometry(SLIME_RADIUS*.91,28,18),
+    new THREE.MeshPhysicalMaterial({color:0xeafffa,roughness:.08,transparent:true,opacity:.12,transmission:.6,depthWrite:false})
+  );
+  core.renderOrder=2;root.add(core);
+  const bubbleMat=new THREE.MeshBasicMaterial({color:0xf4fffd,transparent:true,opacity:.45,depthWrite:false});
+  for(let i=0;i<9;i++){
+    const a=i*2.3999632297+slimeSeed*.0001;
+    const rr=SLIME_RADIUS*(.18+(i%4)*.11);
+    const b=new THREE.Mesh(new THREE.SphereGeometry(.008+(i%3)*.003,10,8),bubbleMat);
+    b.position.set(Math.cos(a)*rr,(i%5-2)*.025,Math.sin(a)*rr);b.renderOrder=4;root.add(b);
+  }
+  root.scale.set(1,.72,1);
+  root.visible=false;
+  root.userData.body=body;
+  slimeBody=body;
+  return root;
+}
+
+function slimeSurface(index){
+  // 전체 구의 약 60%인 위·옆면에 80마리가 차곡차곡 붙는다.
+  const t=(index+.5)/SLIME_TARGET;
+  const y=.96-1.18*t;
+  const rr=Math.sqrt(Math.max(0,1-y*y));
+  const a=index*2.3999632297+(slimeSeed%997)*.0063;
+  const n=new THREE.Vector3(Math.cos(a)*rr,y,Math.sin(a)*rr).normalize();
+  return {n,p:n.clone().multiplyScalar(SLIME_RADIUS*1.012),a};
+}
+
+function makeSlimeRoachMarker(index){
+  if(!slimeRoachGeo){
+    slimeRoachGeo=new THREE.PlaneGeometry(.132,.066);
+    slimeRoachMat=new THREE.MeshBasicMaterial({map:makeSlimeRoachTexture(),transparent:true,alphaTest:.04,side:THREE.DoubleSide,depthWrite:false});
+  }
+  const {n,p,a}=slimeSurface(index);
+  const m=new THREE.Mesh(slimeRoachGeo,slimeRoachMat);
+  m.position.copy(p).addScaledVector(n,.004);
+  const align=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),n);
+  const turn=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),a*1.7);
+  m.quaternion.copy(align).multiply(turn);
+  m.renderOrder=6;
+  m.visible=false;
+  slimeRig.add(m);
+  return {m,n,p,a};
+}
+
+function slimeRestY(){return SLIME_RADIUS*.72;}
+
+function pointSlimeAt(sx,sy,visible=true){
+  if(!G||!slimeRig||G.state!=='r1'||G.r1.item!=='slime'||slimeLabOpen||slimePress)return;
+  const p=G.r1.floorPoint(sx,sy);
+  if(!p)return;
+  slimeRig.position.set(p.x,slimeRestY(),p.z);
+  slimeRig.scale.set(1,.72,1);
+  slimeRig.visible=visible;
+}
+
+function showSlimeAtCenter(){
+  if(!G||!slimeRig)return;
+  if(!Number.isFinite(slimeRig.position.x)||!slimeRig.userData.placed){
+    const w=gameWindow.innerWidth||gameFrame.clientWidth||innerWidth;
+    const h=gameWindow.innerHeight||gameFrame.clientHeight||innerHeight;
+    const p=G.r1.floorPoint(w*.5,h*.53);
+    if(p)slimeRig.position.set(p.x,slimeRestY(),p.z);
+    slimeRig.userData.placed=true;
+  }
+  slimeRig.visible=true;
+}
+
+function selectSlime(){
+  if(!G||G.state!=='r1')return;
+  G.r1.cancel?.();
+  if(slimeComplete){
+    preloadSlimeLab();
+    requestOpenSlimeLab();
+    return;
+  }
+  G.r1.selectItem('slime');
+  showSlimeAtCenter();
+  G.ui.hint?.('투명 슬라임으로 살아 있는 바퀴벌레를 눌러 붙입니다.',2.1,0,true);
+  preloadSlimeLab();
+}
+
+function slimeCandidatesAt(sx,sy){
+  if(!G||G.state!=='r1'||G.r1.item!=='slime'||slimeLabOpen||slimePress||slimeComplete)return {p:null,list:[]};
+  const p=G.r1.floorPoint(sx,sy);
+  if(!p)return {p:null,list:[]};
+  const list=[];
+  for(const r of G.r1.roaches){
+    if(!r||r.gone||r.state==='dead'||r.state==='poison'||!r.m?.g?.visible)continue;
+    if(G.r1.underCushion?.(r.x,r.z))continue;
+    const d=Math.hypot(r.x-p.x,r.z-p.z);
+    if(d<=SLIME_RADIUS*1.04)list.push({r,d});
+  }
+  list.sort((a,b)=>a.d-b.d);
+  return {p,list:list.slice(0,Math.min(2,SLIME_TARGET-slimeCount)).map(v=>v.r)};
+}
+
+function sfxSlimeStick(n=1){
+  if(!GSFX?.ctx)return;
+  GSFX.noise({dur:.11,gain:.18+n*.04,freq:620,q:.7,freqEnd:170});
+  GSFX.tone({t:.025,dur:.09,gain:.08+n*.025,freq:170,freqEnd:92,type:'sine'});
+  for(let i=0;i<n;i++)GSFX.noise({t:.045+i*.045,dur:.035,gain:.14,freq:1700+i*330,q:2.1,freqEnd:760});
+}
+
+function attachRoachToSlime(r){
+  const index=slimeCount++;
+  const i=G.r1.roaches.indexOf(r);
+  if(i>=0)G.r1.roaches.splice(i,1);
+  r.captured=true;r.gone=true;
+  r.m.pose?.(0,0,0);
+  const g=r.m.g;
+  g.updateMatrixWorld(true);
+  slimeRig.attach(g);                 // 잡히는 순간에는 실제 바퀴 모델이 슬라임 쪽으로 빨려 들어간다.
+  const mark=makeSlimeRoachMarker(index);
+  const align=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),mark.n);
+  const turn=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),mark.a||index*1.3);
+  const q=align.multiply(turn);
+  slimeAttachments.push({
+    g,marker:mark.m,t:0,
+    p0:g.position.clone(),q0:g.quaternion.clone(),s0:g.scale.clone(),
+    p1:mark.p.clone().addScaledVector(mark.n,.007),q1:q
+  });
+  slimeCollected.push({heading:r.h||0,state:r.state||'wander',seed:(Math.random()*0x7fffffff)|0});
+}
+
+function updateSlimeSlot(){
+  const slot=G?.ui?.slotEls?.slime;
+  if(!slot)return;
+  const name=slot.querySelector('.slime-name');
+  const badge=slot.querySelector('.slime-count');
+  if(name)name.textContent=slimeComplete?'바뿌볼':'슬라임';
+  if(badge)badge.textContent=`${slimeCount}/${SLIME_TARGET}`;
+  slot.classList.toggle('complete',slimeComplete);
+  slot.title=slimeComplete?'바뿌볼 가지고 놀기':`슬라임 ${slimeCount}/${SLIME_TARGET}`;
+}
+
+function collectWithSlime(sx,sy){
+  const {p,list}=slimeCandidatesAt(sx,sy);
+  if(!p)return;
+  const start=slimeRig.position.clone();
+  slimeRig.visible=true;
+  slimeRig.userData.placed=true;
+  slimePress={t:0,start,end:new THREE.Vector3(p.x,slimeRestY(),p.z),caught:list.length};
+  for(const r of list)attachRoachToSlime(r);
+  G.r1.used?.add('slime');
+  G.r1.touch?.();
+  G.r1.spawnT=-.01;
+  for(let i=0;i<list.length;i++)G.r1.spawn?.();
+  sfxSlimeStick(list.length||.25);
+  updateSlimeSlot();
+  if(!list.length)G.ui.hint?.('바퀴벌레 위로 슬라임을 눌러 주세요.',1.15,0,true);
+  if(slimeCount>=SLIME_TARGET&&!slimeComplete){
+    slimeComplete=true;
+    slimeOpenAfterSquash=true;
+    updateSlimeSlot();
+    preloadSlimeLab();
+  }
+}
+
+function updateSlime(dt){
+  for(let i=slimeAttachments.length-1;i>=0;i--){
+    const a=slimeAttachments[i];a.t+=dt;
+    const k=ease(clamp(a.t/.34));
+    a.g.position.lerpVectors(a.p0,a.p1,k);
+    a.g.quaternion.slerpQuaternions(a.q0,a.q1,k);
+    a.g.scale.copy(a.s0).multiplyScalar(lerp(1,.9,k));
+    a.g.visible=true;
+    a.g.userData.slimeAttached=true;
+    if(a.t>=.34){
+      slimeRig.remove(a.g);a.g.visible=false;
+      a.marker.visible=true;
+      slimeAttachments.splice(i,1);
+    }
+  }
+  if(!slimePress){
+    if(slimeRig)slimeRig.visible=!!(G?.state==='r1'&&G.r1.item==='slime');
+    return;
+  }
+  const s=slimePress;s.t+=dt;
+  const travel=ease(clamp(s.t/.105));
+  slimeRig.position.lerpVectors(s.start,s.end,travel);
+  let sx=1,sy=.72;
+  if(s.t<.13){const k=ease(s.t/.13);sx=lerp(.92,1.22,k);sy=lerp(.9,.29,k);}
+  else if(s.t<.31){const k=ease((s.t-.13)/.18);sx=lerp(1.22,.95,k);sy=lerp(.29,.82,k);}
+  else {const k=ease(clamp((s.t-.31)/.24));sx=lerp(.95,1,k);sy=lerp(.82,.72,k);}
+  slimeRig.scale.set(sx,sy,sx);
+  slimeRig.position.y=SLIME_RADIUS*sy;
+  if(s.t>=.56){
+    slimeRig.scale.set(1,.72,1);slimeRig.position.y=slimeRestY();
+    slimePress=null;
+    if(slimeOpenAfterSquash){slimeOpenAfterSquash=false;requestOpenSlimeLab();}
+    else if(G.r1.item!=='slime')slimeRig.visible=false;
+  }
+}
+
 function addTweezerSlot(){
   const doc=gameWindow.document;
   if(doc.getElementById('tweezer-slot'))return;
@@ -669,19 +937,60 @@ function addTweezerSlot(){
   G.ui.slotEls.tweezer=slot;
 }
 
+function addSlimeSlot(){
+  const doc=gameWindow.document;
+  if(doc.getElementById('slime-slot'))return;
+  if(!doc.getElementById('slime-slot-style')){
+    const style=doc.createElement('style');
+    style.id='slime-slot-style';
+    style.textContent=`
+      #slime-slot{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1px;line-height:1.05}
+      #slime-slot .slime-count{display:inline-grid;place-items:center;min-width:31px;height:14px;padding:0 4px;border-radius:999px;background:rgba(48,32,23,.13);font-size:9px;font-weight:900;letter-spacing:0}
+      #slime-slot.sel .slime-count{background:rgba(248,240,220,.2)}
+      #slime-slot.complete{background:#8bcfc0;color:#17372f;box-shadow:0 2px 0 #438d7e,0 4px 10px rgba(40,95,82,.35)}
+      #slime-slot.complete.sel{background:#17372f;color:#d8fff6}
+    `;
+    doc.head.appendChild(style);
+  }
+  const slot=doc.createElement('div');
+  slot.id='slime-slot';
+  slot.className='slot';
+  const name=doc.createElement('span');name.className='slime-name';name.textContent='슬라임';
+  const badge=doc.createElement('small');badge.className='slime-count';badge.textContent=`0/${SLIME_TARGET}`;
+  slot.append(name,badge);
+  slot.title=`슬라임 0/${SLIME_TARGET}`;
+  slot.addEventListener('pointerdown',e=>{
+    e.stopPropagation();e.preventDefault();
+    GSFX?.ensure?.();
+    selectSlime();
+  });
+  const col=doc.getElementById('wcol');
+  const tweezer=doc.getElementById('tweezer-slot');
+  col.insertBefore(slot,tweezer?.nextSibling||col.firstChild);
+  G.ui.slotEls.slime=slot;
+  updateSlimeSlot();
+}
+
 function installTweezerMode(){
   if(installed||!G)return;
   installed=true;
   addTweezerSlot();
+  addSlimeSlot();
 
   tweezerRig=makeTweezerRig();
   G.r1.grp.add(tweezerRig);
+  slimeRig=makeSlimeRig();
+  G.r1.grp.add(slimeRig);
 
   const originalUpdate=G.r1.update.bind(G.r1);
   G.r1.update=function(dt){
-    if(this.item!=='tweezer'&&!cap){
+    const specialItem=this.item==='tweezer'||this.item==='slime';
+    if(!specialItem&&!cap){
       if(tweezerRig)tweezerRig.visible=false;
-      return originalUpdate(dt);
+      const out=originalUpdate(dt);
+      if(slimePress||slimeAttachments.length)updateSlime(dt);
+      else if(slimeRig)slimeRig.visible=false;
+      return out;
     }
     const mouse=this.G.input?.mouse;
     const oldLive=mouse?.live;
@@ -697,6 +1006,8 @@ function installTweezerMode(){
       if(cap)updateCapture(dt);
       else if(lastPointer&&oldLive&&savedItem==='tweezer')pointTweezerAt(lastPointer.x,lastPointer.y,true);
       else if(tweezerRig)tweezerRig.visible=false;
+      if(savedItem==='slime'||slimePress||slimeAttachments.length)updateSlime(dt);
+      else if(slimeRig)slimeRig.visible=false;
     }
   };
 
@@ -704,6 +1015,8 @@ function installTweezerMode(){
   G.r1.selectItem=function(kind){
     const result=originalSelect(kind);
     if(kind!=='tweezer'&&tweezerRig&&!cap)tweezerRig.visible=false;
+    if(kind!=='slime'&&slimeRig&&!slimePress)slimeRig.visible=false;
+    if(kind==='slime')showSlimeAtCenter();
     return result;
   };
 
@@ -713,7 +1026,16 @@ function installTweezerMode(){
       const r=cap.r;cap=null;
       if(r?.m?.g)G.r1.grp.remove(r.m.g);
     }
+    for(const a of slimeAttachments){
+      if(a.g){slimeRig?.remove(a.g);a.g.visible=false;}
+      if(a.marker)a.marker.visible=true;
+    }
+    slimeAttachments.length=0;
+    slimePress=null;
+    slimeOpenAfterSquash=false;
+    slimeLabPendingOpen=false;
     if(tweezerRig)tweezerRig.visible=false;
+    if(slimeRig)slimeRig.visible=false;
     return originalStop();
   };
 
@@ -725,6 +1047,11 @@ function installTweezerMode(){
 
   // 손가락 번호(id)까지 그대로 넘겨야 게임 쪽에서 양손 연타·뿌리며 두드리기를 구분한다
   G.input.onPress=(x,y,type,id)=>{
+    if(G.state==='r1'&&G.r1.item==='slime'){
+      lastPointer={x,y,type};
+      collectWithSlime(x,y);
+      return;
+    }
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
       lastPointer={x,y,type};
       captureAt(x,y,type);
@@ -733,6 +1060,11 @@ function installTweezerMode(){
     originalPress?.(x,y,type,id);
   };
   G.input.onDrag=(x,y,id)=>{
+    if(G.state==='r1'&&G.r1.item==='slime'){
+      lastPointer={x,y,type:G.input.lastType||'touch'};
+      if(!slimePress)pointSlimeAt(x,y,G.input.lastType==='mouse');
+      return;
+    }
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
       lastPointer={x,y,type:G.input.lastType||'touch'};
       pointTweezerAt(x,y,G.input.lastType==='mouse');
@@ -741,10 +1073,12 @@ function installTweezerMode(){
     originalDrag?.(x,y,id);
   };
   G.input.onRelease=(id)=>{
+    if(G.state==='r1'&&G.r1.item==='slime')return;
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap))return;
     originalRelease?.(id);
   };
   G.input.onCancel=()=>{
+    if(G.state==='r1'&&G.r1.item==='slime')return;
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
       if(!cap)tweezerRig?.userData.setGrip?.(0);
       return;
@@ -762,8 +1096,12 @@ function installTweezerMode(){
   gameWindow.addEventListener('pointermove',e=>{
     lastPointer={x:e.clientX,y:e.clientY,type:e.pointerType==='mouse'?'mouse':'touch'};
     if(G.state==='r1'&&G.r1.item==='tweezer'&&e.pointerType==='mouse')pointTweezerAt(e.clientX,e.clientY,true);
+    if(G.state==='r1'&&G.r1.item==='slime'&&e.pointerType==='mouse')pointSlimeAt(e.clientX,e.clientY,true);
   },{passive:true});
-  gameWindow.addEventListener('pointerleave',()=>{if(tweezerRig&&!cap)tweezerRig.visible=false;});
+  gameWindow.addEventListener('pointerleave',()=>{
+    if(tweezerRig&&!cap)tweezerRig.visible=false;
+    if(slimeRig&&!slimePress&&G.r1.item==='slime')slimeRig.visible=false;
+  });
 }
 
 // ───────── 실험실 ─────────
@@ -825,7 +1163,10 @@ function closeLab(){
     G.r1.touch?.();
     G.ui.hint?.('족집게로 다른 바퀴벌레도 집을 수 있습니다.',1.6,.1,true);
   }
-  setTimeout(()=>{closeBusy=false;},160);
+  setTimeout(()=>{
+    closeBusy=false;
+    if(slimeLabPendingOpen)openSlimeLab();
+  },160);
 }
 
 labBack.addEventListener('pointerdown',e=>{
@@ -848,8 +1189,107 @@ window.addEventListener('message',e=>{
   if(e.data?.type==='specimen-lab-close')closeLab();
 });
 
+// ───────── 바뿌볼 근접 놀이 ─────────
+function preloadSlimeLab(){
+  if(slimeLabState!=='none')return;
+  slimeLabState='loading';
+  slimeFrame.src='slime-lab.html?embed=1';
+}
+
+function slimeLabApi(){
+  try{return slimeFrame.contentWindow?.SlimeLab||null;}catch(err){return null;}
+}
+
+function enterSlimeLab(){
+  const L=slimeLabApi();
+  if(!L)return false;
+  const saved=slimeLabResult&&typeof slimeLabResult==='object'?slimeLabResult:{};
+  try{
+    L.enter?.({
+      ...saved,
+      count:SLIME_TARGET,
+      target:SLIME_TARGET,
+      collected:slimeCount,
+      seed:saved.seed??slimeSeed,
+      mixedState:saved.mixedState||null,
+      playing:slimeLabEntered?(saved.playing??saved.mixedState?.playing??false):false
+    });
+    slimeLabEntered=true;
+    return true;
+  }catch(err){console.error(err);return false;}
+}
+
+function requestOpenSlimeLab(){
+  if(!slimeComplete||slimeLabOpen)return;
+  preloadSlimeLab();
+  if(slimeLabState==='ready'&&!labOpen&&!mailOpen)openSlimeLab();
+  else slimeLabPendingOpen=true;
+}
+
+function openSlimeLab(){
+  if(slimeLabOpen||labOpen||mailOpen||!G||slimeLabState!=='ready')return;
+  if(!enterSlimeLab()){slimeLabPendingOpen=true;return;}
+  slimeLabPendingOpen=false;
+  slimeLabOpen=true;
+  slimeCloseBusy=false;
+  pausedBeforeSlimeLab=!!G.paused;
+  sleepBeforeSlimeLab=!!G.sleep;
+  G.paused=true;
+  G.sleep=true;
+  G.r1.cancel?.();
+  G.input.reset?.();
+  if(tweezerRig)tweezerRig.visible=false;
+  if(slimeRig)slimeRig.visible=false;
+  slimeLayer.classList.add('open');
+  slimeLayer.setAttribute('aria-hidden','false');
+  gameFrame.classList.add('covered');
+}
+
+function rememberSlimeLabResult(result){
+  if(!result||typeof result!=='object')return;
+  slimeLabResult={...result,mixedState:result.mixedState?{...result.mixedState}:result.mixedState};
+  if(Number.isFinite(Number(result.seed)))slimeSeed=Number(result.seed);
+}
+
+function closeSlimeLab(sentResult=null){
+  if(!slimeLabOpen||slimeCloseBusy)return;
+  slimeCloseBusy=true;
+  const L=slimeLabApi();
+  try{rememberSlimeLabResult(sentResult||L?.result?.());}catch(err){console.warn(err);}
+  try{L?.sleep?.();}catch(err){console.warn(err);}
+  slimeLayer.classList.remove('open');
+  slimeLayer.setAttribute('aria-hidden','true');
+  gameFrame.classList.remove('covered');
+  slimeLabOpen=false;
+  if(G){
+    G.sleep=sleepBeforeSlimeLab;
+    G.paused=pausedBeforeSlimeLab;
+    G.r1.touch?.();
+    if(G.state==='r1'&&G.r1.item==='slime'&&slimeRig)slimeRig.visible=true;
+    G.ui.hint?.('바뿌볼을 다시 누르면 이어서 가지고 놀 수 있습니다.',1.55,.08,true);
+  }
+  setTimeout(()=>{slimeCloseBusy=false;},160);
+}
+
+slimeBack.addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  e.stopPropagation();
+  closeSlimeLab();
+});
+
+window.addEventListener('message',e=>{
+  if(e.source!==slimeFrame.contentWindow)return;
+  if(e.data?.type==='slime-lab-ready'){
+    slimeLabState='ready';
+    if(slimeLabPendingOpen&&slimeComplete)openSlimeLab();
+    else if(!slimeLabOpen)slimeLabApi()?.sleep?.();
+  }
+  if(e.data?.type==='slime-lab-close')closeSlimeLab(e.data?.result||null);
+});
+
 window.addEventListener('keydown',e=>{
   if(e.code==='Escape'&&mailOpen){e.preventDefault();closeLetter();return;}
+  if(e.code==='Escape'&&slimeLabOpen){e.preventDefault();closeSlimeLab();return;}
   if(e.code==='Escape'&&labOpen){e.preventDefault();closeLab();}
 });
 
@@ -866,10 +1306,10 @@ window.addEventListener('keydown',e=>{
     const st=G?G.state:'';
     const onIntro=!introEl.hidden&&!introEl.classList.contains('gone');
     let pos='tl';
-    if(labOpen)pos='tr';
+    if(labOpen||slimeLabOpen)pos='tr';
     else if(!onIntro&&(st==='r1'||st==='confirm'))pos='br';
     if(face.dataset.pos!==pos)face.dataset.pos=pos;
-    const playing=!onIntro&&(labOpen||st==='r1'||st==='confirm'||st==='r2'||st==='to_r2');
+    const playing=!onIntro&&(labOpen||slimeLabOpen||st==='r1'||st==='confirm'||st==='r2'||st==='to_r2');
     const target=playing?'_blank':'_top';
     if(face.target!==target){
       face.target=target;
