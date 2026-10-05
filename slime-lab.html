@@ -117,7 +117,7 @@ class SlimeAudio{
     if(!this.ctx)return;const t=this.ctx.currentTime;if(t-this.lastTiny<.18)return;this.lastTiny=t;const s=clamp(strength,.2,1);
     this.crackle(0,.08,2+Math.round(s*3),.035+s*.045,2100,6600);
   }
-  close(){this.ctx?.close?.();this.ctx=null;this.master=null;this.noiseBuffer=null}
+  close(){this.ctx?.close?.();this.ctx=null;this.master=null;this.noiseBuffer=null;this.lastWet=0;this.lastTiny=0}
 }
 const SFX=new SlimeAudio();
 
@@ -310,7 +310,8 @@ function releasePointer(e={},silent=false){
   if(id!=null&&canvas.hasPointerCapture?.(id))canvas.releasePointerCapture?.(id);
   if(!silent&&wholeCount===0)SFX.wet(Math.max(.35,deform.squeeze),true);
 }
-function cancelPointer(){releasePointer({},true)}
+function cancelPointer(e={}){releasePointer(e,true)}
+function forceCancelPointer(){releasePointer({},true)}
 function strongCompression(){
   if(pointer.strong)return;pointer.strong=true;
   if(wholeCount>0){
@@ -321,7 +322,7 @@ function strongCompression(){
 function onContextMenu(e){e.preventDefault()}
 function onPlay(e){e.preventDefault();e.stopPropagation();SFX.ensure();playStarted=true;intro.classList.add('hide');deform.wobble=.4}
 canvas.addEventListener('pointerdown',onPointerDown,{passive:false});canvas.addEventListener('pointermove',onPointerMove,{passive:false});window.addEventListener('pointerup',releasePointer);window.addEventListener('pointercancel',cancelPointer);
-canvas.addEventListener('lostpointercapture',cancelPointer);window.addEventListener('blur',cancelPointer);
+canvas.addEventListener('lostpointercapture',cancelPointer);window.addEventListener('blur',forceCancelPointer);
 canvas.addEventListener('contextmenu',onContextMenu);playBtn.addEventListener('pointerdown',onPlay);
 function onKeyDown(e){if(e.code==='Escape'){e.preventDefault();sendClose()}}
 window.addEventListener('keydown',onKeyDown);
@@ -338,7 +339,7 @@ function resize(){
   const portrait=h>w;camera.fov=portrait?41:34;camera.position.set(0,portrait?5.2:3.85,portrait?12.5:7.05);camera.lookAt(0,portrait?.45:.05,0);camera.updateProjectionMatrix();
 }
 window.addEventListener('resize',resize);const resizeObserver='ResizeObserver'in window?new ResizeObserver(resize):null;resizeObserver?.observe(rootEl);
-function onVisibility(){pageHidden=document.hidden;last=performance.now()/1000;if(pageHidden)cancelPointer()}
+function onVisibility(){pageHidden=document.hidden;last=performance.now()/1000;if(pageHidden)forceCancelPointer()}
 document.addEventListener('visibilitychange',onVisibility);
 
 function parseMixedState(payload={}){
@@ -351,7 +352,7 @@ function parseMixedState(payload={}){
   playStarted=Boolean(payload.playing??mixed.playing??damage>0);
 }
 function resetState(payload={}){
-  cancelPointer();
+  forceCancelPointer();
   const nextSeed=payload.seed??payload.mixedState?.seed??seed;targetCount=clamp(Math.round(Number(payload.target??payload.count??payload.collected??MAX_ROACHES)||MAX_ROACHES),1,MAX_ROACHES);buildPopulation(nextSeed);parseMixedState(payload);
   deform.squeeze=deform.target=0;deform.drag.set(0,0,0);deform.dragTarget.set(0,0,0);deform.press.set(0,0,1);deform.wobble=.25;deform.lastKey=-1;pointer.down=false;pointer.id=null;
   crumbCursor=0;for(let i=0;i<CRUMB_COUNT;i++){crumbLife[i]=0;crumbPos[i*3]=0;crumbPos[i*3+1]=-50;crumbPos[i*3+2]=0;crumbVel[i].set(0,0,0)}crumbGeo.attributes.position.needsUpdate=true;
@@ -361,12 +362,12 @@ function resultSnapshot(){
   const damage=crushes/Math.max(1,breakTotal),mixed=wholeCount===0;return {count:targetCount,target:targetCount,seed,damage,crushes,breakTotal,mixed,playing:playStarted,whole:wholeCount,fragments:{body:fragMeshes.body.count,wing:fragMeshes.wing.count,leg:fragMeshes.leg.count},mixedState:{seed,damage,crushes,breakTotal,mixed,playing:playStarted}};
 }
 function enter(payload={}){appPaused=false;resetState(payload&&typeof payload==='object'?payload:{});wake();return api}
-function sleep(){appPaused=true;cancelPointer();if(rafId){cancelAnimationFrame(rafId);rafId=0}return api}
+function sleep(){appPaused=true;forceCancelPointer();if(rafId){cancelAnimationFrame(rafId);rafId=0}SFX.close();return api}
 function wake(){if(disposed)return api;appPaused=false;last=performance.now()/1000;resize();if(!rafId)rafId=requestAnimationFrame(frame);return api}
 function sendClose(){const result=resultSnapshot();if(window.parent!==window)parent.postMessage({type:'slime-lab-close',result},location.origin);return result}
-function exit(){appPaused=true;return sendClose()}
+function exit(){sleep();return sendClose()}
 function dispose(){
-  if(disposed)return;disposed=true;cancelPointer();cancelAnimationFrame(rafId);resizeObserver?.disconnect();canvas.removeEventListener('pointerdown',onPointerDown);canvas.removeEventListener('pointermove',onPointerMove);canvas.removeEventListener('lostpointercapture',cancelPointer);canvas.removeEventListener('contextmenu',onContextMenu);playBtn.removeEventListener('pointerdown',onPlay);window.removeEventListener('blur',cancelPointer);window.removeEventListener('resize',resize);window.removeEventListener('pointerup',releasePointer);window.removeEventListener('pointercancel',cancelPointer);window.removeEventListener('keydown',onKeyDown);document.removeEventListener('visibilitychange',onVisibility);renderer.dispose();woodTexture.dispose();SFX.close();delete window.SlimeLab;
+  if(disposed)return;disposed=true;forceCancelPointer();cancelAnimationFrame(rafId);resizeObserver?.disconnect();canvas.removeEventListener('pointerdown',onPointerDown);canvas.removeEventListener('pointermove',onPointerMove);canvas.removeEventListener('lostpointercapture',cancelPointer);canvas.removeEventListener('contextmenu',onContextMenu);playBtn.removeEventListener('pointerdown',onPlay);window.removeEventListener('blur',forceCancelPointer);window.removeEventListener('resize',resize);window.removeEventListener('pointerup',releasePointer);window.removeEventListener('pointercancel',cancelPointer);window.removeEventListener('keydown',onKeyDown);document.removeEventListener('visibilitychange',onVisibility);renderer.dispose();woodTexture.dispose();SFX.close();delete window.SlimeLab;
 }
 const api={enter,sleep,wake,result:resultSnapshot,exit,dispose};
 window.SlimeLab=api;
