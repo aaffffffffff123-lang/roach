@@ -112,6 +112,7 @@ export class BappuBall{
     this.roachScale=opts.roachScale||(0.13/this.R); // 바퀴 모델 배율(게임 0.13) → 공 단위
     this.lift=0;                           // 0 바닥에 놓임 ~ 1 공중
     this.crushCount=0;
+    this.murk=0; this._murkShown=0;
     this.crumbSize=opts.crumbSize||0.06;
     this.castShadow=opts.castShadow!==false;
     this.group=new T.Group(); this.group.name='bappu-ball'; this.group.scale.setScalar(this.R);
@@ -440,6 +441,7 @@ export class BappuBall{
         r.flat=1; r.alive=false; this.spawnCrumbs(r,4+Math.floor(rnd()*4)); this.spawnShards(r,2+Math.floor(rnd()*3));
       }
     }
+    this.murk=clamp((this.murk||0)+Math.max(0,st-Math.max(1,r.stage))*0.10/Math.max(1,this.count*3),0,1);
     r.stage=st; if(st>=2) r.alive=false;
   }
   /** 부위 하나를 슬라임 속 조각으로 떼어낸다 */
@@ -477,13 +479,14 @@ export class BappuBall{
 
   // ── 상태 저장/복원 (화면을 닫았다 열어도 이어지게) ──
   getState(){
-    return {crushCount:this.crushCount||0,roaches:this.roaches.map(r=>r.used?{anchor:r.anchor,spin:r.spin,legs:Array.from(r.legs),antPhase:r.antPhase,stage:r.stage,flat:r.flat,state:Array.from(r.state),dmg:Array.from(r.dmg),
+    return {murk:this.murk||0,crushCount:this.crushCount||0,roaches:this.roaches.map(r=>r.used?{anchor:r.anchor,spin:r.spin,legs:Array.from(r.legs),antPhase:r.antPhase,stage:r.stage,flat:r.flat,state:Array.from(r.state),dmg:Array.from(r.dmg),
       frag:r.frag.map(f=>f?{p:f.p.toArray(),q:f.q.toArray(),s:f.s.toArray(),rest:f.rest.toArray(),q1:f.q1.toArray(),t:f.t,dur:f.dur}:null)}:null),
       crumbs:Array.from(this.crumbRest.subarray(0,this.crumbN*3)),shards:this.shardList.map(s=>({p:s.p.toArray(),rest:s.rest.toArray(),q:s.q.toArray(),s:s.s,t:s.t}))};
   }
   setState(st){
     const T=this.T; this.reset();
     this.crushCount=st.crushCount||0;
+    this.murk=clamp(st.murk||0,0,1); this._murkShown=this.murk;
     st.roaches.forEach((d,i)=>{ if(!d)return; const r=this.attach(i,d.anchor,d.spin,{legs:Float32Array.from(d.legs),antPhase:d.antPhase}); r.stage=d.stage; r.flat=d.flat; r.alive=d.stage<2; r.state.set(d.state); r.dmg.set(d.dmg);
       d.frag.forEach((f,slot)=>{ if(!f)return; r.frag[slot]={p:new T.Vector3().fromArray(f.p),q:new T.Quaternion().fromArray(f.q),s:new T.Vector3().fromArray(f.s),rest:new T.Vector3().fromArray(f.rest),q0:new T.Quaternion().fromArray(f.q),q1:new T.Quaternion().fromArray(f.q1),t:f.t,dur:f.dur,axis:new T.Vector3(1,0,0),last:new T.Vector3().fromArray(f.p)}; }); });
     this.crumbN=Math.min(this.crumbCap,Math.floor(st.crumbs.length/3)); this.crumbRest.set(st.crumbs.slice(0,this.crumbN*3)); this.crumbs.geometry.setDrawRange(0,this.crumbN);
@@ -493,6 +496,7 @@ export class BappuBall{
   }
   reset(){
     const T=this.T; this.anchorUsed.fill(0); this.roaches=this.roaches.map((_,i)=>this.emptyRoach(i)); this.dents.length=0; this.wob.v=this.wob.vel=0; this.spreadV=0; this.squat=0; this.crushCount=0; this.brokenCount=0;
+    this.murk=0; this._murkShown=0;
     this.crumbN=0; this.crumbs.geometry.setDrawRange(0,0); this.shardList=[]; this.shards.count=0; this.rollQ.identity(); this.rollQInv.identity();
     const zero=this._m[0].makeScale(0,0,0); for(const im of this.meshes){ const cap=im.instanceMatrix.count; for(let i=0;i<cap;i++) im.setMatrixAt(i,zero); im.instanceMatrix.needsUpdate=true; }
     this.setDrawCount(0); this.dirty=true; this.fadeRoaches(1);
@@ -546,6 +550,64 @@ export class BappuBall{
   }
 
   // ── 매 프레임 ──
+  updateMurk(dt){
+    let used=0,damage=0,work=0;
+
+    for(const r of this.roaches){
+      if(r.used){
+        used++;
+        damage+=Math.max(0,r.stage-1)/3;
+      }
+    }
+    damage/=Math.max(1,used);
+
+    for(const d of this.dents){
+      if(d._murkAge==null||d.t<d._murkAge){
+        d._murkK=0;
+        d._murkDrag=0;
+      }
+
+      const k=clamp(d.k,0,1);
+      if(d.on){
+        work+=Math.max(0,k-d._murkK)
+          +Math.max(0,d.drag-d._murkDrag)*1.3*k;
+      }
+
+      d._murkK=k;
+      d._murkDrag=d.drag;
+      d._murkAge=d.t;
+    }
+
+    this.murk=clamp(
+      (this.murk||0)
+      +(1-(this.murk||0))*damage*work*0.05,
+      0,1
+    );
+
+    this._murkShown=(this._murkShown||0)
+      +(this.murk-(this._murkShown||0))*(1-Math.exp(-2*dt));
+
+    const t=this._murkShown;
+    if(Math.abs(t-(this._murkApplied??-1))<1e-5) return;
+    this._murkApplied=t;
+
+    const T=this.T;
+    const p=this._murkPalette||(this._murkPalette={
+      front:new T.Color(0xf1fbfd),
+      back:new T.Color(0xc9efe9),
+      ivory:new T.Color(0xf2ecd9),
+      tan:new T.Color(0xdcc8a8)
+    });
+
+    const ivory=Math.min(1,t*2);
+    const tan=clamp((t-0.35)/0.65,0,1)*0.6;
+
+    this.matFront.color.copy(p.front).lerp(p.ivory,ivory).lerp(p.tan,tan);
+    this.matBack.color.copy(p.back).lerp(p.ivory,ivory).lerp(p.tan,tan);
+    setSlimeMurk(this.matFront,t);
+    setSlimeMurk(this.matBack,t);
+  }
+
   update(dt){
     this.time+=dt; const T=this.T;
     // 압입 스프링: 누르는 동안은 묵직하게, 떼면 출렁이며 돌아온다
@@ -567,6 +629,7 @@ export class BappuBall{
     const tgtSpread=sumK; this.spreadV+=(tgtSpread-this.spreadV)*(1-Math.exp(-8*dt)); if(Math.abs(this.spreadV-tgtSpread)>1e-3) any=true;
     if(any) this.dirty=true;
     this.knead(dt);
+    this.updateMurk(dt);
     // 살아 있는 바퀴 경련
     for(const r of this.roaches){ if(!r.used||!r.alive)continue; if(r.twitch>0){ r.twitchT+=dt; r.twitch-=dt*1.6; if(r.twitch<=0){r.twitch=0; this.markLeg(r);} else this.markLeg(r); } else if(Math.random()<dt*0.12){ r.twitch=1; r.twitchT=0; r.twitchLeg=Math.floor(Math.random()*6); } }
     if(this.dirty){ this.updateSlime(); this.updateRoaches(); this.updateCrumbs(); this.dirty=false; this.fragDirty=true; }
@@ -761,13 +824,43 @@ export class BappuBall{
   dispose(){ for(const im of this.meshes){ im.geometry.dispose(); } this.slimeGeo.dispose(); this.envMap.dispose(); this.matFront.dispose(); this.matBack.dispose(); this.matWing.dispose(); if(this.shadow){ this.shadow.material.map.dispose(); this.shadow.material.dispose(); } }
 }
 
+function setSlimeMurk(mat,level){
+  const s=mat.userData.slimeTint;
+  if(!s) return;
+
+  s.level=level;
+  const u=s.uniforms;
+  if(!u) return;
+
+  u.uAMin.value=lerp(s.aMin,s.aMin>=0.1?0.28:0.11,level);
+  u.uAMax.value=lerp(s.aMax,Math.min(0.84,s.aMax+0.08),level);
+  u.uRim.value.copy(s.rim).lerp(s.warmRim,level*0.85);
+}
+
 function slimeFresnel(T,mat,aMin,aMax,rim,rimK){
+  const tint=mat.userData.slimeTint={
+    level:0,
+    aMin,
+    aMax,
+    rim:new T.Color(rim),
+    warmRim:new T.Color(0xe7d5b6),
+    uniforms:null
+  };
+
   mat.onBeforeCompile=(sh)=>{
-    sh.uniforms.uAMin={value:aMin}; sh.uniforms.uAMax={value:aMax}; sh.uniforms.uRim={value:new T.Color(rim)}; sh.uniforms.uRimK={value:rimK};
+    sh.uniforms.uAMin={value:aMin};
+    sh.uniforms.uAMax={value:aMax};
+    sh.uniforms.uRim={value:new T.Color(rim)};
+    sh.uniforms.uRimK={value:rimK};
+
+    tint.uniforms=sh.uniforms;
+    setSlimeMurk(mat,tint.level);
+
     sh.fragmentShader=sh.fragmentShader
       .replace('uniform float opacity;','uniform float opacity;\nuniform float uAMin;uniform float uAMax;uniform vec3 uRim;uniform float uRimK;')
       .replace('#include <dithering_fragment>','#include <dithering_fragment>\n{ float f=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.6);\n  float spec=dot(reflectedLight.directSpecular+reflectedLight.indirectSpecular,vec3(0.3333));\n  #ifdef USE_CLEARCOAT\n  spec+=dot(clearcoatSpecularDirect+clearcoatSpecularIndirect,vec3(0.3333));\n  #endif\n  gl_FragColor.a=clamp(mix(uAMin,uAMax,f)+spec*1.6,0.0,1.0)*opacity;\n  gl_FragColor.rgb=mix(gl_FragColor.rgb,gl_FragColor.rgb*0.55+uRim*0.75,f*uRimK); }');
   };
+
   mat.customProgramCacheKey=()=>'slime-fresnel-'+aMin+'-'+aMax;
 }
 
