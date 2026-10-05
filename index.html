@@ -153,6 +153,7 @@ iframe{display:block;width:100%;height:100%;border:0;background:#efe8dc}
 // 족집게 모델은 반드시 게임 창의 three.js로 만들어야 한다.
 // 이 창에서 따로 불러온 three.js로 만든 도형은 게임 렌더러가 읽지 못해 매 프레임 렌더 에러가 나고 화면이 멈춘다.
 let THREE=null;
+import {createSlimeMode} from './slime-mode.js';
 
 const gameFrame=document.getElementById('gameFrame');
 const labLayer=document.getElementById('labLayer');
@@ -177,6 +178,8 @@ let tweezerRig=null;
 let lastPointer=null;
 let closeBusy=false;
 let cap=null;               // 집어 드는 중인 바퀴
+
+const slime=createSlimeMode({gameFrame});
 
 const showError=text=>{
   errorEl.textContent=text;
@@ -203,6 +206,7 @@ async function waitForGame(){
         GSFX=w.__SFX||null;
         installTweezerMode();
         installLetters();
+         slime.install({G,gameWindow,THREE,GSFX});
         if(introActive)holdGameForIntro();
         else if(startWhenReady)beginTreatment();
         boot.classList.add('done');
@@ -219,6 +223,7 @@ async function waitForGame(){
 gameFrame.addEventListener('load',()=>{
   installed=false;
   cap=null;
+  slime.reset();
   waitForGame();
 });
 
@@ -311,7 +316,7 @@ function showLetter(kind,onDone){
   document.getElementById('mailFactText').textContent=factText;
   // 게임 중이면 멈춘다
   mailPausedGame=false;
-  if(G&&G.state==='r1'&&!labOpen&&!introActive){
+  if(G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!introActive){
     mailPausedGame=!G.paused;
     G.r1.cancel?.();
     G.input.reset?.();
@@ -339,7 +344,7 @@ function closeLetter(){
 mailOk.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeLetter();});
 mailEl.addEventListener('pointerdown',()=>{if(mailOpen)mailEl.classList.add('open');});
 
-const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!mailOpen&&!introActive&&!cap;
+const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!mailOpen&&!introActive&&!cap;
 const sinceLetter=()=>performance.now()/1000-lastLetterAt;
 let deathSeen=false, killsSinceLetter=0;
 
@@ -866,10 +871,10 @@ window.addEventListener('keydown',e=>{
     const st=G?G.state:'';
     const onIntro=!introEl.hidden&&!introEl.classList.contains('gone');
     let pos='tl';
-    if(labOpen)pos='tr';
+    if(labOpen||slime.isOpen())pos='tr';
     else if(!onIntro&&(st==='r1'||st==='confirm'))pos='br';
     if(face.dataset.pos!==pos)face.dataset.pos=pos;
-    const playing=!onIntro&&(labOpen||st==='r1'||st==='confirm'||st==='r2'||st==='to_r2');
+    const playing=!onIntro&&(labOpen||slime.isOpen()||st==='r1'||st==='confirm'||st==='r2'||st==='to_r2');
     const target=playing?'_blank':'_top';
     if(face.target!==target){
       face.target=target;
