@@ -257,7 +257,6 @@ function updateWholeInstances(){
   for(let i=0;i<active;i++){
     const r=roaches[i],p=deformSurface(r.n,tmpB),sc=scales(),normal=tmpC.set(r.n.x/sc.x,r.n.y/sc.y,r.n.z/sc.z).normalize();p.addScaledVector(normal,.035);
     qAlign.setFromUnitVectors(Y_AXIS,normal);qRoll.setFromAxisAngle(Y_AXIS,r.roll);qAlign.multiply(qRoll);dummy.position.copy(p);dummy.quaternion.copy(qAlign);dummy.scale.setScalar(r.scale);dummy.updateMatrix();anchorMatrix.copy(dummy.matrix);
-    wholeMeshes.body.setMatrixAt(i,workMatrix.multiplyMatrices(anchorMatrix,local.body));wholeMeshes.plate.setMatrixAt(i,workMatrix.multiplyMatrices(anchorMatrix,local.plate));wholeMeshes.head.setMatrixAt(i,workMatrix.multiplyMatrices(anchorMatrix,local.head));wholeMeshes.wingL.setMatrixAt(i,workMatrix.multiplyMatrices(anchorMatrix,local.wingL));wholeMeshes.wingR.setMatrixAt(i,workMatrix.multiplyMatrices(anchorMatrix,local.wingR));
     for(let k=0;k<6;k++)wholeMeshes.legs.setMatrixAt(i*6+k,workMatrix.multiplyMatrices(anchorMatrix,local.legs[k]));
     for(let k=0;k<2;k++)wholeMeshes.antennae.setMatrixAt(i*2+k,workMatrix.multiplyMatrices(anchorMatrix,local.antennae[k]));
   }
@@ -336,7 +335,7 @@ function frame(){
 }
 function resize(){
   if(disposed)return;const r=rootEl.getBoundingClientRect(),w=Math.max(1,Math.round(r.width||innerWidth)),h=Math.max(1,Math.round(r.height||innerHeight)),dpr=Math.min(devicePixelRatio||1,IS_SMALL?1.18:1.65);renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);camera.aspect=w/h;
-  const portrait=h>w;camera.fov=portrait?41:34;camera.position.set(0,portrait?3.65:3.85,portrait?7.75:7.05);camera.lookAt(0,.05,0);camera.updateProjectionMatrix();
+  const portrait=h>w;camera.fov=portrait?41:34;camera.position.set(0,portrait?5.2:3.85,portrait?12.5:7.05);camera.lookAt(0,portrait?.45:.05,0);camera.updateProjectionMatrix();
 }
 window.addEventListener('resize',resize);const resizeObserver='ResizeObserver'in window?new ResizeObserver(resize):null;resizeObserver?.observe(rootEl);
 function onVisibility(){pageHidden=document.hidden;last=performance.now()/1000;if(pageHidden)cancelPointer()}
