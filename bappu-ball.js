@@ -192,9 +192,13 @@ export class BappuBall{
     const common={color:0xf1fbfd,roughness:0.13,metalness:0,transparent:true,depthWrite:false,clearcoat:1,clearcoatRoughness:0.16,envMap:this.envMap,envMapIntensity:1.7,specularIntensity:1.6,ior:1.45};
     this.matBack=new T.MeshPhysicalMaterial({...common,opacity:1,side:T.BackSide,color:0xc9efe9});
     this.matFront=new T.MeshPhysicalMaterial({...common,opacity:1,side:T.FrontSide});
-    // 가운데는 거의 투명하고 가장자리로 갈수록 두꺼워 보이는 프레넬 알파 — 투명 덩어리 느낌의 핵심
-    slimeFresnel(T,this.matFront,0.16,0.84,0x7fe3d3,0.6);
-    slimeFresnel(T,this.matBack,0.06,0.55,0x5fd0c0,0.35);
+  
+    slimeFresnel(T,this.matFront,0.12,0.58,0x7fe3d3,0.6);
+    slimeFresnel(T,this.matBack,0.04,0.32,0x5fd0c0,0.35);
+
+
+
+
     this.slimeBack=new T.Mesh(geo,this.matBack); this.slimeBack.renderOrder=20; this.slimeBack.frustumCulled=false;
     this.slime=new T.Mesh(geo,this.matFront); this.slime.renderOrder=21; this.slime.frustumCulled=false;
     this.group.add(this.slimeBack,this.slime);
@@ -366,28 +370,45 @@ export class BappuBall{
   dent(id){ return this.dents.find(x=>x.id===id)||null; }
   kick(v){ this.wob.vel+=v; this.dirty=true; }
 
-  // ── 부수기 ──
-  /** 세게 눌렀다: dirW 쪽이 가장 많이 상한다. 돌려주는 값: 이번에 새로 생긴 손상 요약 */
+ 
   crush(dirW,strength=1){
-    const T=this.T, out={wings:0,shells:0,legs:0,bodies:0,near:0};
+    const out={
+      wings:0,shells:0,legs:0,bodies:0,near:0,changed:0
+    };
     const nW=this._tmp[17];
-    this.crushCount=(this.crushCount||0)+1;   // 눌린 횟수가 쌓이면 누구도 멀쩡할 수 없다
+    this.crushCount++;
     for(const r of this.roaches){
       if(!r.used||r.stage>=4) continue;
-      nW.copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ);
+      nW.copy(this.anchorDir[r.anchor])
+        .applyQuaternion(this.rollQ);
       const a=Math.acos(clamp(nW.dot(dirW),-1,1));
-      let add=0;
-      if(a<0.62) add=2; else if(a<1.25) add=1; else if(Math.random()<0.4*strength) add=1;
+      const add=a<0.62?2:a<1.25?1:
+        Math.random()<0.4*strength?1:0;
+      const st=Math.min(4,r.stage+add);
       if(a<0.62) out.near++;
-      let st=Math.min(4,r.stage+add);
-      if(st<this.crushCount-1) st=Math.min(4,this.crushCount-1);
-      if(st>r.stage) this.setStage(r,st,a<0.9);
+      if(st>r.stage){
+        const before=r.state.slice();
+        this.setStage(r,st,a<0.9);
+        out.changed++;
+        for(let slot=0;slot<SLOTS;slot++){
+          if(before[slot]!==0||r.state[slot]===0) continue;
+          if(slot>=6&&slot<10) out.wings++;
+          else if(slot<6) out.shells++;
+          else if(slot<22) out.legs++;
+        }
+      }
       r.crush=Math.max(r.crush,1-Math.min(1,a/1.4));
     }
-    this.wob.vel+=0.6; this.dirty=true;
-    let broken=0; for(const r of this.roaches) if(r.used&&r.stage>=4) broken++;
-    this.brokenCount=broken; return out;
+    this.wob.vel+=0.6;
+    this.dirty=true;
+    this.brokenCount=this.roaches
+      .filter(r=>r.used&&r.stage>=4).length;
+    return out;
   }
+
+
+
+
   allBroken(){ let u=0,b=0; for(const r of this.roaches){ if(r.used){u++; if(r.stage>=4)b++;} } return u>0&&u===b; }
   /** 단계 적용. near: 손가락 가까이(조각이 더 많이 흩어짐) */
   setStage(r,st,near){
@@ -552,24 +573,130 @@ export class BappuBall{
     else this.updateAntennae();
     this.updateFragments(dt);
   }
-  /** 주무르기: 손가락 밑의 조각·부스러기가 슬라임 속으로 밀려 들어가고 끄는 방향으로 떠밀린다. 안 만진 데는 그대로 */
+
+
   knead(dt){
-    let act=false; for(const d of this.dents) if(d.on&&d.k>0.08) act=true;
-    if(!act) return;
-    const dir=this._tmp[2], sink=(rest,strength)=>{
-      let infl=0; const r=rest.length(); if(r<1e-4) return;
-      dir.copy(rest).multiplyScalar(1/r);
-      for(const d of this.dents){ if(!d.on||d.k<0.08) continue; const a=Math.acos(clamp(dir.dot(d.dir),-1,1)); const g=d.k*Math.exp(-(a*a)/(1.5*d.w*d.w)); if(g<0.01) continue; infl+=g;
-        if(d.shear.lengthSq()>1e-6) rest.addScaledVector(d.shear,dt*0.9*g*strength); }
-      if(infl<=0) return;
-      const nr=Math.max(0.26,rest.length()-dt*0.6*infl*strength); rest.setLength(nr); this.fragDirty=true;
+    const flows=[];
+    for(const d of this.dents){
+      if(!d._mixDir||d.t<d._mixTime){
+        d._mixK=0;
+        d._mixDir=d.dir.clone();
+        d._mixShear=d.shear.clone();
+        d._mixMove=new this.T.Vector3();
+      }
+      const k=clamp(d.k,0,1), dk=k-d._mixK;
+      d._mixMove.copy(d.dir).sub(d._mixDir).multiplyScalar(0.42)
+        .addScaledVector(d.shear,0.7)
+        .addScaledVector(d._mixShear,-0.7);
+      d._mixDK=dk;
+      d._mixPower=Math.max(k,d._mixK);
+      d._mixK=k;
+      d._mixDir.copy(d.dir);
+      d._mixShear.copy(d.shear);
+      d._mixTime=d.t;
+      if(Math.abs(dk)>1e-6||d._mixMove.lengthSq()>1e-10)
+        flows.push(d);
+    }
+    if(!flows.length) return;
+
+    const n=this._tmp[2], away=this._tmp[3], motion=this._tmp[4];
+    const transport=(rest,strength)=>{
+      const x=rest.x,y=rest.y,z=rest.z;
+      for(const d of flows){
+        const r=rest.length();
+        if(r<1e-6) continue;
+        n.copy(rest).multiplyScalar(1/r);
+        const c=clamp(n.dot(d.dir),-1,1);
+        const a=Math.acos(c), w=Math.max(0.15,d.w);
+        const core=Math.exp(-a*a/(0.85*w*w));
+        const ring=Math.exp(-Math.pow((a-1.35*w)/(0.55*w),2));
+        const local=Math.exp(-a*a/(2.2*w*w));
+        if(local<0.005) continue;
+
+        // 누른 곳은 안으로, 부푼 둘레는 겉으로.
+        // 손을 떼면 흐름이 반대로 이어진다.
+        rest.addScaledVector(n,
+          d._mixDK*strength*(-0.26*core+0.16*ring));
+        away.copy(n).multiplyScalar(c).sub(d.dir);
+        if(away.lengthSq()>1e-8)
+          rest.addScaledVector(away.normalize(),
+            d._mixDK*strength*0.12*ring);
+
+        // 끌기는 조각을 접선 방향으로 섞는다.
+        motion.copy(d._mixMove)
+          .addScaledVector(n,-d._mixMove.dot(n));
+        rest.addScaledVector(motion,
+          strength*local*d._mixPower);
+
+        const rr=rest.length();
+        if(rr>1e-6)
+          rest.multiplyScalar(clamp(rr,0.20,0.96)/rr);
+      }
+      return Math.abs(rest.x-x)+Math.abs(rest.y-y)
+        +Math.abs(rest.z-z)>1e-8;
     };
-    for(const r of this.roaches){ if(!r.used) continue; for(let slot=0;slot<SLOTS;slot++){ const f=r.frag[slot]; if(f) sink(f.rest,1); } }
-    for(const sh of this.shardList) sink(sh.rest,1.2);
-    const p=this._tmp[3]; let cr=false;
-    for(let i=0;i<this.crumbN;i++){ p.set(this.crumbRest[i*3],this.crumbRest[i*3+1],this.crumbRest[i*3+2]); const l0=p.length(); sink(p,1.4); if(p.length()!==l0){ this.crumbRest[i*3]=p.x; this.crumbRest[i*3+1]=p.y; this.crumbRest[i*3+2]=p.z; cr=true; } }
-    if(cr) this.dirty=true;
+
+    let moved=false;
+    for(const r of this.roaches){
+      if(!r.used) continue;
+      for(const f of r.frag)
+        if(f&&transport(f.rest,1)) moved=true;
+    }
+    for(const sh of this.shardList)
+      if(transport(sh.rest,1.1)) moved=true;
+
+    const p=this._tmp[5];
+    for(let i=0;i<this.crumbN;i++){
+      const j=i*3;
+      p.set(this.crumbRest[j],this.crumbRest[j+1],
+        this.crumbRest[j+2]);
+      if(transport(p,1.15)){
+        this.crumbRest[j]=p.x;
+        this.crumbRest[j+1]=p.y;
+        this.crumbRest[j+2]=p.z;
+        moved=true;
+      }
+    }
+    if(moved){
+      this.dirty=true;
+      this.fragDirty=true;
+    }
   }
+
+  fragmentContact(dirW){
+    const dir=this._tmp[20].copy(dirW).normalize();
+    const n=this._tmp[21], skin=this._tmp[22];
+    let hits=0;
+    const sample=(p,weight)=>{
+      const r=p.length();
+      if(r<1e-5) return;
+      n.copy(p).multiplyScalar(1/r);
+      const c=n.dot(dir);
+      if(c<0.86) return;
+      this.surfacePoint(n,skin);
+      const depth=skin.length()-r;
+      if(depth < -0.15||depth > 0.24) return;
+      hits+=weight*((c-0.86)/0.14)
+        *(1-clamp(depth,0,0.24)/0.24);
+    };
+    for(const r of this.roaches){
+      if(!r.used) continue;
+      for(let slot=0;slot<r.frag.length;slot++){
+        const f=r.frag[slot];
+        if(!f) continue;
+        sample(f.p,slot<10?1:0.3);
+        if(hits>=4) return 1;
+      }
+    }
+    for(const sh of this.shardList){
+      sample(sh.p,0.35);
+      if(hits>=4) return 1;
+    }
+    return clamp(hits/4,0,1);
+  }
+
+
+
   markLeg(r){ const m=this._m[0]; for(const slot of [SLOT_BODY+r.twitchLeg*2,SLOT_BODY+r.twitchLeg*2+1]){ if(r.state[slot]!==0)continue; this.pieceMatrix(r,slot,m); const [mi,ii]=this.instanceSlot(r,slot); this.meshes[mi].setMatrixAt(ii,m); this.meshes[mi].instanceMatrix.needsUpdate=true; } }
   updateSlime(){
     const T=this.T, pos=this.slimeGeo.attributes.position, arr=pos.array, base=this.slimeBase, n=this._tmp[0], o=this._tmp[1];
