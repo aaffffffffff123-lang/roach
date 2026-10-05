@@ -105,9 +105,9 @@ class SlimeSfx{
       this.grains(0.04,0.24,18+Math.round(legs*1.5),0.16*p,1500,7000,2.2);
     }
     // 얇은 날개가 쪼개지는 고음
-    for(let i=0;i<Math.round(wings*0.6)+1;i++) this.ping({t:rand(0.01,0.16),dur:rand(0.008,0.015),gain:rand(0.05,0.11)*p,freq:rand(3800,6600),freqEnd:rand(1500,2500),type:'triangle',pan:rand(-0.5,0.5)});
+    for(let i=0;i<Math.round(wings*0.6);i++) this.ping({t:rand(0.01,0.16),dur:rand(0.008,0.015),gain:rand(0.05,0.11)*p,freq:rand(3800,6600),freqEnd:rand(1500,2500),type:'triangle',pan:rand(-0.5,0.5)});
     // 단단한 등껍질이 내려앉는 저음
-    for(let i=0;i<Math.round(shells*0.5)+1;i++) this.burst({t:rand(0.02,0.2),dur:rand(0.03,0.05),gain:rand(0.12,0.22)*p,type:'lowpass',freq:rand(350,620),freqEnd:rand(90,160),att:0.003,pan:rand(-0.3,0.3)});
+    for(let i=0;i<Math.round(shells*0.5);i++) this.burst({t:rand(0.02,0.2),dur:rand(0.03,0.05),gain:rand(0.12,0.22)*p,type:'lowpass',freq:rand(350,620),freqEnd:rand(90,160),att:0.003,pan:rand(-0.3,0.3)});
     // 잔여 다리 마디가 늦게 부러지는 작은 소리
     for(let i=0;i<Math.round(legs*0.4);i++) this.burst({t:rand(0.15,0.5),dur:rand(0.005,0.009),gain:rand(0.05,0.1)*p,freq:rand(1800,2800),q:2,pan:rand(-0.6,0.6)});
   }
@@ -125,6 +125,55 @@ class SlimeSfx{
     this.grains(0,0.06+s*0.08,2+Math.round(s*3),0.04+s*0.06,1700,4600,2);
     if(Math.random()<0.5) this.burst({dur:0.02,gain:0.05+s*0.05,type:'lowpass',freq:500,freqEnd:200,att:0.002});
   }
+
+  gesture(kind,strength,mix){
+    this.ensure();
+    if(!this.ctx)return;
+    const s=clamp(strength,0.1,1);
+    const w=0.2+0.8*clamp(mix);
+
+    if(kind==='release'){
+      this.burst({
+        dur:0.06+s*0.08,gain:(0.035+s*0.1)*w,
+        freq:760,freqEnd:1500,q:2.4,att:0.003
+      });
+      this.ping({
+        dur:0.045+s*0.035,gain:(0.025+s*0.065)*w,
+        freq:220+s*90,freqEnd:600+s*150,
+        type:'sine',att:0.002
+      });
+      return;
+    }
+
+    const touch=kind==='touch';
+    this.burst({
+      dur:touch?0.06:0.15+s*0.14,
+      gain:(touch?0.065:0.1+s*0.2)*w,
+      type:'lowpass',freq:touch?460:300-s*100,
+      freqEnd:touch?200:110,q:0.8,
+      att:touch?0.004:0.025,rate:0.75
+    });
+    this.ping({
+      dur:touch?0.035:0.09,
+      gain:(touch?0.025:0.08+s*0.04)*w,
+      freq:touch?155:75,freqEnd:touch?230:45,
+      type:'sine',att:0.005
+    });
+    if(!touch){
+      this.burst({
+        t:0.025,dur:0.08+s*0.07,
+        gain:(0.025+s*0.05)*w,
+        freq:780,freqEnd:280,q:4,att:0.014
+      });
+      for(let i=0;i<2;i++)this.ping({
+        t:0.04+i*0.05,dur:0.04,gain:0.035*s*w,
+        freq:rand(250,500),freqEnd:rand(600,850),
+        type:'sine',att:0.006
+      });
+    }
+  }
+
+
   /** 손가락이 닿는 순간 */
   touch(wetStage){
     this.ensure(); if(!this.ctx)return;
@@ -137,11 +186,17 @@ class SlimeSfx{
     if(wetStage) this.wet(Math.max(0.3,k),true);
     else this.burst({dur:0.035,gain:0.06+k*0.05,freq:620,q:1,freqEnd:220,att:0.004});
   }
-  /** 문지르기 세기 (매 프레임) */
-  rub(level){
-    if(!this.ctx)return; const l=clamp(level,0,1); if(Math.abs(l-this.rubLevel)<0.01&&l===0)return; this.rubLevel=l;
-    const t=this.ctx.currentTime; this.rubGain.gain.setTargetAtTime(l*0.28,t,0.05); this.rubGain2.gain.setTargetAtTime(l*0.05,t,0.05);
+
+  rub(level,mix=1){
+    if(!this.ctx)return;
+    const l=clamp(level)*(0.2+0.8*clamp(mix));
+    this.rubLevel=l;
+    const t=this.ctx.currentTime;
+    this.rubGain.gain.setTargetAtTime(l*0.28,t,0.045);
+    this.rubGain2.gain.setTargetAtTime(l*0.07,t,0.045);
   }
+
+
 }
 const SFX=new SlimeSfx();
 for(const ev of ['pointerdown','pointerup','touchend','click','keydown']) window.addEventListener(ev,()=>SFX.ensure(),{capture:true,passive:true});
@@ -200,6 +255,14 @@ function dirFromScreen(x,y){
   const t=Math.max(0,tmpV.copy(c).sub(o).dot(d)); tmpV2.copy(o).addScaledVector(d,t).sub(c);
   if(tmpV2.lengthSq()<1e-6)tmpV2.set(0,0,1); return tmpV2.normalize();
 }
+
+function wetMix(){
+  return ball
+    ?clamp(ball.brokenCount/Math.max(1,ball.usedCount()))
+    :0;
+}
+
+
 function onDown(e){
   if(!started||appPaused||tossing)return;
   if(pointers.has(e.pointerId)){ pointers.delete(e.pointerId); ball.release(e.pointerId); } // 같은 번호가 다시 오면 이전 것은 뗀 것으로
@@ -209,7 +272,7 @@ function onDown(e){
   const d=ball.press(e.pointerId,dir,{depth:0.3,width:0.5});
   pointers.set(e.pointerId,{dent:d,x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,start:h.clone(),held:0,travel:0,strong:false,lastX:e.clientX,lastY:e.clientY,speed:0});
   try{canvas.setPointerCapture(e.pointerId);}catch(err){}
-  SFX.touch(wetStage);
+   SFX.gesture('touch',0.3,wetMix());
 }
 function onMove(e){
   const p=pointers.get(e.pointerId); if(!p||appPaused)return;
@@ -227,7 +290,8 @@ function onUp(e){
   const p=pointers.get(e.pointerId); if(!p)return;
   pointers.delete(e.pointerId);
   const d=ball.release(e.pointerId);
-  SFX.release(wetStage,d?Math.abs(d.k):0.2);
+    if(e.type==='pointerup')
+    SFX.gesture('release',d?Math.abs(d.k):0.2,wetMix());
   try{if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}catch(err){}
 }
 function cancelAll(){ for(const id of [...pointers.keys()]){ pointers.delete(id); ball?.release(id); } SFX.rub(0); }
@@ -240,17 +304,28 @@ canvas.addEventListener('contextmenu',e=>e.preventDefault());
 window.addEventListener('keydown',e=>{ if(e.code==='Escape'){ e.preventDefault(); sendClose(); } });
 
 const crunchKinds=[0,1,2]; let lastKind=-1;
+
 function strongPress(p){
   p.strong=true;
   if(!wetStage){
-    const res=ball.crush(p.dent.dir,1);
-    let kind; do{ kind=crunchKinds[Math.floor(Math.random()*3)]; }while(kind===lastKind&&Math.random()<0.7); lastKind=kind;
-    SFX.crunch(kind,0.85+res.near*0.03,{wings:res.near*2,shells:res.near,legs:res.near*3+4});
-    ball.kick(1.1);
-    if(ball.allBroken()){ wetStage=true; }
-  }else{
-    SFX.wet(0.95,true); if(Math.random()<0.75)SFX.tiny(0.8); ball.kick(0.8);
+    const res=ball.crush(p.dent.dir,1), mix=wetMix();
+    if(res.changed>0){
+      let kind;
+      do{
+        kind=crunchKinds[Math.floor(Math.random()*3)];
+      }while(kind===lastKind&&Math.random()<0.7);
+      lastKind=kind;
+      SFX.crunch(kind,0.9-mix*0.3,{
+        wings:res.wings,shells:res.shells,legs:res.legs
+      });
+    }
+    if(ball.allBroken())wetStage=true;
   }
+  const mix=wetMix();
+  SFX.gesture('press',0.95,mix);
+  if(ball.fragmentContact(p.dent.dir)>0.15)
+    SFX.tiny(0.45);
+  ball.kick(wetStage?0.8:1.1);
 }
 
 // ───────── 프레임 ─────────
@@ -265,10 +340,25 @@ function frame(){
   for(const p of pointers.values()){
     const d=p.dent; p.held+=dt; d.target=Math.min(1,Math.max(d.target,0.3+p.held*1.25+pinch*0.8));
     if(!p.strong&&d.k>0.74) strongPress(p);
-    if(p.speed>0.02){ rubLevel=Math.max(rubLevel,Math.min(1,p.speed*0.6)*Math.max(0.35,d.k)); if(wetStage&&Math.random()<dt*p.speed*0.9) SFX.tiny(0.4+p.speed*0.3); else if(!wetStage&&Math.random()<dt*p.speed*0.5) SFX.tiny(0.3); }
+    
+    
+        const motion=clamp(p.speed*0.6+Math.abs(d.kv)*0.13)
+      *Math.max(0.2,clamp(d.k));
+    rubLevel=Math.max(rubLevel,motion);
+    p.contactAt=(p.contactAt||0)-dt;
+    if(motion>0.08&&p.contactAt<=0){
+      p.contact=ball.fragmentContact(d.dir);
+      p.contactAt=0.12;
+    }
+    if(motion>0.08&&
+       Math.random()<dt*motion*3*(p.contact||0))
+      SFX.tiny(0.2+motion*0.45);
     p.speed*=Math.exp(-6*dt);
   }
-  SFX.rub(wetStage?rubLevel:rubLevel*0.35);
+  SFX.rub(rubLevel,wetMix());
+
+
+
   ball.update(dt);
   if(tossing){ // 버리기: 판 밖으로 휙 던져진다
     tossing.t+=dt; const k=clamp(tossing.t/0.85), g=ball.group;
