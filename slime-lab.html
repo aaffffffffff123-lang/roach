@@ -172,7 +172,7 @@ const table=new THREE.Mesh(new THREE.PlaneGeometry(24,18),new THREE.MeshStandard
 const board=new THREE.Mesh(new THREE.BoxGeometry(5.6,0.18,4.6),new THREE.MeshStandardMaterial({color:0xe9e0cc,roughness:0.6})); board.position.y=BOARD_TOP-0.09; board.castShadow=true; board.receiveShadow=true; scene.add(board);
 
 // ───────── 공 ─────────
-let ball=null, geos=null, started=false, appPaused=false, disposed=false, pageHidden=document.hidden, wetStage=false, rafId=0;
+let ball=null, geos=null, started=false, appPaused=false, disposed=false, pageHidden=document.hidden, wetStage=false, rafId=0, tossing=null;
 function makeBall(){
   if(ball){ scene.remove(ball.group); ball.dispose(); }
   ball=new BappuBall(THREE,{geos,radius:1,roachScale:ROACH_SCALE,segments:IS_SMALL?[44,30]:[56,38],crumbSize:0.07,castShadow:!IS_SMALL});
@@ -201,7 +201,7 @@ function dirFromScreen(x,y){
   if(tmpV2.lengthSq()<1e-6)tmpV2.set(0,0,1); return tmpV2.normalize();
 }
 function onDown(e){
-  if(!started||appPaused)return;
+  if(!started||appPaused||tossing)return;
   if(pointers.has(e.pointerId)){ pointers.delete(e.pointerId); ball.release(e.pointerId); } // 같은 번호가 다시 오면 이전 것은 뗀 것으로
   const h=hitBall(e.clientX,e.clientY); if(!h)return;
   e.preventDefault();
@@ -270,6 +270,11 @@ function frame(){
   }
   SFX.rub(wetStage?rubLevel:rubLevel*0.35);
   ball.update(dt);
+  if(tossing){ // 버리기: 판 밖으로 휙 던져진다
+    tossing.t+=dt; const k=clamp(tossing.t/0.85), g=ball.group;
+    g.position.set(-k*k*7.5,BOARD_TOP+FLOOR+Math.sin(k*Math.PI)*2.6-k*k*1.2,k*1.5); g.rotation.z=k*2.6; g.rotation.x=k*0.8;
+    if(k>=1){ tossing=null; appPaused=true; if(window.parent!==window)parent.postMessage({type:'slime-lab-tossed'},location.origin); }
+  }
   renderer.render(scene,camera);
 }
 function resize(){
@@ -296,10 +301,12 @@ function enter(payload={}){
 }
 function sleep(){ appPaused=true; cancelAll(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } SFX.suspend(); return api; }
 function wake(){ if(disposed)return api; appPaused=false; last=performance.now()/1000; resize(); if(!rafId)rafId=requestAnimationFrame(frame); SFX.resume(); return api; }
-function reset(){ cancelAll(); if(ball)ball.reset(); wetStage=false; started=false; return api; }
+function reset(){ cancelAll(); tossing=null; if(ball){ ball.reset(); ball.group.position.set(0,BOARD_TOP+FLOOR,0); ball.group.rotation.set(0,0,0); ball.group.scale.setScalar(ball.R); } wetStage=false; started=false; return api; }
+/** 바뿌볼 버리기: 던지는 연출 뒤 부모 창에 slime-lab-tossed 를 보낸다 */
+function toss(){ if(!ball||tossing)return api; cancelAll(); tossing={t:0}; SFX.ensure(); SFX.wet(1,true); SFX.burst({dur:0.42,gain:0.22,freq:900,freqEnd:260,q:0.8,att:0.03,rate:0.8}); SFX.burst({t:0.62,dur:0.09,gain:0.3,type:'lowpass',freq:380,freqEnd:120,att:0.004}); SFX.ping({t:0.62,dur:0.08,gain:0.16,freq:90,freqEnd:45,type:'triangle'}); return api; }
 function getState(){ return ball?ball.getState():null; }
 function sendClose(){ if(window.parent!==window)parent.postMessage({type:'slime-lab-close'},location.origin); }
-const api={init,enter,sleep,wake,reset,getState,isWet:()=>wetStage,
+const api={init,enter,sleep,wake,reset,toss,getState,isWet:()=>wetStage,
   _debugStrong(x,y){ const h=hitBall(x,y); if(!h)return false; const d=ball.press('dbg',h.clone().normalize(),{depth:0.9}); d.k=0.9; strongPress({dent:d,strong:false}); ball.release('dbg'); return true; }}; // 점검용
 window.SlimeLab=api;
 resize();

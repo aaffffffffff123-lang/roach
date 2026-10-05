@@ -429,17 +429,18 @@ export class BappuBall{
     if(s.lengthSq()<1e-9){ r.state[slot]=2; return; }
     const nW=this._tmp[18].copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ);
     const t=this._tmp[19].set(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5); t.addScaledVector(nW,-nW.dot(t)); if(t.lengthSq()<1e-6)t.set(1,0,0); t.normalize();
-    const rest=new T.Vector3().copy(nW).multiplyScalar(0.4+Math.random()*0.42).addScaledVector(t,Math.random()*0.3); if(rest.length()>0.8)rest.setLength(0.8);
-    const q1=new T.Quaternion().setFromEuler(new T.Euler(Math.random()*TAU,Math.random()*TAU,Math.random()*TAU));
+    // 떨어진 자리에 반쯤 박힌 채 겉에 남는다. 속으로 섞여 들어가는 건 손가락으로 주무를 때만 (knead)
+    const rest=new T.Vector3().copy(nW).multiplyScalar(0.9+Math.random()*0.06).addScaledVector(t,Math.random()*0.12); rest.setLength(Math.min(0.96,rest.length()));
+    const q1=new T.Quaternion().copy(q).multiply(new T.Quaternion().setFromEuler(new T.Euler((Math.random()-0.5)*1.2,(Math.random()-0.5)*1.2,(Math.random()-0.5)*1.2)));
     r.state[slot]=1;
-    r.frag[slot]={p,q,s,rest,q0:q.clone(),q1,t:0,dur:0.9+Math.random()*0.9,axis:new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize(),last:p.clone()};
+    r.frag[slot]={p,q,s,rest,q0:q.clone(),q1,t:0,dur:0.35+Math.random()*0.4,axis:new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize(),last:p.clone()};
     this.fragDirty=true;
   }
   spawnCrumbs(r,n){
     const nW=this._tmp[20].copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ);
     for(let k=0;k<n&&this.crumbN<this.crumbCap;k++){
       const i=this.crumbN++; const j=this._tmp[21].set(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).multiplyScalar(0.5);
-      const p=this._tmp[22].copy(nW).multiplyScalar(0.45+Math.random()*0.4).add(j); if(p.length()>0.84)p.setLength(0.84);
+      const p=this._tmp[22].copy(nW).multiplyScalar(0.78+Math.random()*0.17).add(j.multiplyScalar(0.5)); if(p.length()>0.95)p.setLength(0.95);
       this.crumbRest[i*3]=p.x; this.crumbRest[i*3+1]=p.y; this.crumbRest[i*3+2]=p.z;
     }
     this.crumbs.geometry.setDrawRange(0,this.crumbN); this.dirty=true;
@@ -447,7 +448,7 @@ export class BappuBall{
   spawnShards(r,n){
     const T=this.T, nW=this._tmp[20].copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ);
     for(let k=0;k<n&&this.shardList.length<this.shardCap;k++){
-      const rest=new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).multiplyScalar(0.5).addScaledVector(nW,0.4+Math.random()*0.4); if(rest.length()>0.84)rest.setLength(0.84);
+      const rest=new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).multiplyScalar(0.25).addScaledVector(nW,0.8+Math.random()*0.15); if(rest.length()>0.95)rest.setLength(0.95);
       this.shardList.push({p:new T.Vector3().copy(nW).multiplyScalar(0.98),rest,q:new T.Quaternion().setFromEuler(new T.Euler(Math.random()*TAU,Math.random()*TAU,Math.random()*TAU)),s:0.7+Math.random()*0.9,t:0});
     }
     this.shards.count=this.shardList.length; this.fragDirty=true;
@@ -544,11 +545,30 @@ export class BappuBall{
     if(Math.abs(w.vel)>1e-3||Math.abs(w.v)>1e-3) any=true; else { w.v=0; w.vel=0; }
     const tgtSpread=sumK; this.spreadV+=(tgtSpread-this.spreadV)*(1-Math.exp(-8*dt)); if(Math.abs(this.spreadV-tgtSpread)>1e-3) any=true;
     if(any) this.dirty=true;
+    this.knead(dt);
     // 살아 있는 바퀴 경련
     for(const r of this.roaches){ if(!r.used||!r.alive)continue; if(r.twitch>0){ r.twitchT+=dt; r.twitch-=dt*1.6; if(r.twitch<=0){r.twitch=0; this.markLeg(r);} else this.markLeg(r); } else if(Math.random()<dt*0.12){ r.twitch=1; r.twitchT=0; r.twitchLeg=Math.floor(Math.random()*6); } }
     if(this.dirty){ this.updateSlime(); this.updateRoaches(); this.updateCrumbs(); this.dirty=false; this.fragDirty=true; }
     else this.updateAntennae();
     this.updateFragments(dt);
+  }
+  /** 주무르기: 손가락 밑의 조각·부스러기가 슬라임 속으로 밀려 들어가고 끄는 방향으로 떠밀린다. 안 만진 데는 그대로 */
+  knead(dt){
+    let act=false; for(const d of this.dents) if(d.on&&d.k>0.08) act=true;
+    if(!act) return;
+    const dir=this._tmp[2], sink=(rest,strength)=>{
+      let infl=0; const r=rest.length(); if(r<1e-4) return;
+      dir.copy(rest).multiplyScalar(1/r);
+      for(const d of this.dents){ if(!d.on||d.k<0.08) continue; const a=Math.acos(clamp(dir.dot(d.dir),-1,1)); const g=d.k*Math.exp(-(a*a)/(1.5*d.w*d.w)); if(g<0.01) continue; infl+=g;
+        if(d.shear.lengthSq()>1e-6) rest.addScaledVector(d.shear,dt*0.9*g*strength); }
+      if(infl<=0) return;
+      const nr=Math.max(0.26,rest.length()-dt*0.6*infl*strength); rest.setLength(nr); this.fragDirty=true;
+    };
+    for(const r of this.roaches){ if(!r.used) continue; for(let slot=0;slot<SLOTS;slot++){ const f=r.frag[slot]; if(f) sink(f.rest,1); } }
+    for(const sh of this.shardList) sink(sh.rest,1.2);
+    const p=this._tmp[3]; let cr=false;
+    for(let i=0;i<this.crumbN;i++){ p.set(this.crumbRest[i*3],this.crumbRest[i*3+1],this.crumbRest[i*3+2]); const l0=p.length(); sink(p,1.4); if(p.length()!==l0){ this.crumbRest[i*3]=p.x; this.crumbRest[i*3+1]=p.y; this.crumbRest[i*3+2]=p.z; cr=true; } }
+    if(cr) this.dirty=true;
   }
   markLeg(r){ const m=this._m[0]; for(const slot of [SLOT_BODY+r.twitchLeg*2,SLOT_BODY+r.twitchLeg*2+1]){ if(r.state[slot]!==0)continue; this.pieceMatrix(r,slot,m); const [mi,ii]=this.instanceSlot(r,slot); this.meshes[mi].setMatrixAt(ii,m); this.meshes[mi].instanceMatrix.needsUpdate=true; } }
   updateSlime(){
