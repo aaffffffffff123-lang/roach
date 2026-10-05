@@ -245,6 +245,14 @@ async function waitForGame(){
 }
 
 gameFrame.addEventListener('load',()=>{
+  if(slimeLabOpen){
+    try{slimeLabApi()?.sleep?.();}catch(err){console.warn(err);}
+    slimeLayer.classList.remove('open');
+    slimeLayer.setAttribute('aria-hidden','true');
+    gameFrame.classList.remove('covered');
+    slimeLabOpen=false;
+    slimeCloseBusy=false;
+  }
   resetSlimeProgress();
   installed=false;
   cap=null;
