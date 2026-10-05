@@ -387,6 +387,14 @@ function enter(payload={}){
   if(!ball) makeBall();
   if(payload.state){ ball.setState(payload.state); }
   else if(payload.roaches){ ball.reset(); payload.roaches.forEach((r,i)=>{ if(r) ball.attach(i,r.anchor,r.spin,{legs:Float32Array.from(r.legs),antPhase:r.antPhase}); }); }
+ 
+   if(payload.rollQ){
+    ball.rollQ.fromArray(payload.rollQ).normalize();
+    ball.rollQInv.copy(ball.rollQ).invert();
+    ball.dirty=true;
+  }
+ 
+ 
   wetStage=ball.allBroken(); started=true; appPaused=false; cancelAll(); wake(); ball.kick(0.6); return api;
 }
 function sleep(){ appPaused=true; cancelAll(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } SFX.suspend(); return api; }
