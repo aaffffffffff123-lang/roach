@@ -189,11 +189,49 @@ class SlimeSfx{
 
   rub(level,mix=1){
     if(!this.ctx)return;
-    const l=clamp(level)*(0.2+0.8*clamp(mix));
-    this.rubLevel=l;
+    const l=clamp(level)*(0.35+0.65*clamp(mix));
     const t=this.ctx.currentTime;
-    this.rubGain.gain.setTargetAtTime(l*0.28,t,0.045);
-    this.rubGain2.gain.setTargetAtTime(l*0.07,t,0.045);
+    this.rubLevel=l;
+
+    // 바람처럼 이어지던 잡음 끄기
+    this.rubGain.gain.setTargetAtTime(0,t,0.025);
+    this.rubGain2.gain.setTargetAtTime(0,t,0.025);
+    if(l<0.025){
+      this.nextRub=0;
+      this.nextGrit=0;
+      return;
+    }
+
+    // 처음 슬라임을 굴릴 때의 촉촉한 소리
+    if(t>=(this.nextRub||0)){
+      this.nextRub=t+rand(0.09,0.14);
+      this.burst({
+        dur:0.05,gain:0.05+l*0.09,type:'lowpass',
+        freq:300,freqEnd:180,att:0.01
+      });
+
+      // 짧게 눌리고 빠져나오는 물기
+      this.burst({
+        t:0.012,dur:0.025+l*0.025,gain:0.015+l*0.035,
+        freq:rand(600,900),freqEnd:rand(220,320),
+        q:2,att:0.005,rate:0.8
+      });
+
+      // 작은 공기방울이 간간이 터지는 소리
+      if(Math.random()<0.4){
+        const f=rand(240,380);
+        this.ping({
+          t:0.02,dur:0.025,gain:0.008+l*0.012,
+          freq:f,freqEnd:f*1.5,type:'sine',att:0.004
+        });
+      }
+    }
+
+    // 전부 부순 뒤에도 움직이는 동안 잔잔한 아삭거림
+    if(mix>=0.999&&t>=(this.nextGrit||0)){
+      this.nextGrit=t+rand(0.17,0.28);
+      this.tiny(0.2+l*0.25);
+    }
   }
 
 
@@ -323,8 +361,8 @@ function strongPress(p){
   }
   const mix=wetMix();
   SFX.gesture('press',0.95,mix);
-  if(ball.fragmentContact(p.dent.dir)>0.15)
-    SFX.tiny(0.45);
+  if(wetStage||ball.fragmentContact(p.dent.dir)>0.15)
+    SFX.tiny(wetStage?0.3:0.45);
   ball.kick(wetStage?0.8:1.1);
 }
 
