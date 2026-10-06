@@ -679,7 +679,7 @@ function frame(){
     g.position.set(-k*k*7.5,BOARD_TOP+FLOOR+Math.sin(k*Math.PI)*2.6-k*k*1.2,k*1.5); g.rotation.z=k*2.6; g.rotation.x=k*0.8;
     if(k>=1){ tossing=null; appPaused=true; if(window.parent!==window)parent.postMessage({type:'slime-lab-tossed'},location.origin); }
   }
-  _debugFx:()=>({drops:dropList.length,stains:stainCount}),
+  updateSplats(dt); updateView(dt); renderer.render(scene,camera);
 }
 
 
@@ -728,7 +728,7 @@ function toss(){ if(!ball||tossing)return api; cancelAll(); tossing={t:0}; SFX.e
 function getState(){ return ball?ball.getState():null; }
 function sendClose(){ if(window.parent!==window)parent.postMessage({type:'slime-lab-close'},location.origin); }
 const api={init,enter,sleep,wake,reset,toss,getState,isWet:()=>wetStage,
-  _debugFx:()=>({strands:strands.length,drops:dropList.length,stains:stainCount}),   // 점검용
+  _debugFx:()=>({drops:dropList.length,stains:stainCount}),   // 점검용
   _debugStrong(x,y){ const h=hitBall(x,y); if(!h)return false; const d=ball.press('dbg',h.clone().normalize(),{depth:0.9}); d.k=0.9; strongPress({dent:d,strong:false}); ball.release('dbg'); return true; }}; // 점검용
 window.SlimeLab=api;
 resize();
