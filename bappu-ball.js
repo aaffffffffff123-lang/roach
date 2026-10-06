@@ -824,6 +824,48 @@ export class BappuBall{
     for(let mi=0;mi<NP;mi++) if(touched[mi]) this.meshes[mi].instanceMatrix.needsUpdate=true;
     if(this.shardList.length){
       let up=false;
+      const rough=this.allBroken();
+      const step=Math.max(1,Math.ceil(this.shardList.length/18));
+      const dir=this._tmp[17], normal=this._tmp[18];
+
+      for(let i=0;i<this.shardList.length;i++){
+        const s=this.shardList[i];
+        s.t+=dt;
+        this.interiorPoint(s.rest,tgt);
+        const k=1-Math.exp(-(s.t<1.2?2.5:9)*dt);
+        vel.copy(tgt).sub(s.p);
+        const sp=vel.length();
+        s.p.addScaledVector(vel,k);
+
+        if(sp>2e-5||this.fragDirty){
+          dq.setFromAxisAngle(
+            this._tmp[3].set(1,0.3,0.2).normalize(),
+            Math.min(0.2,sp*k*6)
+          );
+          s.q.premultiply(dq);
+        }
+
+        // 다 부순 뒤에는 일부 조각의 끝만 표면에 남긴다
+        dir.copy(s.rest).normalize();
+        if(rough&&i%step===0&&dir.y>-0.55){
+          this.surfaceFrame(dir,tgt,normal);
+          tgt.addScaledVector(normal,-0.002);
+          q.setFromUnitVectors(this._tmp[3].set(0,1,0),normal);
+          m.compose(
+            tgt,q,
+            this._tmp[4].set(s.s*0.85,s.s*1.15,s.s*0.65)
+          );
+          this.shards.setMatrixAt(i,m);
+          up=true;
+        }else if(sp>2e-5||this.fragDirty||rough){
+          m.compose(s.p,s.q,this._tmp[4].setScalar(s.s));
+          this.shards.setMatrixAt(i,m);
+          up=true;
+        }
+      }
+      if(up)this.shards.instanceMatrix.needsUpdate=true;
+    }
+      let up=false;
       for(let i=0;i<this.shardList.length;i++){ const s=this.shardList[i]; s.t+=dt; this.interiorPoint(s.rest,tgt); const k=1-Math.exp(-(s.t<1.2?2.5:9)*dt); vel.copy(tgt).sub(s.p); const sp=vel.length(); s.p.addScaledVector(vel,k); if(sp>2e-5||this.fragDirty){ dq.setFromAxisAngle(this._tmp[3].set(1,0.3,0.2).normalize(),Math.min(0.2,sp*k*6)); s.q.premultiply(dq); m.compose(s.p,s.q,this._tmp[4].setScalar(s.s)); this.shards.setMatrixAt(i,m); up=true; } }
       if(up) this.shards.instanceMatrix.needsUpdate=true;
     }
