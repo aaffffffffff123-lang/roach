@@ -481,7 +481,7 @@ export class BappuBall{
 
   // ── 상태 저장/복원 (화면을 닫았다 열어도 이어지게) ──
   getState(){
-    return {goo:this.goo.getState(),murk:this.murk||0,crushCount:this.crushCount||0,roaches:this.roaches.map(r=>r.used?{anchor:r.anchor,spin:r.spin,legs:Array.from(r.legs),antPhase:r.antPhase,stage:r.stage,flat:r.flat,state:Array.from(r.state),dmg:Array.from(r.dmg),
+    return {fragmentWearVersion:3,goo:this.goo.getState(),murk:this.murk||0,crushCount:this.crushCount||0,roaches:this.roaches.map(r=>r.used?{anchor:r.anchor,spin:r.spin,legs:Array.from(r.legs),antPhase:r.antPhase,stage:r.stage,flat:r.flat,state:Array.from(r.state),dmg:Array.from(r.dmg),
       frag:r.frag.map(f=>f?{p:f.p.toArray(),q:f.q.toArray(),s:f.s.toArray(),rest:f.rest.toArray(),q1:f.q1.toArray(),t:f.t,dur:f.dur}:null)}:null),
       crumbs:Array.from(this.crumbRest.subarray(0,this.crumbN*3)),shards:this.shardList.map(s=>({p:s.p.toArray(),rest:s.rest.toArray(),q:s.q.toArray(),s:s.s,t:s.t}))};
   }
@@ -494,6 +494,30 @@ export class BappuBall{
       d.frag.forEach((f,slot)=>{ if(!f)return; r.frag[slot]={p:new T.Vector3().fromArray(f.p),q:new T.Quaternion().fromArray(f.q),s:new T.Vector3().fromArray(f.s),rest:new T.Vector3().fromArray(f.rest),q0:new T.Quaternion().fromArray(f.q),q1:new T.Quaternion().fromArray(f.q1),t:f.t,dur:f.dur,axis:new T.Vector3(1,0,0),last:new T.Vector3().fromArray(f.p)}; }); });
     this.crumbN=Math.min(this.crumbCap,Math.floor(st.crumbs.length/3)); this.crumbRest.set(st.crumbs.slice(0,this.crumbN*3)); this.crumbs.geometry.setDrawRange(0,this.crumbN);
     this.shardList=st.shards.map(s=>({p:new T.Vector3().fromArray(s.p),rest:new T.Vector3().fromArray(s.rest),q:new T.Quaternion().fromArray(s.q),s:s.s,t:s.t})); this.shards.count=this.shardList.length;
+    // 이전 순환 패치에서 거의 모든 조각이 삭제된 저장 상태만 한 번 복구한다.
+    // 새 마모 모델에서 의도적으로 끝까지 갈아버린 공은 다시 생기지 않는다.
+    if(st.fragmentWearVersion==null){
+      let loose=0,erased=0;
+      for(const r of this.roaches){
+        if(!r.used||r.stage<4) continue;
+        for(let slot=0;slot<SLOTS;slot++){
+          if(r.state[slot]===1||r.state[slot]===2) loose++;
+          if(r.state[slot]===2&&!r.frag[slot]) erased++;
+        }
+      }
+      if(loose>=SLOTS&&erased>=loose*0.95){
+        for(const r of this.roaches){
+          if(!r.used||r.stage<4) continue;
+          this.rootMatrix(r,r.anchorMat);
+          for(let slot=0;slot<SLOTS;slot++){
+            if(r.state[slot]!==2||r.frag[slot]) continue;
+            r.state[slot]=0; this.detach(r,slot);
+            const f=r.frag[slot]; if(!f) continue;
+            this.interiorPoint(f.rest,f.p); f.q.copy(f.q1); f.t=f.dur;
+          }
+        }
+      }
+    }
     let b=0; for(const r of this.roaches) if(r.used&&r.stage>=4) b++; this.brokenCount=b;
     this.dirty=true; this.fragDirty=true;
   }
