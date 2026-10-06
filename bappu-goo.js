@@ -1,7 +1,9 @@
-// bappu-goo.js — 바뿌볼 진물 층
+// bappu-goo.js — 바뿌볼 진물 층 (v2)
 // 바퀴가 부서질 때 그 자리 밑에 크림색 진물(소화관 갈색 줄 포함)이 생기고,
 // 주무르면 손가락이 지나간 방향으로 늘어나고 접히면서 줄무늬가 된다. 점도가 높아서 저절로는 안 섞이고,
 // 늘어나 가늘어진 만큼만 슬라임에 녹아 공 전체가 탁해진다.
+// 덩어리 하나는 겹친 세 마디로 그린다: 저절로 살짝 굽어 있고, 손가락 흐름이 가운데와 양 끝에 다르게 걸리면 그만큼 더 휜다 (젖은 내장처럼).
+// 갈림·녹음·뿌얘짐의 속도는 v1의 1/4~1/5 — 100번 넘게 주물러야 끝까지 간다.
 // 탁함은 세 겹: 진물이 표면 가까이 스친 자리의 얼룩(정점별) + 주무를수록 공기가 접혀 들어간 우윳빛 흐림(전체) + 녹아든 진물 색(전체).
 // 조각도 주무를수록 갈린다: 껍질·날개·다리 조각 → 부스러기(shard) → 알갱이(crumb) → 때(grime, 색만 남음). 때가 쌓일수록 공 색이 갈색 쪽으로 탁해진다.
 // bappu-ball.js 가 생성자에서 만들고, setStage / knead / update / 상태 저장 / reset / dispose 에서 호출한다.
@@ -13,16 +15,23 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 // 셰이더 끝(톤매핑·sRGB 변환 뒤)에서 섞는 색이라 변환 없이 화면 색 그대로 넣는다
 const disp=(T,hex)=>new T.Color().setRGB(((hex>>16)&255)/255,((hex>>8)&255)/255,(hex&255)/255);
 
-const LEN_MAX=0.32;      // 이보다 길어진 줄기는 둘로 나뉜다 (겹쳐서 이어진 줄무늬가 된다)
-const STRETCH=2.0;       // 손가락이 끄는 흐름에 진물이 얼마나 잘 늘어나는지
+const LEN_MAX=0.26;      // 이보다 길어진 줄기는 둘로 나뉜다 (겹쳐서 이어진 줄무늬가 된다)
+const STRETCH=0.6;       // 손가락이 끄는 흐름에 진물이 얼마나 잘 늘어나는지
 const RAD_MIN=0.0085;    // 이보다 가늘어지면 슬라임에 녹아든다
-const DEPTH_MIN=0.20;    // 공 중심 쪽 한계 (조각과 같다)
+const DEPTH_MIN=0.42;    // 공 중심 쪽 한계 (조각과 같다)
 const DEPTH_MAX=0.955;
+const SEG=3;             // 덩어리 하나를 겹친 세 마디로 그린다
+const SEG_OFF=[-0.62,0,0.62], SEG_CURVE=[0.55,1,0.55], SEG_RAD=[0.9,1.12,0.9];
+const CURL=0.16;         // 가만히 있어도 길이의 이만큼 굽어 있다
+const BEND_GAIN=2.2, BEND_MAX=0.6;   // 흐름 차이 → 굽힘 목표, 길이 대비 최대 굽힘
+const GRIND=1.1;         // 갈리는 속도
+const DISSOLVE=0.08;     // 녹는 속도
+const HAZE=0.09;         // 뿌얘지는 속도
 
 export class GooLayer{
   constructor(ball){
     this.ball=ball; const T=ball.T; this.T=T;
-    this.cap=ball.count*9;
+    this.cap=ball.count*9;        // 덩어리 수 상한 (인스턴스는 ×SEG)
     this.blobs=[];
     this.dissolved=0;              // 녹아든 진물 부피
     this.grime=0;                  // 갈려서 색만 남은 조각의 양
@@ -34,6 +43,7 @@ export class GooLayer{
     this._tmp=Array.from({length:12},()=>new T.Vector3());
     this._q=new T.Quaternion(); this._m=new T.Matrix4(); this._s=new T.Vector3(); this._c=new T.Color(); this._tc=new T.Color();
     this._Y=new T.Vector3(0,1,0);
+    this._segP=Array.from({length:SEG},()=>new T.Vector3()); this._segT=new T.Vector3(); this._bendV=new T.Vector3();
     this.buildMesh();
     this.buildStain();
     this.hookShader(ball.matFront,{aMurk:0.74,haze:0xf3efe6,goo:0xd8c79e,tint:0xc4b58e,grime:0x8f7d60});
@@ -47,21 +57,21 @@ export class GooLayer{
     const cream=new T.Color(0xdcb86a), gut=new T.Color(0x5e3a1c);   // 크림색 곤죽, 소화관 갈색 (sRGB→linear)
     for(let i=0;i<n;i++){
       const x=P.getX(i), y=P.getY(i), z=P.getZ(i);
-      // 줄기 방향(y)을 따라 달리는 갈색 줄: x≈0 면 근처. 방향에 따라 보였다 안 보였다 한다
-      const vein=sstep(0.30,0.06,Math.abs(x))*sstep(-0.95,-0.55,y)*sstep(0.95,0.55,y);
+      // 줄기 방향(y)을 따라 달리는 갈색 줄: x≈0 면 근처를 구불구불 지난다. 방향에 따라 보였다 안 보였다 한다
+      const vein=sstep(0.30,0.06,Math.abs(x+0.22*Math.sin(y*5.5+z*2.0)))*sstep(-0.95,-0.55,y)*sstep(0.95,0.55,y);
       const wob=0.92+0.08*Math.sin(y*9.0+z*5.0);
       col[i*3]  =lerp(cream.r,gut.r,vein)*wob;
       col[i*3+1]=lerp(cream.g,gut.g,vein)*wob;
       col[i*3+2]=lerp(cream.b,gut.b,vein)*wob;
     }
     geo.setAttribute('color',new T.Float32BufferAttribute(col,3));
-    this.mat=new T.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:0.52,metalness:0,clearcoat:0.5,clearcoatRoughness:0.38,transparent:true,opacity:1});
-    this.mesh=new T.InstancedMesh(geo,this.mat,this.cap);
+    this.mat=new T.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:0.42,metalness:0,clearcoat:0.65,clearcoatRoughness:0.3,transparent:true,opacity:1});
+    this.mesh=new T.InstancedMesh(geo,this.mat,this.cap*SEG);
     this.mesh.count=0; this.mesh.frustumCulled=false; this.mesh.renderOrder=4;
     this.mesh.instanceMatrix.setUsage(T.DynamicDrawUsage);
-    this.mesh.instanceColor=new T.InstancedBufferAttribute(new Float32Array(this.cap*3).fill(1),3);
+    this.mesh.instanceColor=new T.InstancedBufferAttribute(new Float32Array(this.cap*SEG*3).fill(1),3);
     this.mesh.instanceColor.setUsage(T.DynamicDrawUsage);
-    const zero=new T.Matrix4().makeScale(0,0,0); for(let i=0;i<this.cap;i++) this.mesh.setMatrixAt(i,zero);
+    const zero=new T.Matrix4().makeScale(0,0,0); for(let i=0;i<this.cap*SEG;i++) this.mesh.setMatrixAt(i,zero);
     this.ball.group.add(this.mesh);
   }
 
@@ -122,6 +132,7 @@ export class GooLayer{
       const ax=new T.Vector3().copy(t).applyAxisAngle(nW,rnd(0,Math.PI*2)); ax.addScaledVector(nW,rnd(-0.25,0.25)).normalize();
       const len=rnd(l0,l1), rad=rnd(r0,r1);
       const b={rest,axis:ax,len,rad,vol:len*rad*rad,tone:Math.random(),grow:0,p:new T.Vector3(),q:new T.Quaternion(),fresh:true};
+      this.initBend(b);
       this.ball.interiorPoint(rest,b.p);
       this.blobs.push(b);
     }
@@ -135,7 +146,14 @@ export class GooLayer{
     const ax=new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5); ax.addScaledVector(nW,-nW.dot(ax)*0.7); if(ax.lengthSq()<1e-6)ax.set(1,0,0); ax.normalize();
     const len=rnd(l0,l1), rad=rnd(r0,r1);
     const b={rest:rest.clone(),axis:ax,len,rad,vol:len*rad*rad,tone:rnd(0.3,1),grow:0,p:new T.Vector3(),q:new T.Quaternion(),fresh:true};
+    this.initBend(b);
     this.keepInside(b.rest); this.ball.interiorPoint(b.rest,b.p); this.blobs.push(b); this.gooDirty=true;
+  }
+  /** 굽힘 상태: curl 은 가만히 있어도 굽어 있는 방향(축에 수직 단위벡터), bend/bendT 는 주무를 때 생기는 굽힘(절대 길이)과 그 목표 */
+  initBend(b){
+    const T=this.T, c=new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5);
+    c.addScaledVector(b.axis,-b.axis.dot(c)); if(c.lengthSq()<1e-6) c.set(0,0,1).addScaledVector(b.axis,-b.axis.z);
+    b.curl=c.normalize(); b.bend=new T.Vector3(); b.bendT=new T.Vector3();
   }
 
   // ── 조각 갈기: 주물러져 움직인 만큼 닳고, 다 닳으면 더 작은 것이 된다 ──
@@ -146,8 +164,8 @@ export class GooLayer{
       for(let slot=0;slot<r.frag.length;slot++){
         const f=r.frag[slot]; if(!f) continue;
         if(!f._gl){ f._gl=f.rest.clone(); f._gw=0; f._gj=rnd(0.7,1.35); continue; }
-        const d=f.rest.distanceTo(f._gl); f._gl.copy(f.rest); if(d<1e-6) continue;
-        f._gw+=d;
+        const d=f.rest.distanceTo(f._gl), dr=Math.abs(f.rest.length()-f._gl.length()); f._gl.copy(f.rest); if(d<1e-6) continue;
+        f._gw+=Math.sqrt(Math.max(0,d*d-dr*dr))*GRIND;      // 비벼진(접선) 이동만 닳게 한다. 속으로 들어가는 건 닳지 않는다
         const thr=(slot<6?1.25:slot<10?0.5:0.65)*f._gj;   // 껍질은 질기고, 날개·다리는 금방
         if(f._gw>thr) this.grindFrag(r,slot,f);
       }
@@ -155,8 +173,8 @@ export class GooLayer{
     for(let i=B.shardList.length-1;i>=0;i--){
       const sh=B.shardList[i];
       if(!sh._gl){ sh._gl=sh.rest.clone(); sh._gw=0; sh._gj=rnd(0.7,1.35); continue; }
-      const d=sh.rest.distanceTo(sh._gl); sh._gl.copy(sh.rest); if(d<1e-6) continue;
-      sh._gw+=d;
+      const d=sh.rest.distanceTo(sh._gl), dr=Math.abs(sh.rest.length()-sh._gl.length()); sh._gl.copy(sh.rest); if(d<1e-6) continue;
+      sh._gw+=Math.sqrt(Math.max(0,d*d-dr*dr))*GRIND;
       if(sh._gw>1.5*sh._gj){ B.shardList.splice(i,1); B.shards.count=B.shardList.length; B.fragDirty=true; this.addCrumbs(sh.rest,2); this.grime+=0.4; }
     }
     const CR=B.crumbRest, CL=this.crumbLast;
@@ -165,7 +183,7 @@ export class GooLayer{
       const j=i*3, d=Math.abs(CR[j]-CL[j])+Math.abs(CR[j+1]-CL[j+1])+Math.abs(CR[j+2]-CL[j+2]);
       CL[j]=CR[j]; CL[j+1]=CR[j+1]; CL[j+2]=CR[j+2];
       if(d<1e-6) continue;
-      if(Math.random()<d*0.35) this.removeCrumb(i);              // 알갱이는 문질러지다 때가 되어 사라진다
+      if(Math.random()<d*0.35*GRIND) this.removeCrumb(i);        // 알갱이는 문질러지다 때가 되어 사라진다
     }
   }
   grindFrag(r,slot,f){
@@ -205,19 +223,24 @@ export class GooLayer{
 
   // ── 주무를 때 (bappu-ball knead 에서) : fn(rest,strength) 는 조각을 옮기는 그 흐름 ──
   transport(flows,fn){
-    const e1=this._tmp[2], e2=this._tmp[3], d=this._tmp[4], o1=this._tmp[8], o2=this._tmp[9], mdir=this._tmp[6], nb=this._tmp[7], tang=this._tmp[5];
+    const e1=this._tmp[2], e2=this._tmp[3], d=this._tmp[4], o1=this._tmp[8], o2=this._tmp[9], mdir=this._tmp[6], nb=this._tmp[7], tang=this._tmp[5], mid=this._tmp[10], om=this._tmp[11];
     let moved=false; const born=[];
     for(let i=this.blobs.length-1;i>=0;i--){
       const b=this.blobs[i];
-      e1.copy(b.rest).addScaledVector(b.axis,b.len); e2.copy(b.rest).addScaledVector(b.axis,-b.len);
-      o1.copy(e1); o2.copy(e2);
-      fn(e1,1.0); fn(e2,1.0);
+      if(!b.curl) this.initBend(b);
+      e1.copy(b.rest).addScaledVector(b.axis,b.len); e2.copy(b.rest).addScaledVector(b.axis,-b.len); mid.copy(b.rest);
+      o1.copy(e1); o2.copy(e2); om.copy(mid);
+      fn(e1,1.0); fn(e2,1.0); fn(mid,1.0);
       const mv=e1.distanceTo(o1)+e2.distanceTo(o2);
       if(mv<1e-7) continue;
       moved=true;
       d.copy(e1).sub(e2); let L=d.length()*0.5;
       b.rest.copy(e1).add(e2).multiplyScalar(0.5);
       if(L>1e-5) b.axis.copy(d).normalize();
+      // 가운데가 양 끝과 다르게 밀리면 그만큼 휜다 (축에 수직인 성분만)
+      mid.sub(om).addScaledVector(o1.sub(e1),0.5).addScaledVector(o2.sub(e2),0.5);
+      mid.addScaledVector(b.axis,-mid.dot(b.axis));
+      if(mid.lengthSq()>1e-12){ mid.multiplyScalar(BEND_GAIN*12); const bm=BEND_MAX*b.len; if(mid.length()>bm) mid.setLength(bm); b.bendT.lerp(mid,0.6); }
       // 손가락이 끄는 방향으로 더 늘어난다 (점성 유체는 전단층에서 쭉 늘어난다)
       let stretch=0; mdir.set(0,0,0);
       const rr0=b.rest.length();
@@ -255,7 +278,7 @@ export class GooLayer{
       }
       // 문질러지는 만큼 조금씩 슬라임에 녹는다 (가늘수록 빨리)
       const thin=sstep(0.045,0.012,b.rad);
-      const loss=b.vol*clamp(mv*(0.07+0.5*thin),0,0.05);
+      const loss=b.vol*clamp(mv*(0.07+0.15*thin)*DISSOLVE,0,0.05);
       b.vol-=loss; this.dissolved+=loss;
       b.rad=Math.sqrt(Math.max(1e-9,b.vol)/b.len);
       this.keepInside(b.rest);
@@ -278,6 +301,7 @@ export class GooLayer{
   clone(b){
     const T=this.T;
     const c={rest:b.rest.clone(),axis:b.axis.clone(),len:b.len,rad:b.rad,vol:b.vol,tone:clamp(b.tone+rnd(-0.1,0.1),0,1),grow:b.grow,p:b.p.clone(),q:b.q.clone(),fresh:false,smear:0};
+    this.initBend(c); if(b.bend){ c.bend.copy(b.bend); c.bendT.copy(b.bendT); }
     return c;
   }
   keepInside(v){ const r=v.length(); if(r<1e-6){ v.set(0,DEPTH_MIN,0); return; } v.multiplyScalar(clamp(r,DEPTH_MIN,DEPTH_MAX)/r); }
@@ -289,7 +313,7 @@ export class GooLayer{
     this.updateBlobs(dt);
     if(this.gooDirty){ this.updateStain(); this.gooDirty=false; }
     // 녹은 진물 색 (전체)
-    const tintT=1-Math.exp(-(this.dissolved/this.volRef+this.grime/1100));
+    const tintT=1-Math.exp(-(this.dissolved/this.volRef+this.grime/6000));
     this.tint+=(tintT-this.tint)*(1-Math.exp(-1.5*dt));
     this.haze=B._murkShown;
     this.applyUniforms();
@@ -305,29 +329,39 @@ export class GooLayer{
       if(d.on) work+=Math.max(0,k-d._murkK)+Math.max(0,d.drag-d._murkDrag)*1.3*k;
       d._murkK=k; d._murkDrag=d.drag; d._murkAge=d.t;
     }
-    B.murk=clamp((B.murk||0)+(1-(B.murk||0))*damage*work*0.045,0,0.8);
+    B.murk=clamp((B.murk||0)+(1-(B.murk||0))*damage*work*0.045*HAZE,0,0.8);
     B._murkShown=(B._murkShown||0)+(B.murk-(B._murkShown||0))*(1-Math.exp(-2*dt));
   }
   updateBlobs(dt){
-    const B=this.ball, T=this.T, tgt=this._tmp[6], m=this._m, s=this._s, q=this._q, c=this._c;
-    const n=this.blobs.length; let any=false;
-    const k=1-Math.exp(-7*dt);
+    const B=this.ball, T=this.T, tgt=this._tmp[6], m=this._m, s=this._s, q=this._q, c=this._c, bv=this._bendV, P=this._segP, tg=this._segT;
+    const n=this.blobs.length, drawN=n*SEG; let any=false;
+    const k=1-Math.exp(-7*dt), kb=1-Math.exp(-9*dt), decay=Math.exp(-2.5*dt);
     for(let i=0;i<n;i++){
       const b=this.blobs[i];
+      if(!b.curl) this.initBend(b);
       if(b.grow<1){ b.grow=Math.min(1,b.grow+dt*3.2); any=true; }
       B.interiorPoint(b.rest,tgt);
       const dx=tgt.distanceTo(b.p);
       if(dx>1e-5){ b.p.lerp(tgt,b.fresh?1:k); any=true; }
       b.fresh=false;
-      if(any||this.gooDirty||this.mesh.count!==n){
-        q.setFromUnitVectors(this._Y,b.axis);
-        const g=b.grow*b.grow*(3-2*b.grow);
-        s.set(b.rad*g,b.len*lerp(0.35,1,g),b.rad*g);
-        m.compose(b.p,q,s); this.mesh.setMatrixAt(i,m);
-        c.setRGB(lerp(1,0.84,b.tone),lerp(1,0.79,b.tone),lerp(1,0.66,b.tone)); this.mesh.setColorAt(i,c);
+      // 주무를 때 생긴 굽힘은 목표를 따라갔다가 서서히 풀린다
+      if(b.bendT.lengthSq()>1e-12||b.bend.lengthSq()>1e-12){ b.bend.lerp(b.bendT,kb); b.bendT.multiplyScalar(decay); if(b.bendT.lengthSq()<1e-12) b.bendT.set(0,0,0); any=true; }
+      if(any||this.gooDirty||this.mesh.count!==drawN){
+        const g=b.grow*b.grow*(3-2*b.grow), len=b.len*lerp(0.35,1,g), rad=b.rad*g;
+        // 굽힘 = 저절로 굽은 것(curl) + 주무른 것(bend), 둘 다 축에 수직으로 다시 맞춘다
+        b.curl.addScaledVector(b.axis,-b.axis.dot(b.curl)); if(b.curl.lengthSq()<1e-6) b.curl.set(0,0,1).addScaledVector(b.axis,-b.axis.z); b.curl.normalize();
+        bv.copy(b.curl).multiplyScalar(CURL*len).add(b.bend); bv.addScaledVector(b.axis,-bv.dot(b.axis));
+        for(let j=0;j<SEG;j++) P[j].copy(b.p).addScaledVector(b.axis,SEG_OFF[j]*len).addScaledVector(bv,SEG_CURVE[j]);
+        c.setRGB(lerp(1,0.84,b.tone),lerp(1,0.79,b.tone),lerp(1,0.66,b.tone));
+        for(let j=0;j<SEG;j++){
+          tg.copy(P[Math.min(SEG-1,j+1)]).sub(P[Math.max(0,j-1)]); if(tg.lengthSq()<1e-10) tg.copy(b.axis); tg.normalize();
+          q.setFromUnitVectors(this._Y,tg);
+          s.set(rad*SEG_RAD[j],len*0.5,rad*SEG_RAD[j]);
+          m.compose(P[j],q,s); this.mesh.setMatrixAt(i*SEG+j,m); this.mesh.setColorAt(i*SEG+j,c);
+        }
       }
     }
-    if(this.mesh.count!==n){ this.mesh.count=n; any=true; }
+    if(this.mesh.count!==drawN){ this.mesh.count=drawN; any=true; }
     if(any||this.gooDirty){ this.mesh.instanceMatrix.needsUpdate=true; if(this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate=true; }
     const op=B.fade; if(this.mat.opacity!==op){ this.mat.opacity=op; }
     this.mesh.visible=n>0;
@@ -375,7 +409,7 @@ export class GooLayer{
     for(const mat of [this.ball.matFront,this.ball.matBack]){
       const u=mat.userData.gooUniforms; if(!u) continue;
       u.uHaze.value=this.haze; u.uTint.value=this.tint;
-      const tc=mat.userData.gooTint; if(tc) u.uTintCol.value.copy(tc[0]).lerp(tc[1],clamp(this.grime/1600,0,1));
+      const tc=mat.userData.gooTint; if(tc) u.uTintCol.value.copy(tc[0]).lerp(tc[1],clamp(this.grime/12000,0,1));
     }
   }
 
@@ -390,16 +424,16 @@ export class GooLayer{
     for(const d of (st.blobs||[])){
       if(this.blobs.length>=this.cap) break;
       const b={rest:new T.Vector3().fromArray(d.rest),axis:new T.Vector3().fromArray(d.axis).normalize(),len:d.len,rad:d.rad,vol:d.vol,tone:d.tone||0,grow:1,p:new T.Vector3(),q:new T.Quaternion(),fresh:true};
-      this.ball.interiorPoint(b.rest,b.p); this.blobs.push(b);
+      this.initBend(b); this.keepInside(b.rest); this.ball.interiorPoint(b.rest,b.p); this.blobs.push(b);
     }
     if(st.residue&&st.residue.length===this.residue.length) this.residue.set(st.residue);
-    this.tint=1-Math.exp(-(this.dissolved/this.volRef+this.grime/1100));
+    this.tint=1-Math.exp(-(this.dissolved/this.volRef+this.grime/6000));
     this.gooDirty=true;
   }
   reset(){
     this.blobs.length=0; this.dissolved=0; this.grime=0; this.tint=0; this.haze=0; this.crumbLastN=0;
     this.residue.fill(0); this.present.fill(0); this.stainAttr.array.fill(0); this.stainAttr.needsUpdate=true;
-    const zero=this._m.makeScale(0,0,0); for(let i=0;i<this.cap;i++) this.mesh.setMatrixAt(i,zero);
+    const zero=this._m.makeScale(0,0,0); for(let i=0;i<this.cap*SEG;i++) this.mesh.setMatrixAt(i,zero);
     this.mesh.count=0; this.mesh.instanceMatrix.needsUpdate=true; this.mesh.visible=false;
     this.applyUniforms();
   }

@@ -593,18 +593,25 @@ export class BappuBall{
         d._mixDir=d.dir.clone();
         d._mixShear=d.shear.clone();
         d._mixMove=new this.T.Vector3();
+        d._mixDrag=d.drag||0;
       }
       const k=clamp(d.k,0,1), dk=k-d._mixK;
-      d._mixMove.copy(d.dir).sub(d._mixDir).multiplyScalar(0.42)
-        .addScaledVector(d.shear,0.7)
-        .addScaledVector(d._mixShear,-0.7);
-      d._mixDK=dk;
+      // 손가락이 실제로 움직인 프레임만 섞는다. 멈춘 채 shear가 풀리는 건 이동으로 안 센다.
+      const dragStep=(d.drag||0)-d._mixDrag;
+      d._mixMove.set(0,0,0);
+      if(dragStep>1e-7)
+        d._mixMove.copy(d.dir).sub(d._mixDir).multiplyScalar(0.42)
+          .addScaledVector(d.shear,0.7)
+          .addScaledVector(d._mixShear,-0.7);
+      // 깊어지는 동안만 속으로 밀어 넣는다. 손을 떼는 건 되돌리지 않는다 (눌린 모양은 surfacePoint가 보여 준다).
+      d._mixDK=d.on?Math.max(0,dk):0;
       d._mixPower=Math.max(k,d._mixK);
       d._mixK=k;
       d._mixDir.copy(d.dir);
       d._mixShear.copy(d.shear);
+      d._mixDrag=d.drag||0;
       d._mixTime=d.t;
-      if(Math.abs(dk)>1e-6||d._mixMove.lengthSq()>1e-10)
+      if(d.on&&(d._mixDK>1e-6||d._mixMove.lengthSq()>1e-10))
         flows.push(d);
     }
     if(!flows.length) return;
@@ -621,26 +628,31 @@ export class BappuBall{
         const core=Math.exp(-a*a/(0.85*w*w));
         const ring=Math.exp(-Math.pow((a-1.35*w)/(0.55*w),2));
         const local=Math.exp(-a*a/(2.2*w*w));
-        if(local<0.005) continue;
 
-        // 누른 곳은 안으로, 부푼 둘레는 겉으로.
-        // 손을 떼면 흐름이 반대로 이어진다.
-        rest.addScaledVector(n,
-          d._mixDK*strength*(-0.26*core+0.16*ring));
-        away.copy(n).multiplyScalar(c).sub(d.dir);
-        if(away.lengthSq()>1e-8)
-          rest.addScaledVector(away.normalize(),
-            d._mixDK*strength*0.12*ring);
+        // 깊이(반지름) 변화는 여기서만. 누르며 깊어질 때와 누른 채 끌 때 손가락 밑 조각이 속으로 들어가고,
+        // 그만큼 공 전체가 아주 조금씩 겉으로 되밀린다 (부피 보존 — 조각이 속에 쌓이지 않고 천천히 다시 떠오른다).
+        // 둘레가 부푸는 건 surfacePoint 의 임시 변형이 보여 주므로 영구 좌표에는 넣지 않는다.
+        const drag=Math.sqrt(d._mixMove.lengthSq())*d._mixPower;
+        const work=d._mixDK+2*drag;
+        const rNew=r+strength*(-(0.12*d._mixDK+0.25*drag)*core
+          +(r<0.82?work*0.004*(0.82-r)/0.4:0));
+        if(local>=0.005){
+          away.copy(n).multiplyScalar(c).sub(d.dir);
+          if(away.lengthSq()>1e-8)
+            rest.addScaledVector(away.normalize(),
+              d._mixDK*strength*0.10*ring);
 
-        // 끌기는 조각을 접선 방향으로 섞는다.
-        motion.copy(d._mixMove)
-          .addScaledVector(n,-d._mixMove.dot(n));
-        rest.addScaledVector(motion,
-          strength*local*d._mixPower);
+          // 끌기는 조각을 접선 방향으로 섞는다.
+          motion.copy(d._mixMove)
+            .addScaledVector(n,-d._mixMove.dot(n));
+          rest.addScaledVector(motion,
+            strength*local*d._mixPower);
+        }
 
+        // 접선 이동은 깊이를 바꾸지 않는다 (더하기만 하면 매번 조금씩 겉으로 밀려 나간다)
         const rr=rest.length();
         if(rr>1e-6)
-          rest.multiplyScalar(clamp(rr,0.20,0.96)/rr);
+          rest.multiplyScalar(clamp(rNew,0.42,0.96)/rr);
       }
       return Math.abs(rest.x-x)+Math.abs(rest.y-y)
         +Math.abs(rest.z-z)>1e-8;
