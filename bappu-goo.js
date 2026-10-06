@@ -35,6 +35,8 @@ const GRIND=0.09;        // 갈리는 속도 (겉에서 꾹 누르기 한 번 = 
 const CRUMB_WEAR=0.05;   // 알갱이가 문질러져 때가 되는 속도
 const DISSOLVE=0.12;     // 녹는 속도
 const HAZE=0.09;         // 뿌얘지는 속도
+const DYE=0.008;         // 바퀴 물이 드는 속도 (게임적 과장: 주무를수록 연갈색으로 짙어진다. 클수록 빨리 물든다)
+
 
 export class GooLayer{
   constructor(ball){
@@ -45,7 +47,7 @@ export class GooLayer{
     this.grime=0;                  // 갈려서 색만 남은 조각의 양
     this._zero=new ball.T.Matrix4().makeScale(0,0,0);
     this.volRef=ball.count*3*2.0e-4*0.42; // 이만큼 녹으면 색이 꽤 탁해진다 (전체 진물의 ~40%)
-    this.haze=0; this.tint=0;      // 화면에 반영 중인 값 (부드럽게 따라감)
+     this.haze=0; this.tint=0; this.dye=0; this.dyeShown=0;      // 화면에 반영 중인 값 (부드럽게 따라감)
     this.gooDirty=false;
     this._tmp=Array.from({length:12},()=>new T.Vector3());
     this._q=new T.Quaternion(); this._m=new T.Matrix4(); this._s=new T.Vector3(); this._c=new T.Color(); this._tc=new T.Color();
@@ -53,8 +55,17 @@ export class GooLayer{
     this._segP=Array.from({length:SEG},()=>new T.Vector3()); this._segT=new T.Vector3(); this._bendV=new T.Vector3(); this._ax=new T.Vector3(); this._az=new T.Vector3();
     this.buildMesh();
     this.buildStain();
-    this.hookShader(ball.matFront,{aMurk:0.74,haze:0xf3efe6,goo:0xd8c79e,tint:0xc4b58e,grime:0x8f7d60});
-    this.hookShader(ball.matBack,{aMurk:0.46,haze:0xe9e3d6,goo:0xcdbb93,tint:0xb9aa84,grime:0x857355});
+    this.hookShader(ball.matFront,{aMurk:0.74,haze:0xf3efe6,goo:0xd8c79e,tint:0xc4b58e,grime:0x8f7d60,dye:0xb98b58,dyeA:0.18});
+    this.hookShader(ball.matBack,{aMurk:0.46,haze:0xe9e3d6,goo:0xcdbb93,tint:0xb9aa84,grime:0x857355,dye:0xa67848,dyeA:0.12});
+    // 물든 막: 공 속에 보이는 것(조각·진물·뒷벽·공 너머 바닥)에 연갈색을 곱한다. 투명도는 그대로 두고 색만 물들인다 (갈색 물에 담근 것처럼)
+    // 속 내용물보다 나중에, 앞면 광택보다 먼저 그린다. 밖으로 삐져나온 조각 끝은 막 바깥이라 물들지 않는다
+    this.dyeMat=new T.MeshBasicMaterial({color:0xffffff,transparent:true,depthWrite:false,toneMapped:false,blending:T.CustomBlending,blendEquation:T.AddEquation,blendSrc:T.DstColorFactor,blendDst:T.ZeroFactor,blendSrcAlpha:T.ZeroFactor,blendDstAlpha:T.OneFactor});
+    this.dyeShell=new T.Mesh(ball.slimeGeo,this.dyeMat); this.dyeShell.renderOrder=20; this.dyeShell.frustumCulled=false; this.dyeShell.visible=false;
+    ball.group.add(this.dyeShell);
+    this._dyeMul=new T.Color().setRGB(0.95,0.71,0.46,T.SRGBColorSpace); this._white=new T.Color(1,1,1);   // 끝까지 물들었을 때 곱하는 색 (연갈색)
+
+
+
   }
 
   // ── 진물 덩어리 메시: 납작한 타원체 띠, 크림색 몸통에 갈색 소화관 줄, 반투명 ──
@@ -106,31 +117,36 @@ export class GooLayer{
     this.present=new Float32Array(n);   // 지금 진물이 가까이 있는 자리 (매번 새로 센다)
   }
 
-  // 기존 슬라임 셰이더(프레넬 알파)에 얼룩·흐림·색을 덧붙인다
   hookShader(mat,o){
     const T=this.T, prev=mat.onBeforeCompile, prevKey=mat.customProgramCacheKey;
     const self=this;
     mat.onBeforeCompile=function(sh,renderer){
       if(prev) prev.call(this,sh,renderer);
-      sh.uniforms.uHaze={value:self.haze}; sh.uniforms.uTint={value:self.tint};
+      sh.uniforms.uHaze={value:self.haze}; sh.uniforms.uTint={value:self.tint}; sh.uniforms.uDye={value:self.dyeShown};
       sh.uniforms.uAMurk={value:o.aMurk};
-      sh.uniforms.uHazeCol={value:disp(T,o.haze)}; sh.uniforms.uGooCol={value:disp(T,o.goo)}; sh.uniforms.uTintCol={value:disp(T,o.tint)};
+      sh.uniforms.uHazeCol={value:disp(T,o.haze)}; sh.uniforms.uGooCol={value:disp(T,o.goo)}; sh.uniforms.uTintCol={value:disp(T,o.tint)}; sh.uniforms.uDyeCol={value:disp(T,o.dye)};
       mat.userData.gooUniforms=sh.uniforms; mat.userData.gooTint=[disp(T,o.tint),disp(T,o.grime)];
       sh.vertexShader='attribute float aStain;\nvarying float vStain;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvStain=aStain;');
       const old='gl_FragColor.a=clamp(mix(uAMin,uAMax,f)+spec*1.6,0.0,1.0)*opacity;';
       if(sh.fragmentShader.indexOf(old)<0){ console.warn('bappu-goo: slime shader hook not found'); return; }
-      sh.fragmentShader='varying float vStain;\nuniform float uHaze;uniform float uTint;uniform float uAMurk;uniform vec3 uHazeCol;uniform vec3 uGooCol;uniform vec3 uTintCol;\n'
+      // 물듦(dy): 겉막은 살짝만 짙어지고, 뿌옇게 낀 막의 색이 갈색 쪽으로 간다 (속은 물든 막 dyeShell이 곱해서 물들인다)
+      sh.fragmentShader='varying float vStain;\nuniform float uHaze;uniform float uTint;uniform float uDye;uniform float uAMurk;uniform vec3 uHazeCol;uniform vec3 uGooCol;uniform vec3 uTintCol;uniform vec3 uDyeCol;\n'
         +sh.fragmentShader.replace(old,
-          'float stn=clamp(vStain,0.0,1.0); float hz=clamp(uHaze,0.0,1.0); float tn=clamp(uTint,0.0,1.0);\n'
-         +'float m=1.0-(1.0-stn)*(1.0-hz*0.8)*(1.0-tn);\n'
+          'float stn=clamp(vStain,0.0,1.0); float hz=clamp(uHaze,0.0,1.0); float tn=clamp(uTint,0.0,1.0); float dy=clamp(uDye,0.0,1.0);\n'
+         +'float m=1.0-(1.0-stn)*(1.0-hz*0.8)*(1.0-tn)*(1.0-dy*'+o.dyeA.toFixed(3)+');\n'
          +'float aBase=mix(uAMin,uAMax,f); float aMurk=mix(uAMurk,max(uAMax,uAMurk)+0.06,f);\n'
          +'gl_FragColor.a=clamp(mix(aBase,aMurk,m)+spec*1.6*(1.0-0.5*m),0.0,1.0)*opacity;\n'
          +'float lum=dot(gl_FragColor.rgb,vec3(0.299,0.587,0.114));\n'
          +'vec3 mcol=mix(mix(uHazeCol,uTintCol,tn),uGooCol,stn*0.85);\n'
-         +'gl_FragColor.rgb=mix(gl_FragColor.rgb,mcol*(0.40+0.72*lum),m*0.92)+vec3(spec)*0.3*m;');
+         +'mcol=mix(mcol,uDyeCol,min(1.0,dy*1.5));\n'
+         +'gl_FragColor.rgb=mix(gl_FragColor.rgb,mcol*(0.40+0.72*lum),max(m*0.92,dy*0.3))+vec3(spec)*0.3*m;');
     };
     mat.customProgramCacheKey=function(){ return (prevKey?prevKey.call(this):'')+'-goo'; };
   }
+
+
+
+
 
   // ── 바퀴 r이 st 단계로 넘어갈 때 (bappu-ball setStage 에서, r.stage 는 아직 이전 단계) ──
   onStage(r,st){
@@ -357,6 +373,11 @@ export class GooLayer{
     }
     B.murk=clamp((B.murk||0)+(1-(B.murk||0))*damage*work*0.045*HAZE,0,0.8);
     B._murkShown=(B._murkShown||0)+(B.murk-(B._murkShown||0))*(1-Math.exp(-2*dt));
+
+    // 바퀴 물이 드는 정도: 부서진 바퀴가 많을수록, 손가락으로 누르고 문지른 만큼 연갈색이 짙어진다. 저절로 빠지지 않는다
+    this.dye+=(1-this.dye)*damage*work*DYE;
+    this.dyeShown+=(this.dye-this.dyeShown)*(1-Math.exp(-2*dt));
+
   }
   updateBlobs(dt){
     const B=this.ball, tgt=this._tmp[6], m=this._m, sc=this._s, c=this._c, bv=this._bendV, P=this._segP, tg=this._segT, ax=this._ax, az=this._az, A=this.alphaAttr.array;
@@ -437,22 +458,33 @@ export class GooLayer{
     for(let iy=0;iy<=hs;iy++){ const row=iy*W; for(let ix=0;ix<ws;ix++){ const vi=row+ix; A[vi]=clamp(res[vi]+pr[vi],0,1); } A[row+ws]=A[row]; }
     this.stainAttr.needsUpdate=true;
   }
+
+
+
   applyUniforms(){
     for(const mat of [this.ball.matFront,this.ball.matBack]){
       const u=mat.userData.gooUniforms; if(!u) continue;
-      u.uHaze.value=this.haze; u.uTint.value=this.tint;
+      u.uHaze.value=this.haze; u.uTint.value=this.tint; if(u.uDye) u.uDye.value=this.dyeShown;
       const tc=mat.userData.gooTint; if(tc) u.uTintCol.value.copy(tc[0]).lerp(tc[1],clamp(this.grime/12000,0,1));
+      // 테두리 빛(청록)도 같이 물든다 — 이게 그대로면 속이 갈색이어도 공이 여전히 맑아 보인다
+      const st=mat.userData.slimeTint;
+      if(st&&st.uniforms&&st.uniforms.uRim){
+        if(!st.dyeRim) st.dyeRim=disp(this.T,mat===this.ball.matFront?0xbd8a55:0xa87545);
+        st.uniforms.uRim.value.copy(st.rim).lerp(st.dyeRim,this.dyeShown*0.9);
+      }
     }
+    const k=this.dyeShown*(this.ball.fade??1);
+    this.dyeShell.visible=k>0.004; this.dyeMat.color.copy(this._white).lerp(this._dyeMul,k);
   }
 
   // ── 상태 저장/복원/초기화 ──
   getState(){
-    return {dissolved:this.dissolved,grime:this.grime,blobs:this.blobs.map(b=>({rest:b.rest.toArray(),axis:b.axis.toArray(),len:b.len,rad:b.rad,vol:b.vol,flat:b.flat,tone:b.tone})),residue:Array.from(this.residue)};
+    return {dissolved:this.dissolved,grime:this.grime,dye:this.dye,blobs:this.blobs.map(b=>({rest:b.rest.toArray(),axis:b.axis.toArray(),len:b.len,rad:b.rad,vol:b.vol,flat:b.flat,tone:b.tone})),residue:Array.from(this.residue)};
   }
   setState(st){
     this.reset(); if(!st) return;
     const T=this.T;
-    this.dissolved=st.dissolved||0; this.grime=st.grime||0;
+    this.dissolved=st.dissolved||0; this.grime=st.grime||0; this.dye=this.dyeShown=clamp(st.dye||0,0,1);
     for(const d of (st.blobs||[])){
       if(this.blobs.length>=this.cap) break;
       const b={rest:new T.Vector3().fromArray(d.rest),axis:new T.Vector3().fromArray(d.axis).normalize(),len:d.len,rad:d.rad,vol:d.vol,flat:d.flat||FLAT0[0],tone:d.tone||0,grow:1,p:new T.Vector3(),q:new T.Quaternion(),fresh:true};
@@ -463,11 +495,17 @@ export class GooLayer{
     this.gooDirty=true;
   }
   reset(){
-    this.blobs.length=0; this.dissolved=0; this.grime=0; this.tint=0; this.haze=0;
+    this.blobs.length=0; this.dissolved=0; this.grime=0; this.tint=0; this.haze=0; this.dye=0; this.dyeShown=0;
     this.residue.fill(0); this.present.fill(0); this.stainAttr.array.fill(0); this.stainAttr.needsUpdate=true;
     const zero=this._m.makeScale(0,0,0); for(let i=0;i<this.cap*SEG;i++) this.mesh.setMatrixAt(i,zero);
     this.mesh.count=0; this.mesh.instanceMatrix.needsUpdate=true; this.mesh.visible=false;
     this.applyUniforms();
   }
-  dispose(){ this.mesh.geometry.dispose(); this.mat.dispose(); }
+  dispose(){ this.mesh.geometry.dispose(); this.mat.dispose(); this.dyeMat.dispose(); }
+
+
+
+
+
+
 }
