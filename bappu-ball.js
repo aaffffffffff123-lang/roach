@@ -224,7 +224,7 @@ export class BappuBall{
   // ── 슬라임 덩어리 ──
   buildSlime([ws,hs]){
     const T=this.T;
-    const geo=new T.SphereGeometry(1,ws,hs);
+    const geo=new T.SphereGeometry(1,ws,hs); this._ws=ws; this._hs=hs;
     this.slimeGeo=geo;
     this.slimeBase=geo.attributes.position.array.slice();
     this.envMap=makeEnvMap(T);
@@ -882,13 +882,29 @@ export class BappuBall{
   updateSlime(){
     const T=this.T, pos=this.slimeGeo.attributes.position, arr=pos.array, base=this.slimeBase, n=this._tmp[0], o=this._tmp[1];
     for(let i=0;i<pos.count;i++){ n.set(base[i*3],base[i*3+1],base[i*3+2]); this.surfacePoint(n,o); arr[i*3]=o.x; arr[i*3+1]=o.y; arr[i*3+2]=o.z; }
-    pos.needsUpdate=true; this.slimeGeo.computeVertexNormals(); this.slimeGeo.computeBoundingSphere();
+    pos.needsUpdate=true; this.slimeGeo.computeVertexNormals(); this.weldNormals(); this.slimeGeo.computeBoundingSphere();
     const m=this._m[0];
     for(let i=0;i<this.bubbleRest.length;i++){ const b=this.bubbleRest[i]; this.interiorPoint(b.p,o); const bs=b.s*this.bubbleScale(i); m.makeScale(bs,bs,bs); m.setPosition(o); this.bubbles.setMatrixAt(i,m); }
     this.bubbles.instanceMatrix.needsUpdate=true;
     if(this.shadow){ const k=1-this.lift; this.shadow.scale.setScalar((0.75+0.3*(1-this.lift)+this.spreadV*0.1)*(1+0.12*this.squat)); this.shadow.material.opacity=k*0.95*this.fade; this.shadow.visible=k>0.02; }
     this.matFront.opacity=this.fade; this.matBack.opacity=this.fade; this.bubbles.material.opacity=0.35*this.fade;
   }
+  // 공 이음매: 구 도형은 경선 하나(공의 한쪽 옆)를 따라 정점이 두 벌이라, 법선을 따로 계산하면 그 줄에서 반사광이 끊긴다.
+  // 두 벌의 법선을 합쳐 똑같이 맞추고, 위아래 꼭짓점도 같은 이유로 하나로 모은다
+  weldNormals(){
+    const N=this.slimeGeo.attributes.normal, a=N.array, ws=this._ws, hs=this._hs, W=ws+1;
+    for(let iy=1;iy<hs;iy++){
+      const i=iy*W*3, j=(iy*W+ws)*3; let x=a[i]+a[j], y=a[i+1]+a[j+1], z=a[i+2]+a[j+2]; const l=Math.hypot(x,y,z)||1;
+      a[i]=a[j]=x/l; a[i+1]=a[j+1]=y/l; a[i+2]=a[j+2]=z/l;
+    }
+    for(const iy of [0,hs]){
+      let x=0,y=0,z=0; for(let ix=0;ix<=ws;ix++){ const k=(iy*W+ix)*3; x+=a[k]; y+=a[k+1]; z+=a[k+2]; }
+      const l=Math.hypot(x,y,z)||1; for(let ix=0;ix<=ws;ix++){ const k=(iy*W+ix)*3; a[k]=x/l; a[k+1]=y/l; a[k+2]=z/l; }
+    }
+    N.needsUpdate=true;
+  }
+
+
   updateRoaches(){
     const m=this._m[0];
     for(const r of this.roaches){
