@@ -29,6 +29,19 @@ const MIX_ROLL_C=0.55, MIX_ROLL_W=0.85;  // 굴림 소용돌이 중심 깊이(�
 const MIX_STEP=0.03;             // 적분 한 걸음 상한 (빠르게 문질러도 흐름을 건너뛰지 않게)
 const MIX_RUB=0.12;              // 마모: 문지른 거리 1(라디안)이 꾹 누르기 한 번의 몇 배 일인지
 
+// ───────── 겉에 반쯤 박힌 조각 ─────────
+// 바퀴마다 정해 둔 몇 조각은 떨어지는 순간부터 겉에 반쯤 박힌 채 끝이 튀어나와 있다: 판(등판·날개) 둘 + 다리 가닥 0~2개.
+// 주물러 속으로 밀려 들어가면 천천히 잠기고, 겉으로 다시 올라오면 천천히 다시 솟는다. 공 전체가 한꺼번에 바뀌는 순간은 없다.
+const POKE_SLOTS=[0,1,2,3,6,7,8,9];  // 판으로 솟을 수 있는 조각: 배 앞·뒤, 가슴, 앞가슴판, 날개 넷 (바퀴마다 이 중 둘)
+const POKE_LEGS=[0.4,0.88];          // 바퀴마다 솟는 다리 가닥 수: 0개 40% / 1개 48% / 2개 12% (눈에 띄게 솟은 것의 1/3쯤이 다리)
+const POKE_IN=0.80, POKE_OUT=0.96;   // 겉(그 조각이 갈 수 있는 가장 바깥)에 얼마나 가까워야 솟나: 이 사이에서 서서히
+const POKE_RATE=2.5;                 // 솟고 잠기는 빠르기 (1/초). 클수록 빠르다
+const POKE_TURN=2.5;                 // 솟은 조각이 제 기울기로 돌아눕는 빠르기 (1/초)
+const POKE_TILT_PLATE=[0.22,0.95];   // 판 기울기 범위(라디안): 0이면 겉면에 납작하게 눕고, 클수록 모서리가 선다
+const POKE_TILT_LEG=[0.35,1.05];     // 다리 가닥이 겉면 수직에서 기운 범위(라디안): 0이면 바늘처럼 곧게 선다
+const POKE_OUT_LEG=0.13;             // 다리 가닥이 밖으로 나오는 길이 상한 (공 반지름 1 기준)
+
+
 // ───────── 바퀴 모델 부위 정의 (game.html buildRoachBody의 정점 순서 그대로) ─────────
 // 몸통 한 덩어리는 배(414) → 가슴·고관절(610) → 앞가슴판(450) → 머리(406) → 꼬리털(84) → 오른날개(506) → 왼날개(506) 순으로 정점이 쌓여 있다.
 const BODY_COUNT=2976;
@@ -269,8 +282,9 @@ export class BappuBall{
   }
   // 부위마다 도형의 가운데와 크기. 떨어진 조각은 자기 가운데를 축으로 돌고, 크기만큼 겉에서 안쪽에 머문다
   // (바퀴 몸 원점을 축으로 돌리면 머리·꼬리·다리 끝 조각이 크게 휘둘려 슬라임 밖으로 튀어나온다)
+ 
   buildPieceCenters(){
-    const T=this.T; this.pieceCen=[]; this.pieceCenM=[]; this.pieceExt=[];
+    const T=this.T; this.pieceCen=[]; this.pieceCenM=[]; this.pieceExt=[]; this.pieceHull=[]; this.pieceAxisL=[]; this.pieceAxisT=[];
     for(let p=0;p<NP;p++){
       const g=this.pieceGeo[p], P=g.attributes.position.array, idx=g.index?g.index.array:null;
       const nv=P.length/3, seen=new Uint8Array(nv);
@@ -280,8 +294,28 @@ export class BappuBall{
       if(n){ cx/=n; cy/=n; cz/=n; }
       let ext=0; for(let v=0;v<nv;v++){ if(!seen[v])continue; ext=Math.max(ext,Math.hypot(P[v*3]-cx,P[v*3+1]-cy,P[v*3+2]-cz)); }
       this.pieceCen.push(new T.Vector3(cx,cy,cz)); this.pieceCenM.push(new T.Matrix4().makeTranslation(-cx,-cy,-cz)); this.pieceExt.push(ext);
+      // 윤곽점: 26방향 각각으로 가장 멀리 나간 정점 (가운데 기준). 겉으로 얼마나 튀어나왔나 잴 때 정점 수백 개 대신 이것만 본다
+      const hull=[];
+      for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+        if(!dx&&!dy&&!dz)continue; let best=-1,bv=-Infinity;
+        for(let v=0;v<nv;v++){ if(!seen[v])continue; const s=(P[v*3]-cx)*dx+(P[v*3+1]-cy)*dy+(P[v*3+2]-cz)*dz; if(s>bv){bv=s;best=v;} }
+        if(best>=0&&!hull.includes(best)) hull.push(best);
+      }
+      this.pieceHull.push(Float32Array.from(hull.flatMap(v=>[P[v*3]-cx,P[v*3+1]-cy,P[v*3+2]-cz])));
+      // 주축: 가장 길게 뻗은 방향(다리 가닥의 결)과 가장 얇은 방향(판의 두께)
+      let xx=0,xy=0,xz=0,yy=0,yz=0,zz=0;
+      for(let v=0;v<nv;v++){ if(!seen[v])continue; const a=P[v*3]-cx,b=P[v*3+1]-cy,c=P[v*3+2]-cz; xx+=a*a; xy+=a*b; xz+=a*c; yy+=b*b; yz+=b*c; zz+=c*c; }
+      const cov=(u,o)=>o.set(xx*u.x+xy*u.y+xz*u.z,xy*u.x+yy*u.y+yz*u.z,xz*u.x+yz*u.y+zz*u.z);
+      const w=new T.Vector3(), eL=new T.Vector3(0.57,0.58,0.59);
+      for(let k=0;k<50;k++){ cov(eL,w); if(w.lengthSq()<1e-24)break; eL.copy(w).normalize(); }
+      const lam=cov(eL,w).dot(eL), eT=new T.Vector3(-eL.y,eL.x,0.31).normalize();
+      for(let k=0;k<80;k++){ cov(eT,w); w.multiplyScalar(-1).addScaledVector(eT,lam); w.addScaledVector(eL,-w.dot(eL)); if(w.lengthSq()<1e-24)break; eT.copy(w).normalize(); }
+      this.pieceAxisL.push(eL); this.pieceAxisT.push(eT);
     }
   }
+
+
+
   buildCrumbs(){
     const T=this.T; this.crumbCap=this.count*5; this.crumbN=0;
     this.crumbRest=new Float32Array(this.crumbCap*3);
@@ -804,129 +838,88 @@ export class BappuBall{
   }
 
 
+ 
+  /** 슬라임 속 조각: 표면보다 한 박자 늦게 따라오고, 밀리는 동안 돈다.
+   *  바퀴마다 정해 둔 몇 조각(판 둘 + 다리 가닥 0~2개)은 떨어지는 순간부터 겉에 반쯤 박혀 끝이 튀어나와 있다. 다 부순 순간에 한꺼번에 솟는 일은 없다.
+   *  주물러 속으로 들어갈수록 천천히 잠기고, 다시 겉으로 올라오면 천천히 솟는다. 바닥에 깔린 쪽은 솟지 않는다.
+   *  솟은 조각은 저마다 기울기가 달라서 판은 눕거나 모서리가 서고, 다리는 바늘처럼 비스듬히 삐져나온다. */
   updateFragments(dt){
-    const tgt=this._tmp[1], m=this._m[0];
-    const dq=this._q[1], vel=this._tmp[2];
-    const dir=this._tmp[17], normal=this._tmp[18];
-    const localN=this._tmp[19], invQ=this._q[2];
-    const touched=this._touched||(this._touched=new Uint8Array(NP));
-    touched.fill(0);
+    const tgt=this._tmp[1], m=this._m[0], q=this._q[0], dq=this._q[1], qr=this._q[2], vel=this._tmp[2];
+    const dir=this._tmp[17], nrm=this._tmp[18], ln=this._tmp[19], tip=this._tmp[3], ax=this._tmp[20], tg=this._tmp[21];
+    const touched=this._touched||(this._touched=new Uint8Array(NP)); touched.fill(0);
+    const ke=1-Math.exp(-POKE_RATE*dt), kr=1-Math.exp(-POKE_TURN*dt), NS=POKE_SLOTS.length;
     let moving=false;
-
-
- const rough=this.allBroken();
-this.shards.visible=!rough;
-const choices=[0,1,2,3,6,7,8,9];
-
-for(const r of this.roaches){
-  if(!r.used)continue;
-  const picks=[];
-  if(rough){
-    const start=Math.floor(hash(r.i*7.1)*choices.length);
-    for(let j=0;j<choices.length&&picks.length<2;j++){
-      const slot=choices[(start+j*3)%choices.length];
-      if(r.frag[slot])picks.push(slot);
-    }
-  }
-
-  for(let slot=0;slot<SLOTS;slot++){
-
-
-
-
-        const f=r.frag[slot];
-        if(!f)continue;
-        f.t+=dt;
-        const sink=clamp(f.t/f.dur,0,1);
+    for(const r of this.roaches){
+      if(!r.used)continue;
+      // 이 바퀴에서 솟는 조각: 판 둘(pa,pb) + 다리 가닥 0~2개(la,lb)
+      const s0=Math.floor(hash(r.i*7.1)*NS), pa=POKE_SLOTS[s0], pb=POKE_SLOTS[(s0+3)%NS];
+      const hl=hash(r.i*5.3), nl=hl<POKE_LEGS[0]?0:hl<POKE_LEGS[1]?1:2;
+      const la=nl>0?SLOT_BODY+Math.floor(hash(r.i*2.9)*SLOT_LEG):-1, lb=nl>1?SLOT_BODY+(la-SLOT_BODY+4+Math.floor(hash(r.i*8.3)*5))%SLOT_LEG:-1;
+      for(let slot=0;slot<SLOTS;slot++){
+        const f=r.frag[slot]; if(!f)continue;
+        f.t+=dt; const sink=clamp(f.t/f.dur,0,1);
+        const [mi,ii]=this.instanceSlot(r,slot);
         this.interiorPoint(f.rest,tgt);
-        const rate=sink<1?(1.5+sink*7):10;
-        const k=1-Math.exp(-rate*dt);
-        vel.copy(tgt).sub(f.p);
-        f.p.addScaledVector(vel,k);
-        const sp=vel.length()*k;
-        if(sink<1)
-          f.q.slerpQuaternions(f.q0,f.q1,sink*sink*(3-2*sink));
-        else if(sp>1e-4){
-          dq.setFromAxisAngle(f.axis,Math.min(0.3,sp*9));
-          f.q.premultiply(dq);
-        }
-
-        const expose=picks.includes(slot);
-        if(sp>2e-5||sink<1||this.fragDirty||expose){
-          const [mi,ii]=this.instanceSlot(r,slot);
-          let drawPos=f.p;
-
-          if(expose){
-            dir.copy(f.rest).normalize();
-            if(dir.y>-0.55){
-              this.surfaceFrame(dir,tgt,normal);
-              localN.copy(normal)
-                .applyQuaternion(invQ.copy(f.q).invert())
-                .multiply(f.s);
-              const geo=this.pieceGeo[mi];
-              const P=geo.attributes.position.array;
-              const I=geo.index?geo.index.array:null;
-              const center=this.pieceCen[mi];
-              const count=I?I.length:P.length/3;
-              let support=0;
-
-              // 이 조각에 포함된 정점만 계산한다
-              for(let j=0;j<count;j++){
-                const v=(I?I[j]:j)*3;
-                support=Math.max(support,
-                  (P[v]-center.x)*localN.x+
-                  (P[v+1]-center.y)*localN.y+
-                  (P[v+2]-center.z)*localN.z
-                );
-              }
-
-          const tip=Math.min(
-  0.06+hash(r.i*3.7+slot)*0.04,
-  support*0.75
-);
-              tgt.addScaledVector(normal,-(support-tip));
-              drawPos=tgt;
+        const leg=slot===la||slot===lb; let turned=false;
+        if(leg||slot===pa||slot===pb){
+          const rl=f.rest.length(); dir.copy(f.rest).multiplyScalar(1/Math.max(rl,1e-5));
+          const want=sstep(POKE_IN,POKE_OUT,rl/(f.rmax||MIX_RMAX))*sstep(-0.62,-0.45,dir.y);
+          f.poke=f.poke==null?want:f.poke+(want-f.poke)*ke;
+          if(f.poke>0.002){
+            const h=hash(r.i*3.7+slot);
+            this.surfaceFrame(dir,tip,nrm);
+            // 제 기울기로 천천히 돌아눕는다: 다리는 긴 결이, 판은 두께 방향이 겉면 수직에서 정해 둔 만큼 기운다
+            if(sink>=1){
+              const TL=leg?POKE_TILT_LEG:POKE_TILT_PLATE, tilt=TL[0]+(TL[1]-TL[0])*hash(r.i*1.3+slot*7.7);
+              ax.copy(leg?this.pieceAxisL[mi]:this.pieceAxisT[mi]).applyQuaternion(f.q);
+              if(ax.dot(nrm)<0) ax.negate();
+              tg.copy(ax).addScaledVector(nrm,-ax.dot(nrm));
+              if(tg.lengthSq()<1e-6){ tg.set(nrm.z,0,-nrm.x); if(tg.lengthSq()<1e-6) tg.set(1,0,0); }
+              tg.normalize().multiplyScalar(Math.sin(tilt)).addScaledVector(nrm,Math.cos(tilt));
+              if(ax.angleTo(tg)>0.003){ qr.setFromUnitVectors(ax,tg); q.copy(qr).multiply(f.q); f.q.slerp(q,kr*f.poke); turned=true; }
             }
+            // 겉면에서 법선 쪽으로 가장 멀리 나간 끝만 밖으로 나오게 가운데를 묻는다
+            ln.copy(nrm).applyQuaternion(q.copy(f.q).invert()).multiply(f.s);
+            const H=this.pieceHull[mi]; let sup=0;
+            for(let k=0;k<H.length;k+=3){ const d=H[k]*ln.x+H[k+1]*ln.y+H[k+2]*ln.z; if(d>sup)sup=d; }
+            const out=leg?Math.min(POKE_OUT_LEG,sup*(0.45+h*0.35)):Math.min(0.05+h*0.04,sup*0.7);
+            tip.addScaledVector(nrm,-(sup-out));
+            tgt.lerp(tip,f.poke);
           }
-
-          m.compose(drawPos,f.q,f.s).multiply(this.pieceCenM[mi]);
-          this.meshes[mi].setMatrixAt(ii,m);
-          touched[mi]=1;
-          if(sp>2e-5||sink<1)moving=true;
+        }
+        const rate=sink<1?(1.5+sink*7):10, k=1-Math.exp(-rate*dt);
+        vel.copy(tgt).sub(f.p); f.p.addScaledVector(vel,k);
+        const sp=vel.length()*k;
+        if(sink<1) f.q.slerpQuaternions(f.q0,f.q1,sink*sink*(3-2*sink));
+        else if(sp>1e-4&&!(f.poke>0.5)){ dq.setFromAxisAngle(f.axis,Math.min(0.3,sp*9)); f.q.premultiply(dq); }
+        if(sp>2e-5||sink<1||turned||this.fragDirty){
+          m.compose(f.p,f.q,f.s).multiply(this.pieceCenM[mi]); this.meshes[mi].setMatrixAt(ii,m); touched[mi]=1;
+          if(sp>2e-5||sink<1||turned) moving=true;
         }
       }
     }
-
-    for(let mi=0;mi<NP;mi++)
-      if(touched[mi])this.meshes[mi].instanceMatrix.needsUpdate=true;
-
-    // 작은 부스러기는 원래처럼 슬라임 안에서 움직인다
+    for(let mi=0;mi<NP;mi++) if(touched[mi]) this.meshes[mi].instanceMatrix.needsUpdate=true;
+    // 작은 부스러기는 늘 슬라임 속에서 움직인다 (다 부순 뒤에도 숨기지 않는다 — 조각이 갈려서 생기는 다음 단계다)
     if(this.shardList.length){
       let up=false;
       for(let i=0;i<this.shardList.length;i++){
-        const s=this.shardList[i];
-        s.t+=dt;
+        const s=this.shardList[i]; s.t+=dt;
         this.interiorPoint(s.rest,tgt);
         const k=1-Math.exp(-(s.t<1.2?2.5:9)*dt);
-        vel.copy(tgt).sub(s.p);
-        const sp=vel.length();
-        s.p.addScaledVector(vel,k);
+        vel.copy(tgt).sub(s.p); const sp=vel.length(); s.p.addScaledVector(vel,k);
         if(sp>2e-5||this.fragDirty){
-          dq.setFromAxisAngle(
-            this._tmp[3].set(1,0.3,0.2).normalize(),
-            Math.min(0.2,sp*k*6)
-          );
-          s.q.premultiply(dq);
+          dq.setFromAxisAngle(this._tmp[3].set(1,0.3,0.2).normalize(),Math.min(0.2,sp*k*6)); s.q.premultiply(dq);
+          m.compose(s.p,s.q,this._tmp[4].setScalar(s.s)); this.shards.setMatrixAt(i,m); up=true;
         }
-        m.compose(s.p,s.q,this._tmp[4].setScalar(s.s));
-        this.shards.setMatrixAt(i,m);
-        up=true;
       }
-      if(up)this.shards.instanceMatrix.needsUpdate=true;
+      if(up) this.shards.instanceMatrix.needsUpdate=true;
     }
     this.fragDirty=false;
     return moving;
   }
+
+
+
 
 
 
