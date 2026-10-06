@@ -319,6 +319,7 @@ export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     const g=r.m.g; g.updateMatrixWorld(true);
     caps.push({r,m:r.m,g,idx,anchor:a,spin,t:0,p0:g.position.clone(),q0:g.quaternion.clone(),done:false});
     sfx.stick(1);
+    finishCap(caps[caps.length-1],caps.length-1);
   }
   const _pq=[];
   function updateCaps(dt){
