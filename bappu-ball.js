@@ -825,7 +825,7 @@ export class BappuBall{
     if(this.shardList.length){
       let up=false;
       const rough=this.allBroken();
-      const step=Math.max(1,Math.ceil(this.shardList.length/18));
+      const step=Math.max(1,Math.ceil(this.shardList.length/60));
       const dir=this._tmp[17], normal=this._tmp[18];
 
       for(let i=0;i<this.shardList.length;i++){
@@ -849,11 +849,11 @@ export class BappuBall{
         dir.copy(s.rest).normalize();
         if(rough&&i%step===0&&dir.y>-0.55){
           this.surfaceFrame(dir,tgt,normal);
-          tgt.addScaledVector(normal,-0.002);
+          tgt.addScaledVector(normal,0.004);
           q.setFromUnitVectors(this._tmp[3].set(0,1,0),normal);
           m.compose(
             tgt,q,
-            this._tmp[4].set(s.s*0.85,s.s*1.15,s.s*0.65)
+            this._tmp[4].set(s.s*1.6,s.s*3.8,s.s*1.1)
           );
           this.shards.setMatrixAt(i,m);
           up=true;
@@ -864,10 +864,7 @@ export class BappuBall{
         }
       }
       if(up)this.shards.instanceMatrix.needsUpdate=true;
-    }
-      let up=false;
-      for(let i=0;i<this.shardList.length;i++){ const s=this.shardList[i]; s.t+=dt; this.interiorPoint(s.rest,tgt); const k=1-Math.exp(-(s.t<1.2?2.5:9)*dt); vel.copy(tgt).sub(s.p); const sp=vel.length(); s.p.addScaledVector(vel,k); if(sp>2e-5||this.fragDirty){ dq.setFromAxisAngle(this._tmp[3].set(1,0.3,0.2).normalize(),Math.min(0.2,sp*k*6)); s.q.premultiply(dq); m.compose(s.p,s.q,this._tmp[4].setScalar(s.s)); this.shards.setMatrixAt(i,m); up=true; } }
-      if(up) this.shards.instanceMatrix.needsUpdate=true;
+
     }
     this.fragDirty=false; return moving;
   }
