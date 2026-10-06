@@ -290,7 +290,7 @@ function updateAdaptiveQuality(dt){
 
 const scene=new THREE.Scene();scene.background=new THREE.Color(0xe9e0d0);scene.fog=new THREE.Fog(0xe9e0d0,12,30);
 const camera=new THREE.PerspectiveCamera(38,1,.05,60);camera.position.set(0,6.9,7.1);
-const controls=new OrbitControls(camera,canvas);controls.target.set(0,.35,0);controls.enableDamping=true;controls.dampingFactor=.08;controls.minDistance=2.6;controls.maxDistance=16;controls.zoomSpeed=.82;controls.minPolarAngle=.12;controls.maxPolarAngle=1.32;
+const controls=new OrbitControls(camera,canvas);controls.target.set(0,.35,0);controls.enableDamping=true;controls.dampingFactor=.08;controls.minDistance=2.6;controls.maxDistance=18;controls.zoomSpeed=.82;controls.minPolarAngle=.12;controls.maxPolarAngle=1.32;
 controls.mouseButtons.LEFT=-1;controls.mouseButtons.MIDDLE=THREE.MOUSE.DOLLY;controls.mouseButtons.RIGHT=THREE.MOUSE.ROTATE;
 controls.touches.ONE=-1;controls.touches.TWO=THREE.TOUCH.DOLLY_ROTATE;
 const hemi=new THREE.HemisphereLight(0xfff2d7,0x3f2b1e,1.2);scene.add(hemi);
@@ -490,9 +490,9 @@ function eyeGeometry(notch){
   const g=new THREE.SphereGeometry(1,IS_SMALL?18:24,IS_SMALL?14:18),p=g.attributes.position;
   for(let i=0;i<p.count;i++){
     const x=p.getX(i),y=p.getY(i),z=p.getZ(i);
-    let X=x*.055,Y=y*.235,Z=z*.13;
-    X-=.085*y*y;
-    Z-=notch*.045*Math.exp(-((y-.1)**2)/.12)*Math.max(0,z*notch);
+    let X=x*.05,Y=y*.175,Z=z*.115;
+    X-=.045*y*y;
+    Z-=notch*.04*Math.exp(-((y-.1)**2)/.12)*Math.max(0,z*notch);
     p.setXYZ(i,X,Y,Z);
   }
   g.computeVertexNormals();return g;
@@ -633,19 +633,29 @@ class Specimen{
     const mid=this.ellipsoid('thorax_mid',this.flipNode,v3(0,0,0),v3(.58,.16,.36),mat.body,{label:'중가슴',role:'core',fatal:.36,jointStrength:1});
     const rear=this.ellipsoid('thorax_rear',mid.node,v3(0,-.01,-.42),v3(.62,.16,.34),mat.body,{label:'뒷가슴',role:'core',parentId:'thorax_mid',fatal:.24,jointStrength:.88,jointLocal:v3(0,.02,-.2)});
     const pro=this.customPart('pronotum',mid.node,v3(0,.2,.44),sharedGeometry('pronotum',pronotumGeometry),mat.pronotum,{label:'앞가슴 등판',role:'core',parentId:'thorax_mid',fatal:.38,jointStrength:.93,jointLocal:v3(0,.12,.12)});
-    const head=this.customPart('head_core',pro.node,v3(0,-.23,.6),sharedGeometry('head',headGeometry),mat.head,{label:'머리',role:'core',parentId:'pronotum',fatal:.46,jointStrength:.86,jointLocal:v3(0,-.17,.36),meshRot:{x:.42}});
+    const head=this.customPart('head_core',pro.node,v3(0,-.24,.72),sharedGeometry('head',headGeometry),mat.head,{label:'머리',role:'core',parentId:'pronotum',fatal:.46,jointStrength:.86,jointLocal:v3(0,-.17,.48),meshRot:{x:.42},meshScale:v3(1.06,1.1,1.06)});
     // 겉에서 보이는 목 막 (머리를 떼면 드러나는 연한 막)
+    // 머리 메시는 x .42 만큼 숙여져 있다. 머리에 붙는 것(턱·수염·더듬이 뿌리·눈)은 그 기울기를 따라 붙여야 표면에 닿는다.
+    const HT=v3(1,0,0), tilt=(x,y,z,k=1)=>v3(x,y,z).applyAxisAngle(HT,.42*k);
     for(const side of ['L','R']){
       const s=side==='R'?1:-1;
       // 겹눈: 더듬이 뿌리를 감싸는 콩팥 모양. 뽑으면 그 자리에 연한 속살이 드러난다.
       const eyeGeo=sharedGeometry(`eye:${s}`,()=>eyeGeometry(s));
-      const eyeRot={x:-.3,y:s>0?-.4:Math.PI+.4,z:0},eyePos=v3(s*.232,.05,.06);
+      // 실제 머리 표면(headGeometry 식 + meshScale + meshRot x .42)에서 눈 위·가운데·아래 점을 구해 그 사이에 놓는다.
+      // 얇은 축 = 가운데 점의 표면 법선, 긴 축 = 위·아래 점을 잇는 방향. 위·아래 끝이 표면에서 같은 깊이가 된다.
+      const HS=v3(1.06,1.1,1.06),HQ=new THREE.Quaternion().setFromAxisAngle(v3(1,0,0),.42);
+      const headPt=(d)=>{d=d.clone().normalize();return v3(d.x*.3*(.8+.22*d.y),d.y*.25,d.z*.21*(.92+.08*d.y)).multiply(HS).applyQuaternion(HQ)};
+      const dMid=v3(s*.84,.53,.1),pMid=headPt(dMid),pTop=headPt(v3(s*.84,.53+.6,.1)),pBot=headPt(v3(s*.84,.53-.6,.1));
+      const eyeN=v3().crossVectors(headPt(dMid.clone().add(v3(0,.03,0))).sub(pMid),headPt(dMid.clone().add(v3(0,0,.03))).sub(pMid)).normalize();if(eyeN.dot(pMid)<0)eyeN.negate();
+      const eyeUp=pTop.clone().sub(pBot);eyeUp.addScaledVector(eyeN,-eyeUp.dot(eyeN)).normalize();
+      const eyeZ=v3().crossVectors(eyeN,eyeUp).normalize(),eyeE=new THREE.Euler().setFromQuaternion(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(eyeN,eyeUp,eyeZ)),'XYZ');
+      const eyeRot={x:eyeE.x,y:eyeE.y,z:eyeE.z},eyePos=pMid.clone().addScaledVector(eyeN,-.008);   // 가운데를 표면에서 .008 만 묻는다
       const eye=this.customPart(`eye_${side}`,head.node,eyePos,eyeGeo,mat.eye,{rot:eyeRot,label:`${SIDE_NAME[side]} 겹눈`,role:'eye',parentId:'head_core',small:true,jointStrength:.34});
       // 큰턱: 입이 아래를 향한다
-      const mandSock=this.socket(head.node,v3(s*.07,-.2,.1),v3(.06,.04,.06));
-      this.chain(`mandible_${side}`,head.node,'head_core',v3(s*.085,-.19,.1),[v3(-s*.35,-.78,.45)],[.15],[[.065,.022]],mat.dark,()=>({id:`mandible_${side}`,label:`${SIDE_NAME[side]} 큰턱`,role:'jaw',small:true,jointStrength:.48,socket:mandSock,midCut:true}))[0].socket=mandSock;
+      const mandSock=this.socket(head.node,tilt(s*.06,-.17,.07),v3(.06,.04,.06));
+      this.chain(`mandible_${side}`,head.node,'head_core',tilt(s*.075,-.17,.08),[tilt(-s*.35,-.78,.45,.6)],[.15],[[.065,.022]],mat.dark,()=>({id:`mandible_${side}`,label:`${SIDE_NAME[side]} 큰턱`,role:'jaw',small:true,jointStrength:.48,socket:mandSock,midCut:true}))[0].socket=mandSock;
       // 작은입수염
-      this.chain(`palp_${side}`,head.node,'head_core',v3(s*.15,-.16,.12),[v3(s*.45,-.28,.84),v3(s*.36,-.5,.78),v3(s*.24,-.72,.62)],[.15,.13,.11],[[.024,.02],[.02,.016],[.016,.011]],mat.leg,i=>({label:`${SIDE_NAME[side]} 작은입수염 ${i+1}마디`,role:'palp',small:true,jointStrength:.25,midCut:true}));
+      this.chain(`palp_${side}`,head.node,'head_core',tilt(s*.12,-.15,.09),[tilt(s*.45,-.28,.84,.6),tilt(s*.36,-.5,.78,.6),tilt(s*.24,-.72,.62,.6)],[.15,.13,.11],[[.024,.02],[.02,.016],[.016,.011]],mat.leg,i=>({label:`${SIDE_NAME[side]} 작은입수염 ${i+1}마디`,role:'palp',small:true,jointStrength:.25,midCut:true}));
       // 더듬이: 몸길이보다 길게. 굵은 밑마디 두 개 + 가늘어지는 채찍마디
       const AN=IS_SMALL?22:28,antDirs=[],antLens=[],antRadii=[];
       for(let i=0;i<AN;i++){
@@ -654,7 +664,7 @@ class Specimen{
         antLens.push(i===0?.12:i===1?.07:lerp(.2,.13,(i-2)/(AN-3))*(28/AN));
         const ra=i===0?.034:i===1?.026:lerp(.02,.0042,Math.pow((i-2)/(AN-3),.8));antRadii.push([ra,i===0?.028:i===1?.022:ra*.93]);
       }
-      const ant=this.chain(`antenna_${side}`,head.node,'head_core',v3(s*.12,.1,.17),antDirs,antLens,antRadii,mat.antenna,i=>({label:`${SIDE_NAME[side]} 더듬이 ${i+1}마디`,role:'antenna',small:true,jointStrength:.18+.3*(1-i/AN)*.2,midCut:true}));
+      const ant=this.chain(`antenna_${side}`,head.node,'head_core',tilt(s*.11,.1,.155),antDirs,antLens,antRadii,mat.antenna,i=>({label:`${SIDE_NAME[side]} 더듬이 ${i+1}마디`,role:'antenna',small:true,jointStrength:.18+.3*(1-i/AN)*.2,midCut:true}));
       ant.forEach((ap,i)=>{ap.animOffset=i*.45*(8/AN)+(side==='R'?0:1.7);ap.antN=AN});
     }
     // ── 배: 8마디 판이 앞에서 뒤로 기와처럼 겹친다 ──
@@ -683,8 +693,8 @@ class Specimen{
     }
     // ── 다리 6개: 앞다리는 앞으로, 가운데는 옆으로, 뒷다리는 뒤로 뻗고 발끝이 바닥을 짚는다 ──
     const legDefs=[
-      {pair:'front',parent:pro.node,parentId:'pronotum',start:v3(.2,-.28,.05),
-        dirs:[[.45,-.22,.8],[.68,-.1,.72],[.82,.04,.58],[.62,-.37,.72],[.46,-.12,.87],[.38,-.04,.92],[.3,-.02,.95]],lens:[.22,.13,.55,.6,.2,.14,.12]},
+      {pair:'front',parent:pro.node,parentId:'pronotum',start:v3(.2,-.04,.05),   // 밑마디 뿌리가 등판 밑면에 닿는 높이. 아래로 길게 내려와 무릎 위치는 그대로
+        dirs:[[.29,-.81,.51],[.68,-.1,.72],[.82,.04,.58],[.62,-.37,.72],[.46,-.12,.87],[.38,-.04,.92],[.3,-.02,.95]],lens:[.365,.13,.55,.6,.2,.14,.12]},
       {pair:'middle',parent:mid.node,parentId:'thorax_mid',start:v3(.28,-.08,.02),
         dirs:[[.65,-.22,-.2],[.92,-.08,-.2],[.97,.05,-.2],[.78,-.25,-.5],[.55,-.09,-.83],[.46,-.03,-.89],[.36,-.01,-.94]],lens:[.24,.14,.7,.8,.24,.16,.13]},
       {pair:'rear',parent:rear.node,parentId:'thorax_rear',start:v3(.3,-.07,0),
@@ -760,9 +770,32 @@ function raggedRingGeometry(radius=.09,segments=15,depth=.02){
   for(let i=0;i<segments;i++){const n=(i+1)%segments,oi=i,on=n,ii=segments+i,inn=segments+n;idx.push(oi,on,inn,oi,inn,ii)}
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return g
 }
+Specimen.prototype.partOfNode=function(node){for(const p of this.parts.values())if(p.node===node)return p;return null};
+// 상처·단면을 노드에 붙일 때, 노드가 눌려 있으면(핀·집게의 surfacePress/pinDepress 로 y 스케일이 줄어든 상태) attach 가 그 찌그러짐을
+// 거꾸로 보상해 붙여서 나중에 스케일이 돌아오면 단면이 늘어나거나 기울어진다. 붙이는 순간만 기본 스케일로 되돌렸다가 복구한다.
+Specimen.prototype.attachAtRest=function(node,obj){
+  let owner=this.partOfNode(node),scaled=node;if(!owner&&node.parent){owner=this.partOfNode(node.parent);scaled=node.parent}
+  const sc=owner?scaled.scale.clone():null;if(owner){scaled.scale.copy(owner.baseScale);scaled.updateWorldMatrix(true,true)}
+  scene.add(obj);node.attach(obj);
+  if(owner){scaled.scale.copy(sc);scaled.updateWorldMatrix(false,true)}
+};
+// origin 에서 dir 방향으로 쏴서 meshes 표면의 점과 바깥쪽 법선(월드)을 얻는다.
+// 법선은 꼭짓점 보간 법선을 쓰고(각진 삼각형의 면 법선이 아니라), 납작한 타원체처럼 비균등 스케일인 메시에서도 법선 행렬로 바르게 변환한다.
+Specimen.prototype.surfaceHit=function(meshes,origin,dir,maxDist=12){
+  const list=(Array.isArray(meshes)?meshes:[meshes]).filter(m=>m&&m.isMesh);if(!list.length)return null;
+  for(const m of list)m.updateWorldMatrix(true,false);
+  const d=dir.clone().normalize(),hit=new THREE.Raycaster(origin.clone(),d,0,maxDist).intersectObjects(list,false)[0];if(!hit)return null;
+  const nm=new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+  const face=hit.face?hit.face.normal.clone().applyNormalMatrix(nm).normalize():null;
+  let n=hit.normal?hit.normal.clone().applyNormalMatrix(nm).normalize():face;
+  if(!n||!(n.lengthSq()>.5))return null;
+  if(face&&n.dot(face)<.85)n=face;   // 얇은 테두리처럼 보간 법선이 면과 크게 어긋나는 자리는 면 법선
+  if(n.dot(d)>0)n.negate();
+  return {point:hit.point.clone(),normal:n,object:hit.object,distance:hit.distance};
+};
 Specimen.prototype.attachScar=function(targetNode,worldPoint,worldNormal,size=.09,opts={}){
   if(!targetNode||!objectInScene(targetNode))return null;
-  const n=worldNormal.clone().normalize();const group=new THREE.Group();group.position.copy(worldPoint).addScaledVector(n,.002);group.quaternion.setFromUnitVectors(v3(0,0,1),n);scene.add(group);targetNode.attach(group);
+  const n=worldNormal.clone().normalize();const group=new THREE.Group();group.position.copy(worldPoint).addScaledVector(n,.002);group.quaternion.setFromUnitVectors(v3(0,0,1),n);this.attachAtRest(targetNode,group);
   const cavity=new THREE.Mesh(irregularDiscGeometry(size*.73,.3,15,size*.16),cloneWorkingMaterial(opts.pale?mat.eyeWoundDeep:opts.dark?mat.gut:mat.socket));cavity.renderOrder=5;group.add(cavity);
   const moist=new THREE.Mesh(irregularDiscGeometry(size*.48,.3,13,size*.11),cloneWorkingMaterial(mat.tissue));moist.position.z=.004;moist.material.opacity=opts.moisture??.72;moist.renderOrder=6;group.add(moist);
   const rim=new THREE.Mesh(raggedRingGeometry(size,17,size*.24),cloneWorkingMaterial(mat.tear));rim.renderOrder=7;group.add(rim);
@@ -777,10 +810,10 @@ Specimen.prototype.carveEyeSocket=function(eye){
   const eyeM=new THREE.Matrix4().compose(eye.basePos,eye.baseQuat,new THREE.Vector3(1,1,1));
   const toEye=eyeM.clone().invert().multiply(mesh.matrix),back=mesh.matrix.clone().invert().multiply(eyeM);
   const v=v3(),c=new THREE.Color(),cRim=new THREE.Color(0x1c0904),cWall=new THREE.Color(0x4a1d0c),cFlesh=new THREE.Color(0x8e5a33),cDeep=new THREE.Color(0xcdb07a),cClot=new THREE.Color(0x3a1a0c);
-  const D=.08,A=.235*.96,B=.13*.96,notch=eye.id.endsWith('_R')?1:-1;let deep=null,best=0;
+  const D=.072,A=.175*.96,B=.115*.96,notch=eye.id.endsWith('_R')?1:-1;let deep=null,best=0;
   for(let i=0;i<pos.count;i++){
-    v.fromBufferAttribute(pos,i).applyMatrix4(toEye);if(v.x<-.14)continue;
-    const yn=v.y/A,zn=(v.z+notch*.035*Math.exp(-((yn-.1)**2)/.12)*Math.max(0,v.z*notch/B))/B,r2=yn*yn+zn*zn;
+    v.fromBufferAttribute(pos,i).applyMatrix4(toEye);if(v.x<-.12)continue;
+    const yn=v.y/A,zn=(v.z+notch*.031*Math.exp(-((yn-.1)**2)/.12)*Math.max(0,v.z*notch/B))/B,r2=yn*yn+zn*zn;
     if(r2>=1.4)continue;
     const h=Math.abs(Math.sin(i*12.9898)*43758.5453)%1;
     if(col)c.fromBufferAttribute(col,i);
@@ -810,16 +843,20 @@ Specimen.prototype.sectionRadii=function(part,parentPart){
 };
 // 뜯긴 면: 바깥에서 몸 쪽으로 광선을 쏴서 표면을 찾고, 그 자리에 진물 막·지방 덩어리·내장 단면·가는 관을 붙인다.
 // dir: 몸 안쪽에서 뜯긴 쪽을 향하는 방향(월드). 반환값의 gut은 내장 줄이 이어질 점(node 기준).
-Specimen.prototype.attachBodyWound=function(node,mesh,dir,rx,ry,{gut=true,big=1}={}){
+Specimen.prototype.attachBodyWound=function(node,mesh,dir,rx,ry,{gut=true,big=1,origin=null}={}){
   if(!node||!mesh||!objectInScene(node))return null;
   mesh.updateWorldMatrix(true,false);if(!mesh.geometry.boundingSphere)mesh.geometry.computeBoundingSphere();
   const n=dir.clone().normalize(),center=mesh.geometry.boundingSphere.center.clone().applyMatrix4(mesh.matrixWorld);
-  const rc=new THREE.Raycaster(center.clone().addScaledVector(n,6),n.clone().negate(),0,12);const hit=rc.intersectObject(mesh,false)[0];
+  // origin 을 주면 그 점에서 -n 방향으로 쏜다 (등판처럼 가운데가 아니라 특정 자리를 맞혀야 할 때)
+  const hit=this.surfaceHit(mesh,origin?origin.clone():center.clone().addScaledVector(n,6),n.clone().negate(),12);
   const at=hit?hit.point.clone():center.clone().addScaledVector(n,Math.max(rx,ry));
-  // 면 방향: z = 바깥, x = 몸의 좌우
-  const side=v3(1,0,0).applyQuaternion(this.root.getWorldQuaternion(new THREE.Quaternion()));side.addScaledVector(n,-side.dot(n));if(side.lengthSq()<1e-4)side.set(0,0,1).cross(n);side.normalize();
-  const up=new THREE.Vector3().crossVectors(n,side).normalize(),g=new THREE.Group();
-  g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side,up,n));g.position.copy(at).addScaledVector(n,.004);g.userData.bodyWound=true;scene.add(g);node.attach(g);
+  // 면 방향: 뜯긴 방향이 그 마디의 몸 축(z)과 거의 같으면(앞뒤 마디 사이 단면) 마디 축에 정확히 수직으로 세운다 — 납작한 타원체는 맞은 점이 조금만 비껴도 표면 법선이 몇 도씩 기울어서.
+  // 그 밖(등판 밑면·머리 뒤처럼 옆으로 붙은 자리)은 실제로 맞은 표면의 법선(바깥). 관절 축으로 세우면 등판처럼 납작한 부위에서는 면이 껍질을 뚫고 서 버린다. x = 몸의 좌우.
+  const zAxis=v3(0,0,1).applyQuaternion(node.getWorldQuaternion(new THREE.Quaternion())),along=zAxis.dot(n);
+  const nn=Math.abs(along)>.985?zAxis.multiplyScalar(Math.sign(along)):hit?hit.normal.clone():n.clone();if(nn.dot(n)<0)nn.negate();
+  const side=v3(1,0,0).applyQuaternion(this.root.getWorldQuaternion(new THREE.Quaternion()));side.addScaledVector(nn,-side.dot(nn));if(side.lengthSq()<1e-4)side.set(0,0,1).cross(nn);side.normalize();
+  const up=new THREE.Vector3().crossVectors(nn,side).normalize(),g=new THREE.Group();
+  g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side,up,nn));g.position.copy(at).addScaledVector(nn,.004);g.userData.bodyWound=true;this.attachAtRest(node,g);
   const add=(geo,m,x,y,z,sx,sy,sz)=>{const q=new THREE.Mesh(geo,m);q.position.set(x,y,z);q.scale.set(sx,sy,sz);q.castShadow=false;q.receiveShadow=false;g.add(q);return q};
   // 진물 막 + 찢긴 껍질 테
   add(irregularDiscGeometry(1,.3,19,.008),mat.ooze,0,0,.012,rx*.95,ry*.95,1).renderOrder=5;
@@ -898,31 +935,60 @@ Specimen.prototype.spawnFlakes=function(point,n=7,power=.5){
 };
 Specimen.prototype.detachPart=function(part,worldPoint=null,force=.6,reason='pull'){
   if(!part||!part.node.parent)return false;if(part.parentId===null&&part.node.parent===looseGroup)return false;
+  const wasLoose=part.state.detached;   // 이미 떨어져 나온 조각을 또 뜯는 것 — 몸은 못 느낀다
   removePinsForSubtree(part,{silent:true,stimulate:false,ooze:false});
   if(part.id==='thorax_mid'&&this.partFunction(part)>.035){part.state.integrity=Math.max(.02,part.state.integrity-force*.11);part.state.crack=clamp(part.state.crack+force*.18);this.stimulate(.18+force*.1,part);return false}
-  const oldParent=part.node.parent,childCenter=part.worldPos(v3()),parentCenter=oldParent.getWorldPosition(v3());let axis=childCenter.clone().sub(parentCenter);if(axis.lengthSq()<1e-5)axis.set(0,1,0);axis.normalize();
-  oldParent.updateWorldMatrix(true,false);
-  const joint=part.jointLocal?oldParent.localToWorld(part.jointLocal.clone()):(part.segmentMesh||part.role==='eye')?oldParent.localToWorld(part.basePos.clone()):parentCenter.clone().lerp(childCenter,.6);
-  const eye=part.role==='eye',pit=eye?this.carveEyeSocket(part):null,pt=pit||joint.clone();
+  const oldParent=part.node.parent,parentPart=this.parts.get(part.parentId);
+  // 단면은 붙어 있던 자리(basePos) 기준으로 잰다. 드래그 중에는 마디가 잡은 쪽으로 밀려 있어서(dragGrab) 그 위치로 재면 단면의 각도·자리가 당긴 방향으로 비뚤어진다.
+  part.node.position.copy(part.basePos);oldParent.updateWorldMatrix(true,false);part.node.updateMatrixWorld(true);
+  const childCenter=part.worldPos(v3()),parentCenter=oldParent.getWorldPosition(v3());
+  const Q=part.node.getWorldQuaternion(new THREE.Quaternion()),PQ=oldParent.getWorldQuaternion(new THREE.Quaternion());
+  const eye=part.role==='eye',wing=part.role==='wing',body=!eye&&(part.role==='core'||part.role==='abdomen');
+  const limb=!!part.segmentMesh||part.role==='claw';          // 마디 사슬: 다리·더듬이·수염·턱·꼬리돌기·발톱
+  const chainJoint=limb&&!!parentPart?.segmentMesh;           // 마디와 마디 사이 관절 (몸통에 박힌 첫 마디는 제외)
+  // axis: 몸 안쪽에서 뜯긴 조각 쪽을 향하는 방향(월드). nParent/nChild: 부모 쪽·조각 쪽 단면이 보는 방향.
+  let axis;
+  if(chainJoint)axis=v3(1,0,0).applyQuaternion(PQ);           // 부모 마디가 뻗은 방향 = 부모 끝 단면의 법선
+  else if(limb)axis=v3(1,0,0).applyQuaternion(Q);             // 첫 마디: 마디 자신이 뻗은 방향
+  else if(wing)axis=v3(0,1,0).applyQuaternion(PQ);            // 날개: 등 쪽 (뿌리에 납작하게 붙는다)
+  else{axis=childCenter.clone().sub(parentCenter);if(axis.lengthSq()<1e-5)axis.set(0,1,0).applyQuaternion(PQ);axis.normalize()}
+  const nParent=axis.clone(),nChild=(eye||limb)?v3(-1,0,0).applyQuaternion(Q):wing?v3(0,1,0).applyQuaternion(Q):axis.clone().negate();
+  // 날개 뿌리는 노드 원점이 아니라 날개 판이 실제로 시작되는 점
+  const wingRoot=wing?part.node.localToWorld(v3((part.id.endsWith('_R')?1:-1)*(part.wingKind==='hind'?.25:.27),0,-(part.wingKind==='hind'?2.55:3)*.045)):null;
+  let pt=wing?wingRoot.clone():part.jointLocal?oldParent.localToWorld(part.jointLocal.clone()):childCenter.clone();   // 뜯긴 자리(월드): 부모 쪽 흉터 자리이자 진물·조각이 튀는 기준점
+  if(limb&&!chainJoint&&parentPart?.meshes?.length){
+    // 첫 마디는 몸 표면을 뚫고 나와 있으므로, 마디 방향을 따라 바깥에서 몸 쪽으로 쏴 실제로 빠져나오던 표면점에 그 표면 법선으로 흉터를 둔다
+    const h=this.surfaceHit(parentPart.meshes,childCenter.clone().addScaledVector(axis,1.5),axis.clone().negate(),1.9);
+    if(h&&h.point.distanceTo(childCenter)<.3){pt.copy(h.point);nParent.copy(h.normal)}
+  }
+  const pit=eye?this.carveEyeSocket(part):null;if(pit)pt.copy(pit);
+  const childPt=eye?childCenter.clone().addScaledVector(nChild,.05):wing?wingRoot.clone():childCenter.clone();   // 조각 쪽 흉터 자리: 눈은 안쪽 면, 마디는 뿌리 단면
   const ragged=reason==='pull';const scarSize=eye?.075:clamp((part.small?.06:.095)+force*.035,.055,.16);
-  const body=!eye&&(part.role==='core'||part.role==='abdomen'),parentPart=this.parts.get(part.parentId);let pw=null;
+  let pw=null;
   if(body){
     // 몸마디끼리 뜯기면 양쪽 단면에 진물·지방·내장이 드러난다
     const [rx,ry]=this.sectionRadii(part,parentPart),withGut=part.id!=='pronotum',big=part.role==='abdomen'?1:part.id==='head_core'?.7:.85;
     if(parentPart?.meshes?.[0])pw=this.attachBodyWound(oldParent,parentPart.meshes[0],axis,rx,ry,{gut:withGut,big});
     if(pw)pt.copy(pw.world);
-  }else if(!eye){this.attachScar(oldParent,pt,axis,scarSize,{moisture:ragged?.86:.7,ragged});if(part.socket)part.socket.visible=true}
+  }else if(!eye){this.attachScar(oldParent,pt,nParent,scarSize,{moisture:ragged?.86:.7,ragged});if(part.socket)part.socket.visible=true}
   part.parentId=null;looseGroup.attach(part.node);this.markSubtreeDetached(part);this.refreshGraph();
   if(body){
     const [rx,ry]=this.sectionRadii(part,parentPart),withGut=part.id!=='pronotum',big=part.role==='abdomen'?1:part.id==='head_core'?.7:.85;
-    const cw=this.attachBodyWound(part.node,part.meshes[0],axis.clone().negate(),rx,ry,{gut:withGut,big});
+    let cw=null;
+    if(part.id==='pronotum'){
+      // 등판은 납작한 판이라 가운데 단면이 없다. 붙어 있던 뒤쪽 밑면에 살점을, 뒤 가장자리에 찢긴 막을 매단다 (엎어져 있어도 뒷단이 보인다)
+      const L=(x,y,z)=>part.node.localToWorld(v3(x,y,z));
+      this.attachBodyWound(part.node,part.meshes[0],v3(0,-1,0).applyQuaternion(Q),rx*.8,ry*.75,{gut:false,big:.8,origin:L(0,-3,-.26)});
+      this.attachBodyWound(part.node,part.meshes[0],v3(0,0,-1).applyQuaternion(Q),rx*.78,.1,{gut:false,big:.55,origin:L(0,0,-3)});
+    }else cw=this.attachBodyWound(part.node,part.meshes[0],axis.clone().negate(),rx,ry,{gut:withGut,big});
     if(pw&&cw&&pw.gut&&cw.gut)this.addStrand(pw.node,pw.gut,cw.node,cw.gut,part.role==='abdomen'?1.5:1.1,part.role==='abdomen'?.034:.026);
-  }else this.attachScar(part.node,part.segmentMesh?childCenter:pt,axis.clone().negate(),scarSize*.88,{moisture:ragged?.8:.64,ragged,pale:eye});
+  }else this.attachScar(part.node,childPt,nChild,scarSize*.88,{moisture:ragged?.8:.64,ragged,pale:eye});
   const rec={part,node:part.node,vel:v3(rand(-.3,.3),rand(.3,.8),rand(-.3,.3)).multiplyScalar(force),rot:v3(rand(-5,5),rand(-5,5),rand(-5,5)),floor:boardTopY+.006,dragging:false};this.loose.push(rec);this.fragments++;
   part.state.integrity=Math.max(0,part.state.integrity-force*.22);part.state.severed=true;part.state.strain=0;
   const fluidScale=ragged?1.35:1.12;this.addFluid(pt,(.065+force*.052)*fluidScale,ragged?3:2,false);this.spawnDroplets(pt,Math.max(7,Math.floor((11+force*15)*fluidScale*FX_BUDGET)),.68+force*.38,Math.random()<.25);this.spawnFlakes(pt,Math.max(3,Math.floor((4+force*7)*FX_BUDGET)),.52+force*.23);
-  this.registerWound(oldParent,pt,.9+force*.35,false,34);this.registerWound(part.node,pt,.48+force*.24,Math.random()<.18,22);this.addTrauma(.38+force*.32);
-  this.stimulate(.28+force*.28,part,reason==='burn'?'heat':'pain');SFX.detach(part,clamp(force,0,1));this.totalDamage+=.2+force*.25;return true
+  this.registerWound(oldParent,pt,.9+force*.35,false,34);this.registerWound(part.node,body?pt:childPt,.48+force*.24,Math.random()<.18,22);
+  if(!wasLoose){this.addTrauma(.38+force*.32);this.stimulate(.28+force*.28,part,reason==='burn'?'heat':'pain');this.totalDamage+=.2+force*.25}
+  SFX.detach(part,clamp(force,0,1));return true
 };
 Specimen.prototype.computeSystems=function(){
   const f=id=>{const p=this.parts.get(id);return !p||p.state.detached?0:this.partFunction(p)};const head=f('head_core'),pro=f('pronotum'),mid=f('thorax_mid'),rear=f('thorax_rear');
@@ -1083,14 +1149,49 @@ function partPickPriority(p,activeTool=tool){
   if(role==='eye'||role==='jaw'||role==='palp'||role==='antenna'||role==='claw')return 0;if(role==='leg'||role==='cercus')return 1;if(role==='wing')return 2;if(role==='abdomen')return 3;if(role==='core')return 4;return p.small?1:3;
 }
 function pickPart(x,y){
-  setRay(x,y);const hits=raycaster.intersectObjects(interactiveMeshes,false);if(!hits.length)return null;
-  const nearest=hits[0].distance,band=tool==='pin'?.055:.045,weight=tool==='pin'?.012:.009;let best=null,bestScore=Infinity;
-  for(const h of hits){
-    if(h.distance>nearest+band)break;const p=h.object.userData.part;if(!p||!objectInScene(h.object))continue;
-    const score=h.distance+partPickPriority(p)*weight+(h.object.userData.pickProxy?.003:0)-(p.small?.002:0)-(p.state.detached?.002:0);
-    if(score<bestScore){bestScore=score;best=h}
+  setRay(x,y);const hits=raycaster.intersectObjects(interactiveMeshes,false);let best=null,bestScore=Infinity;
+  if(hits.length){
+    const nearest=hits[0].distance,band=tool==='pin'?.055:.045,weight=tool==='pin'?.012:.009;
+    for(const h of hits){
+      if(h.distance>nearest+band)break;const p=h.object.userData.part;if(!p||!objectInScene(h.object))continue;
+      const score=h.distance+partPickPriority(p)*weight+(h.object.userData.pickProxy?.003:0)-(p.small?.002:0)-(p.state.detached?.002:0);
+      if(score<bestScore){bestScore=score;best=h}
+    }
   }
-  return best?{part:best.object.userData.part,hit:best}:null;
+  const sel=best?{part:best.object.userData.part,hit:best}:null;
+  // 손가락(coarse pointer)은 더듬이·수염·발목 같은 가는 마디를 정확히 못 짚는다.
+  // 가는 부위를 못 맞혔으면 화면에서 손가락 자리와 가장 가까운 가는 마디를 고른다 (겹치면 더 끝쪽 마디).
+  if(!IS_COARSE||tool==='camera'||(sel&&sel.part.small))return sel;
+  return pickThinNear(x,y,sel?8:22)||sel;
+}
+const THIN_TMP={a:new THREE.Vector3(),b:new THREE.Vector3(),s:new THREE.Vector3()};
+function toScreen(v,r,w,h){const q=THIN_TMP.s.copy(v).project(camera);return [r.left+(q.x+1)*.5*w,r.top+(1-q.y)*.5*h,q.z]}
+function pickThinNear(x,y,maxPx){
+  const r=canvas.getBoundingClientRect(),w=Math.max(1,r.width),h=Math.max(1,r.height),cands=[];
+  for(const p of specimen.parts.values()){
+    if(!p.small||!objectInScene(p.node))continue;
+    if(p.segmentMesh&&p.childAnchor){
+      // 가는 마디: 화면에 투영한 마디 선분까지의 거리
+      p.node.getWorldPosition(THIN_TMP.a);p.childAnchor.getWorldPosition(THIN_TMP.b);
+      const [ax,ay,az]=toScreen(THIN_TMP.a,r,w,h),[bx,by,bz]=toScreen(THIN_TMP.b,r,w,h);if(az>1&&bz>1)continue;
+      const vx=bx-ax,vy=by-ay,L2=vx*vx+vy*vy;let t=L2>1e-6?((x-ax)*vx+(y-ay)*vy)/L2:0;t=clamp(t,0,1);
+      const d=Math.hypot(x-(ax+vx*t),y-(ay+vy*t));if(d<=maxPx)cands.push({p,d,t,rank:p.radius});
+    }else{
+      // 겹눈처럼 덩어리인 작은 부위: 중심까지의 거리에서 화면상 반지름을 뺀다
+      const m=p.meshes[0];if(!m||!m.visible)continue;const g=m.geometry;if(!g.boundingSphere)g.computeBoundingSphere();
+      m.getWorldPosition(THIN_TMP.a);const [cx,cy,cz]=toScreen(THIN_TMP.a,r,w,h);if(cz>1)continue;
+      const rw=g.boundingSphere.radius*Math.max(m.scale.x,m.scale.y,m.scale.z);THIN_TMP.b.set(1,0,0).applyQuaternion(camera.quaternion);THIN_TMP.b.multiplyScalar(rw).add(THIN_TMP.a);
+      const [ex,ey]=toScreen(THIN_TMP.b,r,w,h),rpx=Math.hypot(ex-cx,ey-cy);
+      const d=Math.max(0,Math.hypot(x-cx,y-cy)-rpx*.85);if(d<=maxPx)cands.push({p,d,t:-1,rank:1});
+    }
+  }
+  if(!cands.length)return null;
+  cands.sort((u,v)=>u.d-v.d);const d0=cands[0].d;let pick=cands[0];
+  for(const c of cands){if(c.d>d0+3)break;if(c.rank<pick.rank)pick=c}
+  const p=pick.p;let point;
+  if(pick.t>=0){p.node.getWorldPosition(THIN_TMP.a);p.childAnchor.getWorldPosition(THIN_TMP.b);point=THIN_TMP.a.clone().lerp(THIN_TMP.b,pick.t)}
+  else point=p.meshes[0].getWorldPosition(new THREE.Vector3());
+  return {part:p,hit:{point,object:p.segmentMesh||p.meshes[0],face:null,distance:camera.position.distanceTo(point)}};
 }
 const pinHeads=[];
 function pickPin(x,y){setRay(x,y);const hits=raycaster.intersectObjects(pinHeads,false);return hits.find(h=>objectInScene(h.object))?.object.userData.pinRec||null}
@@ -1185,11 +1286,11 @@ function placePinImmediate(hit){
   pinHeads.push(head,shaft,grip);specimen.pins.push(rec);p.pins.push(rec);p.state.pinned=true;p.state.pinDepress=1;
   const leg=specimen.legAnim.find(L=>L.parts.includes(p));if(leg&&!leg.pinRot)leg.pinRot=leg.parts.map(q=>q.node.rotation.clone());
   const loose=specimen.findLooseRecord(p);if(loose){loose.vel.set(0,0,0);loose.rot.set(0,0,0)}
-  SFX.pin();triggerToolAction();specimen.spawnFlakes(wp,Math.min(3,IS_SMALL?2:3),.25);specimen.addFluid(wp,.025,2,false);specimen.registerWound(p.node,wp,.14,false,9);specimen.addTrauma(.09);specimen.stimulate(.2,p);updateStats(true);
+  SFX.pin();triggerToolAction();specimen.spawnFlakes(wp,Math.min(3,IS_SMALL?2:3),.25);specimen.addFluid(wp,.025,2,false);specimen.registerWound(p.node,wp,.14,false,9);if(!p.state.detached){specimen.addTrauma(.09);specimen.stimulate(.2,p)}updateStats(true);
 }
 function removePin(rec,{silent=false,stimulate=true,ooze=true}={}){
   if(!rec)return;const hole=rec.part&&objectInScene(rec.part.node)?partAnchorWorld(rec,v3()):rec.target.clone(),iHead=-1;for(const m of [rec.head,rec.shaft,rec.grip]){const k=pinHeads.indexOf(m);if(k>=0)pinHeads.splice(k,1)}const iPin=specimen.pins.indexOf(rec);if(iPin>=0)specimen.pins.splice(iPin,1);const arr=rec.part?.pins||[],iPart=arr.indexOf(rec);if(iPart>=0)arr.splice(iPart,1);if(rec.part){rec.part.state.pinned=arr.length>0;rec.part.state.surfacePress=Math.max(rec.part.state.surfacePress,.25);const leg=specimen.legAnim.find(L=>L.parts.includes(rec.part));if(leg&&!leg.parts.some(q=>q.pins.length))leg.pinRot=null}disposeObject3D(rec.group);
-  if(ooze&&rec.part&&objectInScene(rec.part.node)){specimen.addFluid(hole,.022,2,false);specimen.registerWound(rec.part.node,hole,.2,false,12);specimen.addTrauma(.035)}if(stimulate&&rec.part){specimen.stimulate(.12,rec.part);specimen.painImpulse=Math.max(specimen.painImpulse,.14)}if(!silent)SFX.unpin();updateStats(true);
+  if(ooze&&rec.part&&objectInScene(rec.part.node)){specimen.addFluid(hole,.022,2,false);specimen.registerWound(rec.part.node,hole,.2,false,12);if(!rec.part.state.detached)specimen.addTrauma(.035)}if(stimulate&&rec.part&&!rec.part.state.detached){specimen.stimulate(.12,rec.part);specimen.painImpulse=Math.max(specimen.painImpulse,.14)}if(!silent)SFX.unpin();updateStats(true);
 }
 function removePinsForSubtree(part,opts={}){if(!part)return;const parts=new Set(specimen.collectSubtree(part));for(const rec of [...specimen.pins])if(parts.has(rec.part))removePin(rec,opts)}
 function removeAllPins(){const had=specimen.pins.length;for(const p of [...specimen.pins])removePin(p,{silent:true});if(had){SFX.unpin();toast('고정 핀을 전부 뺐다')}}
@@ -1209,7 +1310,7 @@ function dragGrab(x,y){
   // 중가슴은 몸 전체의 뿌리라 뜯기지 않는다. 대신 집고 끌면 몸통째 끌려온다(핀이 박혀 있으면 애초에 집히지 않는다).
   if(p.id==='thorax_mid'){const R=specimen.root;if(!grab.rootStart)grab.rootStart=R.position.clone();R.position.x=clamp(grab.rootStart.x+(tgt.x-grab.startWorld.x)*.85,-1.3,1.3);R.position.z=clamp(grab.rootStart.z+(tgt.z-grab.startWorld.z)*.85,-.9,1.4);p.state.strain=.45;SFX.strain(p,.45);specimen.stimulate(Math.min(.06,.012+dragStep*.12),p);specimen.addTrauma(Math.min(.012,.002+dragStep*.03));return}
   const dist=tgt.distanceTo(grab.startWorld),weak=clamp(1-p.state.cutDepth*.48-p.state.crack*.23-p.state.puncture*.18,.18,1),threshold=(.14+p.jointStrength*.3)*weak;
-  p.state.strain=clamp(dist/Math.max(.04,threshold),0,2);SFX.strain(p,p.state.strain);p.state.shockPulse=Math.max(p.state.shockPulse,p.state.strain*.05);p.state.surfacePress=Math.max(p.state.surfacePress,.25+p.state.strain*.18);specimen.addTrauma(Math.min(.012,dragStep*.055+p.state.strain*.0012));specimen.stimulate(Math.min(.012,.003+p.state.strain*.003),p);
+  p.state.strain=clamp(dist/Math.max(.04,threshold),0,2);SFX.strain(p,p.state.strain);p.state.shockPulse=Math.max(p.state.shockPulse,p.state.strain*.05);p.state.surfacePress=Math.max(p.state.surfacePress,.25+p.state.strain*.18);if(!p.state.detached){specimen.addTrauma(Math.min(.012,dragStep*.055+p.state.strain*.0012));specimen.stimulate(Math.min(.012,.003+p.state.strain*.003),p)}
   if(grab.parent){const local=grab.parent.worldToLocal(GRAB_TMP.local.copy(tgt)),delta=GRAB_TMP.delta.copy(local).sub(grab.startLocal),max=.22+p.jointStrength*.11;if(delta.length()>max)delta.setLength(max);p.node.position.copy(grab.startLocal).addScaledVector(delta,.55)}
   if(dist>threshold&&p.parentId){const did=specimen.detachPart(p,tgt,clamp(.35+dist*.9,0,1),'pull');if(did){const rec=specimen.findLooseRecord(p);grab.rec=rec;if(rec){rec.dragging=true;rec.node.position.x=tgt.x;rec.node.position.z=tgt.z;rec.node.position.y=Math.max(boardTopY+.03,tgt.y);resolveLooseFloor(rec)}}}
 }
@@ -1333,7 +1434,8 @@ function resetSpecimen({silent=false,wipe=false}={}){
   partSerial=0;specimen=new Specimen();prepBases(specimen);specimen.computeSystems();settleBaseHeight(specimen);lastStatsKey='';updateStats(true);setTool(firstEnabledTool());cameraHome();syncFlipLabel();
   if(!silent)toast(wipe?'판을 싹 닦고 새 바퀴벌레를 올렸다':'새 바퀴벌레로 교체했다');return specimen;
 }
-function cameraHome(){camera.position.set(0,6.9,7.1);controls.target.set(0,.35,-.1);controls.update()}
+// 세로 화면(폰)에서는 더듬이 끝까지 다 들어오도록 화각을 조금 넓히고 카메라를 뒤로 뺀다. 가로 화면은 원래 그대로.
+function cameraHome(){const a=camera.aspect||1;camera.fov=a<1?46:38;camera.updateProjectionMatrix();const d=clamp(2.9/(Math.tan(camera.fov*Math.PI/360)*a),9.73,17.5);controls.target.set(0,.35,-.1);camera.position.set(0,.35+.673*d,-.1+.74*d);controls.update()}
 function applyOptions(next={}){
   const clean={},allowed=['showHUD','showToolbar','showActions','showIntro','enabledTools','quality','soundVolume','resetOnEnter','onChange','onExit'];for(const key of allowed)if(Object.prototype.hasOwnProperty.call(next,key))clean[key]=next[key];if(clean.enabledTools&&!Array.isArray(clean.enabledTools))delete clean.enabledTools;
   appOptions={...appOptions,...clean};appOptions.enabledTools=[...new Set((appOptions.enabledTools||[]).filter(k=>['tweezer','pin','camera'].includes(k)))];if(!appOptions.enabledTools.length)appOptions.enabledTools=['camera'];
@@ -1414,7 +1516,7 @@ const api={
   get specimen(){return specimen},get options(){return {...appOptions}}
 };
 window.SpecimenLab=api;
-prepBases(specimen);specimen.computeSystems();settleBaseHeight(specimen);applyOptions(DEFAULT_OPTIONS);setTool('tweezer');resize();updateStats(true);rafId=requestAnimationFrame(frame);if(EMBEDDED)parent.postMessage({type:'specimen-lab-ready'},location.origin);
+prepBases(specimen);specimen.computeSystems();settleBaseHeight(specimen);applyOptions(DEFAULT_OPTIONS);setTool('tweezer');resize();cameraHome();updateStats(true);rafId=requestAnimationFrame(frame);if(EMBEDDED)parent.postMessage({type:'specimen-lab-ready'},location.origin);
 </script>
 </body>
 </html>
