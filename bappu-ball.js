@@ -11,6 +11,23 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const lerp=(a,b,t)=>a+(b-a)*t;
 const sstep=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
 const hash=(x)=>{const s=Math.sin(x*127.1+311.7)*43758.5453;return s-Math.floor(s);};
+const dsstep=(a,b,x)=>{const t=(x-a)/(b-a);return t<=0||t>=1?0:6*t*(1-t)/(b-a);};
+
+// ───────── 주무르기 흐름 ─────────
+// 속의 조각·부스러기·알갱이·진물은 손가락이 한 일만큼 '흐름'을 따라 옮겨진다. 흐름은 소용돌이(curl)로 만들어 부피를 보존한다:
+// 어디로 들어간 만큼 다른 데서 나오므로 한쪽에 몰리거나 비지 않는다 (공 뒤쪽이나 한가운데에 뭉쳐 풍선처럼 되지 않는다).
+// 반지름 MIX_RB 구면에서는 표면을 따라서만 흐르므로 조각이 슬라임 밖으로 밀려 나가지도 않는다.
+//  · 누르기(깊어지는 동안): 손가락 밑으로 모여 가라앉고, 둘레 속에서 다시 떠오르는 고리 소용돌이
+//  · 끌기: 겉은 손가락을 따라가고, 손가락 앞쪽은 접혀 들어가고, 뒤쪽은 떠오르는 굴림 소용돌이
+const MIX_RB=1.0;                // 흐름 경계 (이 구면에서 흐름은 표면과 나란하다)
+const MIX_RMAX=0.955;            // 조각이 있을 수 있는 가장 바깥
+const MIX_PRESS=0.35;            // 한 번 꾹 누를 때(k 0→1) 손가락 바로 밑 조각이 가라앉는 정도 (겉 0.9 → 0.7쯤)
+const MIX_PRESS_W=0.9;           // 고리 소용돌이 굵기 (압입 폭 배율)
+const MIX_S0=-0.25, MIX_S1=0.4;  // 고리 소용돌이가 미치는 깊이: 손가락 쪽 반구 + 중심 조금 너머까지
+const MIX_DRAG=0.7;              // 끈 거리 대비 손가락 바로 밑 조각이 따라오는 정도
+const MIX_ROLL_C=0.55, MIX_ROLL_W=0.85;  // 굴림 소용돌이 중심 깊이(반지름 배율), 굵기(압입 폭 배율)
+const MIX_STEP=0.03;             // 적분 한 걸음 상한 (빠르게 문질러도 흐름을 건너뛰지 않게)
+const MIX_RUB=0.12;              // 마모: 문지른 거리 1(라디안)이 꾹 누르기 한 번의 몇 배 일인지
 
 // ───────── 바퀴 모델 부위 정의 (game.html buildRoachBody의 정점 순서 그대로) ─────────
 // 몸통 한 덩어리는 배(414) → 가슴·고관절(610) → 앞가슴판(450) → 머리(406) → 꼬리털(84) → 오른날개(506) → 왼날개(506) 순으로 정점이 쌓여 있다.
@@ -131,9 +148,12 @@ export class BappuBall{
     this._q=[0,1,2,3].map(()=>new T.Quaternion());
     this._m=[0,1,2,3,4,5].map(()=>new T.Matrix4());
     this._e=new T.Euler();
+    this._flows=[];
+    this._mv=[0,1,2,3].map(()=>new T.Vector3());
     this.buildAnchors();
     this.buildSlime(opts.segments||[44,30]);
     this.buildRoaches(opts.materials);
+    this.buildPieceCenters();
     this.buildCrumbs();
     this.goo=new GooLayer(this);
     if(opts.shadow!==false) this.buildShadow();
@@ -202,7 +222,8 @@ export class BappuBall{
 
 
 
-    this.slimeBack=new T.Mesh(geo,this.matBack); this.slimeBack.renderOrder=20; this.slimeBack.frustumCulled=false;
+    // 뒷벽(공 안쪽 먼 면)은 속 내용물보다 먼저 그린다. 진물·알갱이·날개가 뒷벽 뒤에 있는 것처럼 뿌옇게 덮이지 않게
+    this.slimeBack=new T.Mesh(geo,this.matBack); this.slimeBack.renderOrder=1; this.slimeBack.frustumCulled=false;
     this.slime=new T.Mesh(geo,this.matFront); this.slime.renderOrder=21; this.slime.frustumCulled=false;
     this.group.add(this.slimeBack,this.slime);
     // 속 기포 몇 개 (투명 슬라임 느낌)
@@ -246,12 +267,32 @@ export class BappuBall{
     this.shards.count=0; this.shards.frustumCulled=false; this.shards.instanceMatrix.setUsage(T.DynamicDrawUsage); this.shards.renderOrder=1;
     this.shardList=[]; this.group.add(this.shards);
   }
+  // 부위마다 도형의 가운데와 크기. 떨어진 조각은 자기 가운데를 축으로 돌고, 크기만큼 겉에서 안쪽에 머문다
+  // (바퀴 몸 원점을 축으로 돌리면 머리·꼬리·다리 끝 조각이 크게 휘둘려 슬라임 밖으로 튀어나온다)
+  buildPieceCenters(){
+    const T=this.T; this.pieceCen=[]; this.pieceCenM=[]; this.pieceExt=[];
+    for(let p=0;p<NP;p++){
+      const g=this.pieceGeo[p], P=g.attributes.position.array, idx=g.index?g.index.array:null;
+      const nv=P.length/3, seen=new Uint8Array(nv);
+      if(idx){ for(let k=0;k<idx.length;k++) seen[idx[k]]=1; } else seen.fill(1);
+      let n=0,cx=0,cy=0,cz=0;
+      for(let v=0;v<nv;v++){ if(!seen[v])continue; cx+=P[v*3]; cy+=P[v*3+1]; cz+=P[v*3+2]; n++; }
+      if(n){ cx/=n; cy/=n; cz/=n; }
+      let ext=0; for(let v=0;v<nv;v++){ if(!seen[v])continue; ext=Math.max(ext,Math.hypot(P[v*3]-cx,P[v*3+1]-cy,P[v*3+2]-cz)); }
+      this.pieceCen.push(new T.Vector3(cx,cy,cz)); this.pieceCenM.push(new T.Matrix4().makeTranslation(-cx,-cy,-cz)); this.pieceExt.push(ext);
+    }
+  }
   buildCrumbs(){
     const T=this.T; this.crumbCap=this.count*5; this.crumbN=0;
     this.crumbRest=new Float32Array(this.crumbCap*3);
     const attr=new T.Float32BufferAttribute(new Array(this.crumbCap*3).fill(0),3); this.crumbPos=attr.array;
     const g=new T.BufferGeometry(); g.setAttribute('position',attr); g.setDrawRange(0,0);
-    this.crumbs=new T.Points(g,new T.PointsMaterial({color:0x3a1a0a,size:this.crumbSize,sizeAttenuation:true,transparent:true,opacity:0.85,depthWrite:false}));
+    // 알갱이는 둥근 점 (그냥 점은 네모로 그려진다)
+    const c=document.createElement('canvas'); c.width=c.height=32; const x=c.getContext('2d');
+    const gr=x.createRadialGradient(16,16,0,16,16,16); gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(0.55,'rgba(255,255,255,0.9)'); gr.addColorStop(1,'rgba(255,255,255,0)');
+    x.fillStyle=gr; x.fillRect(0,0,32,32);
+    this.crumbTex=new T.CanvasTexture(c);
+    this.crumbs=new T.Points(g,new T.PointsMaterial({color:0x3a1a0a,size:this.crumbSize*1.25,sizeAttenuation:true,map:this.crumbTex,transparent:true,opacity:0.9,depthWrite:false}));
     this.crumbs.frustumCulled=false; this.crumbs.renderOrder=3; this.group.add(this.crumbs);
   }
   buildShadow(){
@@ -452,13 +493,16 @@ export class BappuBall{
     const m=this._m[0]; this.pieceMatrix(r,slot,m);
     const p=new T.Vector3(), q=new T.Quaternion(), s=new T.Vector3(); m.decompose(p,q,s);
     if(s.lengthSq()<1e-9){ r.state[slot]=2; return; }
+    const mi=this.instanceSlot(r,slot)[0];
+    p.copy(this.pieceCen[mi]).applyMatrix4(m);                       // 조각 자기 가운데 (여기를 축으로 돈다)
+    const rmax=clamp(MIX_RMAX-0.6*this.pieceExt[mi]*Math.max(s.x,s.y,s.z),0.7,MIX_RMAX);   // 큰 조각일수록 겉에서 조금 더 안쪽
     const nW=this._tmp[18].copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ);
     const t=this._tmp[19].set(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5); t.addScaledVector(nW,-nW.dot(t)); if(t.lengthSq()<1e-6)t.set(1,0,0); t.normalize();
     // 떨어진 자리에 반쯤 박힌 채 겉에 남는다. 속으로 섞여 들어가는 건 손가락으로 주무를 때만 (knead)
-    const rest=new T.Vector3().copy(nW).multiplyScalar(0.9+Math.random()*0.06).addScaledVector(t,Math.random()*0.12); rest.setLength(Math.min(0.96,rest.length()));
+    const rest=new T.Vector3().copy(nW).multiplyScalar(0.9+Math.random()*0.06).addScaledVector(t,Math.random()*0.12); rest.setLength(Math.min(rmax,rest.length()));
     const q1=new T.Quaternion().copy(q).multiply(new T.Quaternion().setFromEuler(new T.Euler((Math.random()-0.5)*1.2,(Math.random()-0.5)*1.2,(Math.random()-0.5)*1.2)));
     r.state[slot]=1;
-    r.frag[slot]={p,q,s,rest,q0:q.clone(),q1,t:0,dur:0.35+Math.random()*0.4,axis:new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize(),last:p.clone()};
+    r.frag[slot]={p,q,s,rest,rmax,q0:q.clone(),q1,t:0,dur:0.35+Math.random()*0.4,axis:new T.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize(),last:p.clone()};
     this.fragDirty=true;
   }
   spawnCrumbs(r,n){
@@ -481,8 +525,8 @@ export class BappuBall{
 
   // ── 상태 저장/복원 (화면을 닫았다 열어도 이어지게) ──
   getState(){
-    return {fragmentWearVersion:3,goo:this.goo.getState(),murk:this.murk||0,crushCount:this.crushCount||0,roaches:this.roaches.map(r=>r.used?{anchor:r.anchor,spin:r.spin,legs:Array.from(r.legs),antPhase:r.antPhase,stage:r.stage,flat:r.flat,state:Array.from(r.state),dmg:Array.from(r.dmg),
-      frag:r.frag.map(f=>f?{p:f.p.toArray(),q:f.q.toArray(),s:f.s.toArray(),rest:f.rest.toArray(),q1:f.q1.toArray(),t:f.t,dur:f.dur}:null)}:null),
+    return {goo:this.goo.getState(),murk:this.murk||0,crushCount:this.crushCount||0,roaches:this.roaches.map(r=>r.used?{anchor:r.anchor,spin:r.spin,legs:Array.from(r.legs),antPhase:r.antPhase,stage:r.stage,flat:r.flat,state:Array.from(r.state),dmg:Array.from(r.dmg),
+      frag:r.frag.map(f=>f?{p:f.p.toArray(),q:f.q.toArray(),s:f.s.toArray(),rest:f.rest.toArray(),rmax:f.rmax,q1:f.q1.toArray(),t:f.t,dur:f.dur}:null)}:null),
       crumbs:Array.from(this.crumbRest.subarray(0,this.crumbN*3)),shards:this.shardList.map(s=>({p:s.p.toArray(),rest:s.rest.toArray(),q:s.q.toArray(),s:s.s,t:s.t}))};
   }
   setState(st){
@@ -491,33 +535,9 @@ export class BappuBall{
     this.murk=clamp(st.murk||0,0,1); this._murkShown=this.murk;
     this.goo.setState(st.goo);
     st.roaches.forEach((d,i)=>{ if(!d)return; const r=this.attach(i,d.anchor,d.spin,{legs:Float32Array.from(d.legs),antPhase:d.antPhase}); r.stage=d.stage; r.flat=d.flat; r.alive=d.stage<2; r.state.set(d.state); r.dmg.set(d.dmg);
-      d.frag.forEach((f,slot)=>{ if(!f)return; r.frag[slot]={p:new T.Vector3().fromArray(f.p),q:new T.Quaternion().fromArray(f.q),s:new T.Vector3().fromArray(f.s),rest:new T.Vector3().fromArray(f.rest),q0:new T.Quaternion().fromArray(f.q),q1:new T.Quaternion().fromArray(f.q1),t:f.t,dur:f.dur,axis:new T.Vector3(1,0,0),last:new T.Vector3().fromArray(f.p)}; }); });
+      d.frag.forEach((f,slot)=>{ if(!f)return; r.frag[slot]={p:new T.Vector3().fromArray(f.p),q:new T.Quaternion().fromArray(f.q),s:new T.Vector3().fromArray(f.s),rest:new T.Vector3().fromArray(f.rest),rmax:f.rmax||MIX_RMAX,q0:new T.Quaternion().fromArray(f.q),q1:new T.Quaternion().fromArray(f.q1),t:f.t,dur:f.dur,axis:new T.Vector3(1,0,0),last:new T.Vector3().fromArray(f.p)}; }); });
     this.crumbN=Math.min(this.crumbCap,Math.floor(st.crumbs.length/3)); this.crumbRest.set(st.crumbs.slice(0,this.crumbN*3)); this.crumbs.geometry.setDrawRange(0,this.crumbN);
     this.shardList=st.shards.map(s=>({p:new T.Vector3().fromArray(s.p),rest:new T.Vector3().fromArray(s.rest),q:new T.Quaternion().fromArray(s.q),s:s.s,t:s.t})); this.shards.count=this.shardList.length;
-    // 이전 순환 패치에서 거의 모든 조각이 삭제된 저장 상태만 한 번 복구한다.
-    // 새 마모 모델에서 의도적으로 끝까지 갈아버린 공은 다시 생기지 않는다.
-    if(st.fragmentWearVersion==null){
-      let loose=0,erased=0;
-      for(const r of this.roaches){
-        if(!r.used||r.stage<4) continue;
-        for(let slot=0;slot<SLOTS;slot++){
-          if(r.state[slot]===1||r.state[slot]===2) loose++;
-          if(r.state[slot]===2&&!r.frag[slot]) erased++;
-        }
-      }
-      if(loose>=SLOTS&&erased>=loose*0.95){
-        for(const r of this.roaches){
-          if(!r.used||r.stage<4) continue;
-          this.rootMatrix(r,r.anchorMat);
-          for(let slot=0;slot<SLOTS;slot++){
-            if(r.state[slot]!==2||r.frag[slot]) continue;
-            r.state[slot]=0; this.detach(r,slot);
-            const f=r.frag[slot]; if(!f) continue;
-            this.interiorPoint(f.rest,f.p); f.q.copy(f.q1); f.t=f.dur;
-          }
-        }
-      }
-    }
     let b=0; for(const r of this.roaches) if(r.used&&r.stage>=4) b++; this.brokenCount=b;
     this.dirty=true; this.fragDirty=true;
   }
@@ -610,114 +630,109 @@ export class BappuBall{
 
 
   knead(dt){
-    const flows=[];
+    const T=this.T, flows=[];
     for(const d of this.dents){
       if(!d._mixDir||d.t<d._mixTime){
-        d._mixK=0;
-        d._mixDir=d.dir.clone();
-        d._mixShear=d.shear.clone();
-        d._mixMove=new this.T.Vector3();
-        d._mixDrag=d.drag||0;
+        d._mixK=0; d._mixDir=d.dir.clone(); d._mixDrag=d.drag||0;
+        d._mixMove=new T.Vector3(); d._mixM=new T.Vector3(); d._mixB=new T.Vector3(); d._mixC=new T.Vector3();
       }
       const k=clamp(d.k,0,1), dk=k-d._mixK;
-      // 손가락이 실제로 움직인 프레임만 섞는다. 멈춘 채 shear가 풀리는 건 이동으로 안 센다.
       const dragStep=(d.drag||0)-d._mixDrag;
-      d._mixMove.set(0,0,0);
-      if(dragStep>1e-7)
-        d._mixMove.copy(d.dir).sub(d._mixDir).multiplyScalar(0.42)
-          .addScaledVector(d.shear,0.7)
-          .addScaledVector(d._mixShear,-0.7);
-      // 실제로 누르거나 끈 양만 재료를 순환시킨다. 정지·스프링 복귀는 섞는 작업이 아니다.
-      d._mixDK=d.on?Math.max(0,dk):0;
       d._mixPower=Math.max(k,d._mixK);
-      d._mixK=k;
-      d._mixDir.copy(d.dir);
-      d._mixShear.copy(d.shear);
-      d._mixDrag=d.drag||0;
-      d._mixTime=d.t;
-      if(d.on&&(d._mixDK>1e-6||d._mixMove.lengthSq()>1e-10))
-        flows.push(d);
+      // 깊어지는 동안만 누르기 흐름. 손을 떼며 돌아오는 건 되돌리지 않는다 (눌린 모양은 surfacePoint가 보여 준다)
+      d._mixDK=d.on?Math.max(0,dk):0;
+      // 손가락이 실제로 움직인 프레임만 끌기 흐름 (멈춘 채 늘어난 모양이 풀리는 건 섞는 게 아니다)
+      d._mixMove.copy(d.dir).sub(d._mixDir); d._mixMove.addScaledVector(d.dir,-d._mixMove.dot(d.dir));
+      const ml=d._mixMove.length();
+      d._mixDragAmt=0;
+      if(d.on&&dragStep>1e-7&&ml>1e-7){
+        d._mixDragAmt=ml*d._mixPower;            // 압입 자리가 실제로 옮겨 간 각도 × 누른 세기
+        d._mixM.copy(d._mixMove).multiplyScalar(1/ml);
+        d._mixB.crossVectors(d.dir,d._mixM).normalize();
+        d._mixMove.multiplyScalar(0.42);        // bappu-goo: 진물이 끄는 방향으로 돌아눕는 양
+      }else d._mixMove.set(0,0,0);
+      d._mixC.copy(d.dir).multiplyScalar(MIX_ROLL_C);
+      d._mixK=k; d._mixDir.copy(d.dir); d._mixDrag=d.drag||0; d._mixTime=d.t;
+      if(d._mixDK>1e-6||d._mixDragAmt>0) flows.push(d);
     }
+    this._flows=flows;
     if(!flows.length) return;
 
-    const n=this._tmp[2], motion=this._tmp[4];
-    const mid=this._tmp[6], v0=this._tmp[7], v1=this._tmp[8];
-    const boundary=1.01, boundary2=boundary*boundary;
-    // 손가락 방향의 안쪽 흐름과 옆/반대편의 되돌아오는 흐름을 한 쌍으로 만든다.
-    // curl(F*(dir × p)) 형태라 중심으로 빨려 들어가는 수축 항이 없고,
-    // 구의 경계에서는 접선 방향으로 흐른다. 중심에서도 끊기지 않는다.
-    const circulation=(p,d,out)=>{
-      const rr=p.lengthSq(), s=p.dot(d.dir), width=Math.max(0.15,d.w), w2=width*width;
-      const rho2=Math.max(0,rr-s*s), H=1-rr/boundary2, G=Math.exp(-rho2/w2);
-      const F=-H*G, FR=G*(1/boundary2+H/w2), Fs=2*s*F/w2;
-      return out.copy(d.dir).multiplyScalar(2*F+2*FR*rr+Fs*s)
-        .addScaledVector(p,-(2*FR*s+Fs));
-    };
-    const transport=(rest,strength)=>{
-      const x=rest.x,y=rest.y,z=rest.z;
+    const RB2=MIX_RB*MIX_RB;
+    // 모든 손가락의 흐름을 더한 속도. 이번 프레임 동안(가상 시간 0→1) 적분하면 옮겨질 거리가 된다
+    const vel=(p,out)=>{
+      out.set(0,0,0);
+      const rr=p.lengthSq(), H=1-rr/RB2;
       for(const d of flows){
-        const drag=Math.sqrt(d._mixMove.lengthSq())*d._mixPower;
-        const amount=strength*(0.12*d._mixDK+0.10*drag);
-        const steps=Math.max(1,Math.ceil(amount/0.02)), step=amount/steps;
-        // 중간점 적분: 긴 프레임/빠른 드래그도 흐름을 건너뛰지 않는다.
-        for(let i=0;i<steps;i++){
-          circulation(rest,d,v0);
-          mid.copy(rest).addScaledVector(v0,step*0.5);
-          circulation(mid,d,v1);
-          rest.addScaledVector(v1,step);
-          if(rest.lengthSq()>boundary2) rest.setLength(boundary);
+        const D=d.dir, s=p.dot(D);
+        if(d._mixDK>0&&s>MIX_S0){
+          // 고리 소용돌이: 벡터 퍼텐셜 F·(D×p), F=-G(축에서 거리)·S(깊이)·H(경계). v=∇F×(D×p)+2F·D
+          const w=Math.max(0.15,d.w)*MIX_PRESS_W, w2=w*w, rho2=Math.max(0,rr-s*s);
+          if(rho2<9*w2){
+            const G=Math.exp(-rho2/w2), S=sstep(MIX_S0,MIX_S1,s), Sp=dsstep(MIX_S0,MIX_S1,s);
+            const F=-G*S*H, al=-2*F/w2+2*G*S/RB2, be=2*s*F/w2-G*Sp*H, a=MIX_PRESS*d._mixDK;
+            out.addScaledVector(D,a*(al*rr+be*s+2*F)).addScaledVector(p,-a*(al*s+be));
+          }
         }
-        const r=rest.length();
-        if(r<1e-6) continue;
-        n.copy(rest).multiplyScalar(1/r);
-        const c=clamp(n.dot(d.dir),-1,1);
-        const a=Math.acos(c), w=Math.max(0.15,d.w);
-        const local=Math.exp(-a*a/(2.2*w*w));
-
-        // 깊이는 위의 순환으로만 바꾼다. 눌린 모양은 surfacePoint의 임시 변형으로 그린다.
-        if(local>=0.005){
-          // 끌기는 조각을 접선 방향으로 섞는다.
-          motion.copy(d._mixMove)
-            .addScaledVector(n,-d._mixMove.dot(n));
-          rest.addScaledVector(motion,
-            strength*local*d._mixPower);
+        if(d._mixDragAmt>0){
+          // 굴림 소용돌이: 흐름함수 Ψ=E(손가락 밑 깊이 c 둘레)·H, 축 b=D×(끄는 방향), v=∇Ψ×b
+          const sg=Math.max(0.15,d.w)*MIX_ROLL_W, sg2=sg*sg, c=d._mixC;
+          const qx=p.x-c.x, qy=p.y-c.y, qz=p.z-c.z, q2=qx*qx+qy*qy+qz*qz;
+          if(q2<9*sg2){
+            const E=Math.exp(-q2/sg2), a=MIX_DRAG*d._mixDragAmt, k1=-2*E*H/sg2, k2=-2*E/RB2, b=d._mixB;
+            const gx=k1*qx+k2*p.x, gy=k1*qy+k2*p.y, gz=k1*qz+k2*p.z;
+            out.x+=a*(gy*b.z-gz*b.y); out.y+=a*(gz*b.x-gx*b.z); out.z+=a*(gx*b.y-gy*b.x);
+          }
         }
-
-        // 접선 이동은 깊이를 바꾸지 않는다 (더하기만 하면 매번 조금씩 겉으로 밀려 나간다)
-        const rr=rest.length();
-        if(rr>1e-6)
-          rest.multiplyScalar(Math.min(r,boundary)/rr);
       }
-      return Math.abs(rest.x-x)+Math.abs(rest.y-y)
-        +Math.abs(rest.z-z)>1e-8;
+      return out;
+    };
+    let amt=0; for(const d of flows) amt+=MIX_PRESS*d._mixDK*1.7+MIX_DRAG*d._mixDragAmt*1.9;   // 이번 프레임 최대 이동 거리 어림
+    const steps=Math.min(10,Math.max(1,Math.ceil(amt/MIX_STEP))), h=1/steps;
+    const v1=this._mv[0], v2=this._mv[1], mid=this._mv[2];
+    // 중간점 적분. strength: 조각 종류마다 흐름을 타는 정도, rmax: 그 조각이 있을 수 있는 가장 바깥
+    const transport=(rest,strength,rmax=MIX_RMAX)=>{
+      const x=rest.x,y=rest.y,z=rest.z, hs=h*strength;
+      for(let i=0;i<steps;i++){
+        vel(rest,v1); mid.copy(rest).addScaledVector(v1,0.5*hs);
+        vel(mid,v2); rest.addScaledVector(v2,hs);
+      }
+      const r2=rest.lengthSq(); if(r2>rmax*rmax) rest.multiplyScalar(rmax/Math.sqrt(r2));
+      return Math.abs(rest.x-x)+Math.abs(rest.y-y)+Math.abs(rest.z-z)>1e-8;
     };
 
     let moved=false;
     for(const r of this.roaches){
       if(!r.used) continue;
       for(const f of r.frag)
-        if(f&&transport(f.rest,1)) moved=true;
+        if(f&&transport(f.rest,1,f.rmax)) moved=true;
     }
     for(const sh of this.shardList)
       if(transport(sh.rest,1.1)) moved=true;
     if(this.goo.transport(flows,transport)) moved=true;
 
-    const p=this._tmp[5];
+    const p=this._mv[3];
     for(let i=0;i<this.crumbN;i++){
       const j=i*3;
-      p.set(this.crumbRest[j],this.crumbRest[j+1],
-        this.crumbRest[j+2]);
+      p.set(this.crumbRest[j],this.crumbRest[j+1],this.crumbRest[j+2]);
       if(transport(p,1.15)){
-        this.crumbRest[j]=p.x;
-        this.crumbRest[j+1]=p.y;
-        this.crumbRest[j+2]=p.z;
+        this.crumbRest[j]=p.x; this.crumbRest[j+1]=p.y; this.crumbRest[j+2]=p.z;
         moved=true;
       }
     }
-    if(moved){
-      this.dirty=true;
-      this.fragDirty=true;
+    if(moved){ this.dirty=true; this.fragDirty=true; }
+  }
+  /** 이번 프레임 손가락이 p(정지 좌표) 자리에서 한 일 — 눌리고 문질린 만큼. 겉 가까이에서만 센다 (속은 슬라임이 감싸서 안 갈린다) */
+  mixWork(p){
+    const flows=this._flows; if(!flows.length) return 0;
+    const r=p.length(); if(r<0.55) return 0;
+    const surf=sstep(0.55,0.88,r); let w=0;
+    for(const d of flows){
+      const c=p.dot(d.dir)/r; if(c<0.3) continue;
+      const a=Math.acos(Math.min(1,c)), ww=Math.max(0.15,d.w), a2=a*a/(ww*ww);
+      w+=d._mixDK*Math.exp(-a2/0.9)+MIX_RUB*d._mixDragAmt*Math.exp(-a2/1.4);
     }
+    return w*surf;
   }
 
   fragmentContact(dirW){
@@ -803,7 +818,7 @@ export class BappuBall{
         const sp=vel.length()*k;
         if(sink<1) f.q.slerpQuaternions(f.q0,f.q1,sink*sink*(3-2*sink));
         else if(sp>1e-4){ dq.setFromAxisAngle(f.axis,Math.min(0.3,sp*9)); f.q.premultiply(dq); }
-        if(sp>2e-5||sink<1||this.fragDirty){ m.compose(f.p,f.q,f.s); const [mi,ii]=this.instanceSlot(r,slot); this.meshes[mi].setMatrixAt(ii,m); touched[mi]=1; if(sp>2e-5||sink<1)moving=true; }
+        if(sp>2e-5||sink<1||this.fragDirty){ const [mi,ii]=this.instanceSlot(r,slot); m.compose(f.p,f.q,f.s).multiply(this.pieceCenM[mi]); this.meshes[mi].setMatrixAt(ii,m); touched[mi]=1; if(sp>2e-5||sink<1)moving=true; }
       }
     }
     for(let mi=0;mi<NP;mi++) if(touched[mi]) this.meshes[mi].instanceMatrix.needsUpdate=true;
@@ -815,7 +830,7 @@ export class BappuBall{
     this.fragDirty=false; return moving;
   }
 
-  dispose(){ this.goo.dispose(); for(const im of this.meshes){ im.geometry.dispose(); } this.slimeGeo.dispose(); this.envMap.dispose(); this.matFront.dispose(); this.matBack.dispose(); this.matWing.dispose(); if(this.shadow){ this.shadow.material.map.dispose(); this.shadow.material.dispose(); } }
+  dispose(){ this.goo.dispose(); for(const im of this.meshes){ im.geometry.dispose(); } this.slimeGeo.dispose(); this.envMap.dispose(); this.crumbTex.dispose(); this.crumbs.geometry.dispose(); this.crumbs.material.dispose(); this.matFront.dispose(); this.matBack.dispose(); this.matWing.dispose(); if(this.shadow){ this.shadow.material.map.dispose(); this.shadow.material.dispose(); } }
 }
 
 function setSlimeMurk(mat,level){
