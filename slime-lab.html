@@ -12,12 +12,21 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#e9e0d0;tou
 #gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
 #err{position:fixed;z-index:5;inset:auto 16px calc(18px + env(safe-area-inset-bottom));display:none;padding:12px 15px;border-radius:14px;background:rgba(83,25,18,.94);color:#f8f0dc;font:700 13px/1.5 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center}
 #err.show{display:block}
+
+#viewHome{position:fixed;z-index:4;right:calc(12px + env(safe-area-inset-right));top:calc(12px + env(safe-area-inset-top));height:44px;padding:0 15px;border:0;border-radius:999px;background:rgba(248,240,220,.94);color:#302017;font:900 13px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 2px 0 rgba(114,76,43,.7),0 7px 20px rgba(0,0,0,.3);opacity:0;visibility:hidden;transition:opacity .2s,visibility 0s linear .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#viewHome.show{opacity:1;visibility:visible;transition:opacity .2s}
+#viewHome:active{transform:translateY(2px)}
+#viewHint{position:fixed;z-index:4;left:50%;bottom:calc(72px + env(safe-area-inset-bottom));transform:translateX(-50%);width:max-content;max-width:min(560px,80vw);padding:9px 14px;border-radius:999px;background:rgba(25,17,13,.8);color:#f8f0dc;font:800 12px/1.35 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center;word-break:keep-all;opacity:0;transition:opacity .25s;pointer-events:none}
+#viewHint.show{opacity:1}
+
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 </head>
 <body>
 <canvas id="gl"></canvas>
 <div id="err" role="alert"></div>
+<button id="viewHome" type="button">시점 원위치</button>
+<div id="viewHint"></div>
 <script type="module">
 import * as THREE from 'three';
 import {BappuBall,FLOOR,ROACH_COUNT} from './bappu-ball.js';
@@ -43,7 +52,15 @@ class SlimeSfx{
       const c=this.ctx=new C();
       this.master=c.createGain(); this.master.gain.value=0.9;
       const comp=c.createDynamicsCompressor(); comp.threshold.value=-15; comp.knee.value=6; comp.ratio.value=6; comp.attack.value=0.002; comp.release.value=0.14;
-      this.master.connect(comp); comp.connect(c.destination);
+            // 길이 둘이다: 축축한 소리·문지르는 소리(master → 압축기 → duck)와 콰삭 소리(crunchBus). 콰삭은 압축기를 거치지 않아서
+      // 문지르는 소리가 압축기를 눌러 놓고 있어도 같이 눌리지 않는다. 둘은 마지막 리미터 하나에서만 만나 찢어지지 않게 한다.
+      this.duck=c.createGain(); this.crunchBus=c.createGain();
+      // 콰삭 전용 압축기 + 끌어올림: 1라운드 죽는 소리처럼 짧은 파열음을 단단하게 모아 크게 들리게 한다
+      const cComp=c.createDynamicsCompressor(); cComp.threshold.value=-20; cComp.knee.value=4; cComp.ratio.value=3.5; cComp.attack.value=0.002; cComp.release.value=0.1;
+      const cLift=c.createGain(); cLift.gain.value=2.5;   // 콰삭 전체 크기 (클수록 크다)
+      const lim=c.createDynamicsCompressor(); lim.threshold.value=-3; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.001; lim.release.value=0.09;
+      this.master.connect(comp); comp.connect(this.duck); this.duck.connect(lim);
+      this.crunchBus.connect(cComp); cComp.connect(cLift); cLift.connect(lim); lim.connect(c.destination);
       const n=c.sampleRate*2, buf=c.createBuffer(1,n,c.sampleRate), d=buf.getChannelData(0);
       for(let i=0;i<n;i++)d[i]=Math.random()*2-1;
       this.noiseBuf=buf;
@@ -64,53 +81,73 @@ class SlimeSfx{
   suspend(){ if(this.ctx&&this.ctx.state==='running')this.ctx.suspend().catch(()=>{}); }
   resume(){ if(this.ctx&&this.ctx.state==='suspended')this.ctx.resume().catch(()=>{}); }
   env(g,t,att,dur,peak){ g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(Math.max(peak,0.0002),t+att); g.gain.exponentialRampToValueAtTime(0.0001,t+att+dur); }
-  burst({t=0,dur=0.03,gain=0.2,type='bandpass',freq=2000,q=1,freqEnd=null,att=0.001,pan=0,rate=1}={}){
+
+  burst({t=0,dur=0.03,gain=0.2,type='bandpass',freq=2000,q=1,freqEnd=null,att=0.001,pan=0,rate=1,out=null}={}){
     const c=this.ctx; if(!c)return; const t0=c.currentTime+t;
     const s=c.createBufferSource(); s.buffer=this.noiseBuf; s.loop=true; s.playbackRate.value=rate; s.start(t0,Math.random()*1.6);
     const f=c.createBiquadFilter(); f.type=type; f.frequency.setValueAtTime(freq,t0); f.Q.value=q; if(freqEnd)f.frequency.exponentialRampToValueAtTime(Math.max(30,freqEnd),t0+att+dur);
     const g=c.createGain(); this.env(g,t0,att,dur,gain);
     const p=c.createStereoPanner(); p.pan.value=clamp(pan,-1,1);
-    s.connect(f); f.connect(g); g.connect(p); p.connect(this.master); s.stop(t0+att+dur+0.05);
+    s.connect(f); f.connect(g); g.connect(p); p.connect(out||this.master); s.stop(t0+att+dur+0.05);
   }
-  ping({t=0,dur=0.03,gain=0.1,freq=3000,freqEnd=null,type='sine',att=0.001,pan=0}={}){
+  ping({t=0,dur=0.03,gain=0.1,freq=3000,freqEnd=null,type='sine',att=0.001,pan=0,out=null}={}){
     const c=this.ctx; if(!c)return; const t0=c.currentTime+t;
     const o=c.createOscillator(); o.type=type; o.frequency.setValueAtTime(freq,t0); if(freqEnd)o.frequency.exponentialRampToValueAtTime(Math.max(20,freqEnd),t0+att+dur);
     const g=c.createGain(); this.env(g,t0,att,dur,gain);
     const p=c.createStereoPanner(); p.pan.value=clamp(pan,-1,1);
-    o.connect(g); g.connect(p); p.connect(this.master); o.start(t0); o.stop(t0+att+dur+0.05);
+    o.connect(g); g.connect(p); p.connect(out||this.master); o.start(t0); o.stop(t0+att+dur+0.05);
   }
   // 잔파열음 알갱이들: span 동안 count개, 앞쪽에 몰리고 뒤로 갈수록 성기고 작아진다
-  grains(t0,span,count,gain,lo,hi,q=1.6){
-    for(let i=0;i<count;i++){ const k=Math.pow(Math.random(),0.6); this.burst({t:t0+k*span,dur:rand(0.003,0.011),gain:gain*rand(0.4,1.1)*(1-k*0.55),freq:rand(lo,hi),q:rand(q*0.6,q*1.6),pan:rand(-0.6,0.6)}); }
+  grains(t0,span,count,gain,lo,hi,q=1.6,out=null){
+    for(let i=0;i<count;i++){ const k=Math.pow(Math.random(),0.6); this.burst({t:t0+k*span,dur:rand(0.003,0.011),gain:gain*rand(0.4,1.1)*(1-k*0.55),freq:rand(lo,hi),q:rand(q*0.6,q*1.6),pan:rand(-0.6,0.6),out}); }
   }
-  /** 세게 눌러 부수기. kind 0 빠드득 / 1 와드득 / 2 까드득. parts: {wings,shells,legs} 이번에 부서진 것 수 */
+  /** 세게 눌러 부수기. 바탕은 1라운드에서 바퀴가 맞아 죽는 소리(game.html AudioFX.kill('hand'))와 같은 짜임이고,
+   *  손가락 밑에서 같이 으스러진 마리 수만큼 조금씩 늦게 겹쳐 와드득 길어진다. kind 0 빠드득 / 1 와드득 / 2 까드득 은 그 위에 얹는 결.
+   *  parts: {wings,shells,legs,near,changed} — 이번에 떨어진 날개·껍질·다리 수, 손가락 가까이서 부서진 바퀴 수, 단계가 바뀐 바퀴 수
+   *  콰삭은 압축기를 안 거치는 crunchBus로 내보내고, 그동안 축축한 소리·문지르는 소리를 잠깐 눌러 둔다 — 묻히지 않게. */
   crunch(kind,power,parts={}){
-    this.ensure(); if(!this.ctx)return; const p=clamp(power,0.5,1.3);
+    this.ensure(); if(!this.ctx)return;
+    const c=this.ctx, out=this.crunchBus, now=c.currentTime, p=clamp(power,0.5,1.3);
     const wings=clamp(parts.wings||0,0,8), shells=clamp(parts.shells||0,0,6), legs=clamp(parts.legs||0,0,12);
-    if(kind===0){ // 빠드득: 날카롭게 터지고 빠르게 사그라든다
-      this.burst({dur:0.009,gain:0.5*p,freq:2900,q:1.1,freqEnd:1100}); this.ping({dur:0.022,gain:0.16*p,freq:3300,freqEnd:800,type:'triangle'});
-      for(const [i,d] of [0.035,0.082,0.138].entries()) this.burst({t:d,dur:rand(0.012,0.02),gain:(0.36-i*0.07)*p,freq:rand(1300,2000),q:1.3,freqEnd:rand(400,700),pan:rand(-0.3,0.3)});
-      this.burst({t:0.01,dur:0.09,gain:0.32*p,type:'lowpass',freq:520,freqEnd:140,att:0.004}); this.ping({t:0.012,dur:0.07,gain:0.22*p,freq:112,freqEnd:46,type:'triangle'});
-      this.grains(0.05,0.3,22+Math.round(legs*1.5),0.17*p,900,5500);
-    }else if(kind===1){ // 와드득: 덜 날카롭고 넓게 으깨지며 길다
-      this.burst({dur:0.03,gain:0.3*p,type:'lowpass',freq:1100,freqEnd:400,att:0.004}); this.burst({t:0.02,dur:0.07,gain:0.3*p,freq:rand(700,1000),q:0.9,freqEnd:300,att:0.008,rate:0.8});
-      for(const [i,d] of [0.03,0.085,0.14,0.2].entries()) this.burst({t:d,dur:rand(0.015,0.028),gain:(0.3-i*0.045)*p,freq:rand(900,1700),q:1.1,freqEnd:rand(300,600),pan:rand(-0.35,0.35)});
-      this.burst({t:0.015,dur:0.12,gain:0.42*p,type:'lowpass',freq:460,freqEnd:120,att:0.006}); this.ping({t:0.02,dur:0.09,gain:0.26*p,freq:96,freqEnd:40,type:'triangle'});
-      this.grains(0.06,0.42,30+Math.round(legs*1.5),0.15*p,700,4600);
-    }else{ // 까드득: 딱딱한 것이 걸리며 톡톡 깨진다
-      this.ping({dur:0.012,gain:0.18*p,freq:4300,freqEnd:1800,type:'square'}); this.ping({t:0.006,dur:0.012,gain:0.14*p,freq:5200,freqEnd:2200,type:'triangle'});
-      this.burst({dur:0.011,gain:0.42*p,freq:3600,q:1.4,freqEnd:1500});
-      for(const [i,d] of [0.03,0.072,0.118,0.165].entries()) this.burst({t:d,dur:rand(0.008,0.016),gain:(0.3-i*0.05)*p,freq:rand(2000,3100),q:1.6,freqEnd:rand(600,1100),pan:rand(-0.4,0.4)});
-      this.burst({t:0.01,dur:0.07,gain:0.24*p,type:'lowpass',freq:600,freqEnd:170,att:0.003}); this.ping({t:0.01,dur:0.06,gain:0.18*p,freq:130,freqEnd:52,type:'triangle'});
-      this.grains(0.04,0.24,18+Math.round(legs*1.5),0.16*p,1500,7000,2.2);
+    const n=clamp(parts.near||Math.ceil((parts.changed||1)/10),1,5), span=0.05+n*0.045;
+    // 축축한 소리를 16dB쯤 눌렀다가 콰삭이 끝날 무렵 풀어 준다
+    const dg=this.duck.gain; dg.cancelScheduledValues(now); dg.setValueAtTime(Math.max(0.05,dg.value),now);
+    dg.linearRampToValueAtTime(0.16,now+0.006); dg.setTargetAtTime(1,now+span+0.06,0.1);
+    const B=o=>{ o.out=out; this.burst(o); }, P=o=>{ o.out=out; this.ping(o); };
+    // 한 마리 몫. full: 손가락 바로 밑 첫 마리, 아니면 조금 가벼운 겹침
+    const hit=(t,g,pf,pan,full)=>{
+      B({t,dur:0.07,gain:0.55*g,freq:1900*pf,q:0.8,freqEnd:800,att:0.002,pan});                        // 껍질이 쪼개지는 몸통
+      const m=full?4+Math.floor(Math.random()*4):3;
+      for(let i=0;i<m;i++) B({t:t+i*rand(0.006,0.018),dur:rand(0.018,0.038),gain:0.5*g,freq:rand(2600,5200)*pf,q:1.3,rate:rand(0.9,1.4),pan});   // 파작파작
+      for(let i=0;i<(full?6:3);i++) B({t:t+0.015+i*rand(0.012,0.024),dur:rand(0.03,0.06),gain:rand(0.3,0.42)*g,freq:rand(1400,3000)*pf,q:rand(1,1.8),freqEnd:rand(500,900),pan:pan+rand(-0.2,0.2)});   // 껍질이 겹겹이 연달아 바스러진다
+      B({t:t+0.012,dur:0.17,gain:0.42*g,type:'lowpass',freq:720*pf,q:1.6,freqEnd:200,att:0.002,pan});  // 속이 터지는 뭉근한 소리
+      if(full){
+        B({t,dur:0.028,gain:0.7*g,freq:1500,q:0.5,att:0.002,pan});                                      // 손끝에 눌리는 첫 순간
+        B({t,dur:0.06,gain:0.5*g,freq:500,q:0.8,freqEnd:200,att:0.002,pan});
+        P({t,dur:0.09,gain:0.45*g,freq:130*pf,freqEnd:40,pan});                                          // 바닥 울림
+      }
+    };
+    hit(0,p,1,0,true);
+    for(let i=1;i<n;i++) hit(i*span/n+rand(-0.006,0.012),p*rand(0.5,0.68)*(1-i*0.06),rand(0.9,1.12),rand(-0.45,0.45),false);
+    if(kind===0){        // 빠드득: 날카로운 첫 파열이 한 번 더 튄다
+      B({dur:0.006,gain:0.6*p,type:'highpass',freq:2400,q:0.7});
+      B({t:0.024,dur:0.012,gain:0.45*p,freq:3300,q:1.2,freqEnd:1500});
+      this.grains(0.04,span+0.18,22+n*6,0.32*p,1400,6000,1.6,out);
+    }else if(kind===1){  // 와드득: 넓고 길게 으깨진다
+      B({t:0.01,dur:0.12,gain:0.4*p,freq:900,q:0.9,freqEnd:350,att:0.006});
+      this.grains(0.03,span+0.28,26+n*7,0.3*p,1000,5000,1.3,out);
+    }else{               // 까드득: 딱딱한 것이 걸리며 톡톡 깨진다
+      P({dur:0.012,gain:0.16*p,freq:4300,freqEnd:1800,type:'square'});
+      for(let i=0;i<4;i++) B({t:0.03+i*rand(0.035,0.05),dur:rand(0.008,0.014),gain:(0.4-i*0.06)*p,freq:rand(2200,3400),q:1.6,freqEnd:rand(800,1300),pan:rand(-0.4,0.4)});
+      this.grains(0.04,span+0.15,20+n*6,0.32*p,1600,7000,2.2,out);
     }
-    // 얇은 날개가 쪼개지는 고음
-    for(let i=0;i<Math.round(wings*0.6);i++) this.ping({t:rand(0.01,0.16),dur:rand(0.008,0.015),gain:rand(0.05,0.11)*p,freq:rand(3800,6600),freqEnd:rand(1500,2500),type:'triangle',pan:rand(-0.5,0.5)});
-    // 단단한 등껍질이 내려앉는 저음
-    for(let i=0;i<Math.round(shells*0.5);i++) this.burst({t:rand(0.02,0.2),dur:rand(0.03,0.05),gain:rand(0.12,0.22)*p,type:'lowpass',freq:rand(350,620),freqEnd:rand(90,160),att:0.003,pan:rand(-0.3,0.3)});
-    // 잔여 다리 마디가 늦게 부러지는 작은 소리
-    for(let i=0;i<Math.round(legs*0.4);i++) this.burst({t:rand(0.15,0.5),dur:rand(0.005,0.009),gain:rand(0.05,0.1)*p,freq:rand(1800,2800),q:2,pan:rand(-0.6,0.6)});
+    // 얇은 날개가 쪼개지는 고음 · 등껍질이 내려앉는 소리(폰 스피커에서도 들리는 대역) · 다리 마디가 늦게 부러지는 소리
+    for(let i=0;i<Math.round(wings*0.6);i++) P({t:rand(0.01,span+0.1),dur:rand(0.008,0.015),gain:rand(0.07,0.13)*p,freq:rand(3800,6600),freqEnd:rand(1500,2500),type:'triangle',pan:rand(-0.5,0.5)});
+    for(let i=0;i<Math.round(shells*0.5);i++) B({t:rand(0.02,span+0.1),dur:rand(0.03,0.05),gain:rand(0.18,0.3)*p,freq:rand(450,800),q:1,freqEnd:rand(200,300),att:0.003,pan:rand(-0.3,0.3)});
+    for(let i=0;i<Math.round(legs*0.4);i++) B({t:rand(0.15,span+0.4),dur:rand(0.005,0.009),gain:rand(0.07,0.12)*p,freq:rand(1800,2800),q:2,pan:rand(-0.6,0.6)});
   }
+
+
   /** 축축한 슬라임 */
   wet(strength=0.5,force=false){
     this.ensure(); if(!this.ctx)return; const t=this.ctx.currentTime; if(!force&&t-this.lastWet<0.13)return; this.lastWet=t; const s=clamp(strength,0.15,1);
@@ -298,19 +335,81 @@ function wetMix(){
     :0;
 }
 
+// ───────── 시점 ─────────
+// 공 바깥을 한 손가락(마우스 왼쪽)으로 끌면 공 둘레로 시점이 돌고, 공 바깥에서 두 손가락을 벌리거나 오므리면(PC는 휠) 다가가고 물러난다.
+// 마우스 오른쪽 버튼으로 끌면 공 위에서도 돈다. 공 위에서 시작한 손가락은 지금처럼 주무르기만 한다 — 한 손으로 주무르며 다른 손으로 돌려 볼 수 있다.
+// 손을 떼면 해부 화면처럼 조금 미끄러지다 멈춘다.
+const LOOK=new THREE.Vector3(0,BOARD_TOP+0.55,0);
+const VIEW_EASE=5;                       // 미끄러짐 (해부 화면 OrbitControls 감쇠 .08과 같은 느낌)
+const VIEW_TURN=0.9;                     // 화면 높이만큼 끌면 0.9바퀴
+const PITCH_MIN=0.1, PITCH_MAX=1.35;     // 거의 옆에서 ~ 거의 위에서 (라디안)
+const ZOOM_MAX=1.75;                     // 처음 거리의 몇 배까지 물러나나
+const view={yaw:0,pitch:0.33,zoom:1,vy:0,vp:0,vz:0,homeR:6,homePitch:0.33,minZoom:0.55,away:false};
+const viewPtrs=new Map();
+let pinchD=0, hintShown=false, hintClock=0, hintTimer=0;
+const homeBtn=document.getElementById('viewHome'), hintEl=document.getElementById('viewHint');
+function placeCamera(){
+  const r=view.homeR*view.zoom, cp=Math.cos(view.pitch);
+  camera.position.set(LOOK.x+Math.sin(view.yaw)*cp*r,LOOK.y+Math.sin(view.pitch)*r,LOOK.z+Math.cos(view.yaw)*cp*r);
+  camera.lookAt(LOOK);
+  const yw=Math.atan2(Math.sin(view.yaw),Math.cos(view.yaw));
+  const away=Math.abs(yw)>0.04||Math.abs(view.pitch-view.homePitch)>0.04||Math.abs(Math.log(view.zoom))>0.04;
+  if(away!==view.away){ view.away=away; homeBtn.classList.toggle('show',away); }
+}
+function resetView(){ view.yaw=0; view.pitch=view.homePitch; view.zoom=1; view.vy=view.vp=view.vz=0; viewPtrs.clear(); pinchD=0; placeCamera(); }
+// 시점 원위치: 남은 차이를 미끄러짐으로 넣어 부드럽게 돌아온다
+function viewToHome(){ view.yaw=Math.atan2(Math.sin(view.yaw),Math.cos(view.yaw)); view.vy=-view.yaw; view.vp=view.homePitch-view.pitch; view.vz=-Math.log(view.zoom); }
+function updateView(dt){
+  if(!hintShown){ hintClock+=dt; if(hintClock>1.2) showViewHint(); }
+  if(Math.abs(view.vy)+Math.abs(view.vp)+Math.abs(view.vz)<1e-5) return;
+  const k=1-Math.exp(-VIEW_EASE*dt);
+  view.yaw+=view.vy*k; view.vy-=view.vy*k;
+  view.pitch+=view.vp*k; view.vp-=view.vp*k;
+  view.zoom*=Math.exp(view.vz*k); view.vz-=view.vz*k;
+  if(view.pitch<PITCH_MIN||view.pitch>PITCH_MAX){ view.pitch=clamp(view.pitch,PITCH_MIN,PITCH_MAX); view.vp=0; }
+  if(view.zoom<view.minZoom||view.zoom>ZOOM_MAX){ view.zoom=clamp(view.zoom,view.minZoom,ZOOM_MAX); view.vz=0; }
+  placeCamera();
+}
+function showViewHint(){
+  hintShown=true; hintEl.textContent='공 바깥을 끌면 시점이 돌아가고, 두 손가락이나 휠로 확대한다.';
+  hintEl.classList.add('show'); clearTimeout(hintTimer); hintTimer=setTimeout(()=>hintEl.classList.remove('show'),4500);
+}
+function hideViewHint(){ hintShown=true; clearTimeout(hintTimer); hintEl.classList.remove('show'); }
+function ptrGap(){ const [a,b]=[...viewPtrs.values()]; return Math.hypot(a.x-b.x,a.y-b.y); }
+function viewDown(e){
+  viewPtrs.set(e.pointerId,{x:e.clientX,y:e.clientY}); pinchD=viewPtrs.size===2?ptrGap():0;
+  try{canvas.setPointerCapture(e.pointerId);}catch(err){}
+  hideViewHint();
+}
+function viewMove(e){
+  const v=viewPtrs.get(e.pointerId); if(!v)return;
+  const dx=e.clientX-v.x, dy=e.clientY-v.y; v.x=e.clientX; v.y=e.clientY;
+  if(viewPtrs.size===1){ const H=Math.max(1,canvas.clientHeight); view.vy-=Math.PI*2*VIEW_TURN*dx/H; view.vp+=Math.PI*2*VIEW_TURN*dy/H; }
+  else if(viewPtrs.size===2){ const d=ptrGap(); if(pinchD>1&&d>1) view.vz+=Math.log(pinchD/d); pinchD=d; }
+}
+function viewUp(id){ if(!viewPtrs.delete(id))return false; pinchD=viewPtrs.size===2?ptrGap():0; return true; }
+function onWheel(e){
+  if(!started||appPaused||tossing)return; e.preventDefault();
+  const d=e.deltaY*(e.deltaMode===1?33:e.deltaMode===2?400:1);
+  view.vz+=clamp(d*0.0012,-0.35,0.35); hideViewHint();
+}
+homeBtn.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); viewToHome(); });
 
 function onDown(e){
   if(!started||appPaused||tossing)return;
   if(pointers.has(e.pointerId)){ pointers.delete(e.pointerId); ball.release(e.pointerId); } // 같은 번호가 다시 오면 이전 것은 뗀 것으로
-  const h=hitBall(e.clientX,e.clientY); if(!h)return;
+  viewUp(e.pointerId);
+  const h=e.button===2?null:hitBall(e.clientX,e.clientY);
+  if(!h){ e.preventDefault(); viewDown(e); return; }   // 공 바깥(또는 마우스 오른쪽 버튼)은 시점
   e.preventDefault();
   const dir=h.clone().normalize();
   const d=ball.press(e.pointerId,dir,{depth:0.3,width:0.5});
   pointers.set(e.pointerId,{dent:d,x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,start:h.clone(),held:0,travel:0,strong:false,lastX:e.clientX,lastY:e.clientY,speed:0});
   try{canvas.setPointerCapture(e.pointerId);}catch(err){}
-   SFX.gesture('touch',0.3,wetMix());
+  SFX.gesture('touch',0.3,wetMix());
 }
 function onMove(e){
+  if(viewPtrs.has(e.pointerId)){ e.preventDefault(); viewMove(e); return; }
   const p=pointers.get(e.pointerId); if(!p||appPaused)return;
   e.preventDefault();
   const dx=e.clientX-p.lastX, dy=e.clientY-p.lastY; p.lastX=e.clientX; p.lastY=e.clientY; p.x=e.clientX; p.y=e.clientY;
@@ -323,46 +422,50 @@ function onMove(e){
   p.dent.target=Math.min(1,p.dent.target+mv*2.2);
 }
 function onUp(e){
+  if(viewUp(e.pointerId)){ try{if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}catch(err){} return; }
   const p=pointers.get(e.pointerId); if(!p)return;
   pointers.delete(e.pointerId);
   const d=ball.release(e.pointerId);
-    if(e.type==='pointerup')
-    SFX.gesture('release',d?Math.abs(d.k):0.2,wetMix());
+  if(e.type==='pointerup') SFX.gesture('release',d?Math.abs(d.k):0.2,wetMix());
   try{if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}catch(err){}
 }
-function cancelAll(){ for(const id of [...pointers.keys()]){ pointers.delete(id); ball?.release(id); } SFX.rub(0); }
+function cancelAll(){ for(const id of [...pointers.keys()]){ pointers.delete(id); ball?.release(id); } viewPtrs.clear(); pinchD=0; SFX.rub(0); }
 canvas.addEventListener('pointerdown',onDown,{passive:false});
 canvas.addEventListener('pointermove',onMove,{passive:false});
 window.addEventListener('pointerup',onUp); window.addEventListener('pointercancel',onUp);
 canvas.addEventListener('lostpointercapture',onUp);
+canvas.addEventListener('wheel',onWheel,{passive:false});
 window.addEventListener('blur',cancelAll);
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 window.addEventListener('keydown',e=>{ if(e.code==='Escape'){ e.preventDefault(); sendClose(); } });
+
 
 const crunchKinds=[0,1,2]; let lastKind=-1;
 
 function strongPress(p){
   p.strong=true;
+  let crunched=false;
   if(!wetStage){
-    const res=ball.crush(p.dent.dir,1), mix=wetMix();
+    const res=ball.crush(p.dent.dir,1);
     if(res.changed>0){
       let kind;
-      do{
-        kind=crunchKinds[Math.floor(Math.random()*3)];
-      }while(kind===lastKind&&Math.random()<0.7);
-      lastKind=kind;
-      SFX.crunch(kind,0.9-mix*0.3,{
-        wings:res.wings,shells:res.shells,legs:res.legs
-      });
+      do{ kind=crunchKinds[Math.floor(Math.random()*3)]; }while(kind===lastKind&&Math.random()<0.7);
+      lastKind=kind; crunched=true;
+      // 부술수록 작아지던 것을 없앴다: 마지막 한 마리까지 같은 세기로 콰삭
+      SFX.crunch(kind,1,{wings:res.wings,shells:res.shells,legs:res.legs,near:res.near,changed:res.changed});
     }
     if(ball.allBroken())wetStage=true;
   }
-  const mix=wetMix();
-  SFX.gesture('press',0.95,mix);
+  // 콰삭이 난 순간에는 꾹 눌리는 축축한 소리를 겹치지 않는다 (콰삭이 묻히지 않게)
+  if(!crunched) SFX.gesture('press',0.95,wetMix());
   if(wetStage||ball.fragmentContact(p.dent.dir)>0.15)
     SFX.tiny(wetStage?0.3:0.45);
   ball.kick(wetStage?0.8:1.1);
 }
+
+
+
+
 
 // ───────── 프레임 ─────────
 let last=performance.now()/1000;
@@ -404,8 +507,10 @@ function frame(){
     g.position.set(-k*k*7.5,BOARD_TOP+FLOOR+Math.sin(k*Math.PI)*2.6-k*k*1.2,k*1.5); g.rotation.z=k*2.6; g.rotation.x=k*0.8;
     if(k>=1){ tossing=null; appPaused=true; if(window.parent!==window)parent.postMessage({type:'slime-lab-tossed'},location.origin); }
   }
-  renderer.render(scene,camera);
+  updateView(dt); renderer.render(scene,camera);
 }
+
+
 function resize(){
   if(disposed)return;
   const w=Math.max(1,innerWidth), h=Math.max(1,innerHeight), dpr=Math.min(devicePixelRatio||1,1.5);
@@ -413,8 +518,15 @@ function resize(){
   const portrait=h>=w; camera.fov=portrait?38:30;
   const half=camera.fov*Math.PI/360, hh=Math.atan(Math.tan(half)*camera.aspect);
   const dist=portrait?clamp((1.22/0.86)/Math.tan(hh),4.6,16):clamp((1.22/0.8)/Math.tan(half),4.6,16);
-  camera.position.set(0,dist*0.4,dist*0.92); camera.lookAt(0,BOARD_TOP+0.55,0); camera.updateProjectionMatrix();
+  // 처음 구도(공이 화면에 꽉 차게 비스듬히 내려다봄)가 시점의 원위치다. 돌려 놓은 시점은 화면 크기가 바뀌어도 그대로 둔다
+  const oy=dist*0.4-0.55, oz=dist*0.92;
+  view.homeR=Math.hypot(oy,oz); view.homePitch=Math.atan2(oy,oz);
+  if(!view.away) view.pitch=view.homePitch;
+  view.minZoom=Math.min(1,(1.25/(0.72*Math.tan(Math.max(half,hh))))/view.homeR);   // 가장 가까이 가도 공 둘레에 끌 자리가 남게
+  view.zoom=clamp(view.zoom,view.minZoom,ZOOM_MAX);
+  camera.updateProjectionMatrix(); placeCamera();
 }
+
 window.addEventListener('resize',resize);
 document.addEventListener('visibilitychange',()=>{ pageHidden=document.hidden; last=performance.now()/1000; if(pageHidden){ cancelAll(); SFX.suspend(); } else if(!appPaused) SFX.resume(); });
 
@@ -434,11 +546,11 @@ function enter(payload={}){
   }
  
  
-  wetStage=ball.allBroken(); started=true; appPaused=false; cancelAll(); wake(); ball.kick(0.6); return api;
+  wetStage=ball.allBroken(); started=true; resetView(); appPaused=false; cancelAll(); wake(); ball.kick(0.6); return api;
 }
 function sleep(){ appPaused=true; cancelAll(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } SFX.suspend(); return api; }
 function wake(){ if(disposed)return api; appPaused=false; last=performance.now()/1000; resize(); if(!rafId)rafId=requestAnimationFrame(frame); SFX.resume(); return api; }
-function reset(){ cancelAll(); tossing=null; if(ball){ ball.reset(); ball.group.position.set(0,BOARD_TOP+FLOOR,0); ball.group.rotation.set(0,0,0); ball.group.scale.setScalar(ball.R); } wetStage=false; started=false; return api; }
+function reset(){ cancelAll(); resetView(); tossing=null; if(ball){ ball.reset(); ball.group.position.set(0,BOARD_TOP+FLOOR,0); ball.group.rotation.set(0,0,0); ball.group.scale.setScalar(ball.R); } wetStage=false; started=false; return api; }
 /** 바뿌볼 버리기: 던지는 연출 뒤 부모 창에 slime-lab-tossed 를 보낸다 */
 function toss(){ if(!ball||tossing)return api; cancelAll(); tossing={t:0}; SFX.ensure(); SFX.wet(1,true); SFX.burst({dur:0.42,gain:0.22,freq:900,freqEnd:260,q:0.8,att:0.03,rate:0.8}); SFX.burst({t:0.62,dur:0.09,gain:0.3,type:'lowpass',freq:380,freqEnd:120,att:0.004}); SFX.ping({t:0.62,dur:0.08,gain:0.16,freq:90,freqEnd:45,type:'triangle'}); return api; }
 function getState(){ return ball?ball.getState():null; }
