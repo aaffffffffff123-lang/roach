@@ -412,7 +412,7 @@ function spawnSplat(burst){
     }
   }
 }
-function clearFlying(){ dropList.length=0; drops.count=0; for(const st of strands){ scene.remove(st.m,st.tip); } strands.length=0; }
+function clearFlying(){ dropList.length=0; drops.count=0; }
 function updateSplats(dt){
   const c=ball.group.position, R=ball.R;
   for(let i=dropList.length-1;i>=0;i--){
@@ -450,38 +450,16 @@ function updateWipe(dt){
 }
 wipeBtn.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); startWipe(); });
 
-// ───────── 손가락에 늘어나는 실 ─────────
-// 깊게 눌렀다 떼면 슬라임이 손가락에 들러붙어 실처럼 늘어났다가 똑 끊기고 되돌아간다. 슬라임이 물들면 실도 같이 물든다
-const strandGeo=new THREE.LatheGeometry(Array.from({length:14},(_,i)=>{ const y=i/13; return new THREE.Vector2(0.16+0.84*Math.pow(1-y,3.2),y); }),16);
-const tipGeo=new THREE.SphereGeometry(1,12,10);
-const strandMat=new THREE.MeshPhysicalMaterial({color:0xbfeee6,roughness:0.05,metalness:0,transparent:true,opacity:0.78,clearcoat:1,clearcoatRoughness:0.05,envMapIntensity:2.2,depthWrite:false,depthTest:false,side:THREE.DoubleSide});   // 당겨 올린 실은 늘 공보다 앞이라 바퀴에 가려지지 않게
-const strands=[], CLEAR_TINT=new THREE.Color(0xbfeee6), DYE_TINT=new THREE.Color(0xc99a62), _sn=new THREE.Vector3(), _sp=new THREE.Vector3(), _sq=new THREE.Vector3();
-function spawnStrand(d){
-  if(strands.length>=3||!ball)return;
-  const k=clamp(d.k,0,1), g=ball.group; g.updateMatrixWorld();
-  const n=d.dir.clone().normalize(); ball.surfaceFrame(n,_sp,_sn); g.localToWorld(_sp); _sn.transformDirection(g.matrixWorld);
-  const toCam=camera.position.clone().sub(_sp).normalize(), up=new THREE.Vector3(0,1,0).applyQuaternion(camera.quaternion);
-  const dir=_sn.clone().multiplyScalar(0.35).addScaledVector(up,0.8).addScaledVector(toCam,0.15).normalize();   // 화면에서 위로 늘어나 보이게
-  const m=new THREE.Mesh(strandGeo,strandMat), tip=new THREE.Mesh(tipGeo,strandMat);
-  m.renderOrder=22; tip.renderOrder=22; m.frustumCulled=false; tip.frustumCulled=false; scene.add(m,tip);
-  if(ball.envMap){ strandMat.envMap=ball.envMap; strandMat.needsUpdate=true; }
-  strands.push({n,dir,k,t:0,snapAt:0.14+0.12*k+rand(0,0.06),maxLen:0.26+0.36*k,r0:0.07+0.05*k,m,tip,snapped:false,len:0});
-  SFX.stretch(k);
+// ───────── 손가락에 들러붙는 소리 ─────────
+// 깊게 눌렀다 떼면 슬라임이 손가락에 들러붙어 쩌억 늘어났다가 똑 끊기는 소리 (눈에 보이는 실은 없다). 끊기는 순간 공이 살짝 출렁인다
+function pullSound(d){
+  const k=clamp(d.k,0,1); SFX.stretch(k);
+  setTimeout(()=>{ if(!appPaused&&ball){ SFX.snap(k); ball.kick(0.25); } },(0.14+0.12*k+rand(0,0.06))*1000);
 }
-function updateStrands(dt){
-  if(!strands.length)return;
-  strandMat.color.copy(CLEAR_TINT).lerp(DYE_TINT,(ball.goo?.dyeShown||0)*0.75);
-  const g=ball.group;
-  for(let i=strands.length-1;i>=0;i--){
-    const s=strands[i]; s.t+=dt; let r;
-    if(!s.snapped){ const u=clamp(s.t/s.snapAt); s.len=s.maxLen*(1-Math.pow(1-u,2.2)); r=s.r0*(1-0.45*u); if(u>=1){ s.snapped=true; s.t=0; SFX.snap(s.k); ball.kick(0.25); } }
-    else{ s.len*=Math.exp(-18*dt); r=s.r0*0.55*Math.exp(-7*s.t); if(s.t>0.32){ scene.remove(s.m,s.tip); strands.splice(i,1); continue; } }
-    ball.surfaceFrame(s.n,_sp,_sq); g.localToWorld(_sp);
-    _dq.setFromUnitVectors(_dy,s.dir);
-    s.m.position.copy(_sp); s.m.quaternion.copy(_dq); s.m.scale.set(r,Math.max(0.001,s.len),r);
-    s.tip.position.copy(_sp).addScaledVector(s.dir,s.len); s.tip.scale.setScalar(s.snapped?r*0.3:r*0.34);
-  }
-}
+
+
+
+
 
 // ───────── 진동 · 번째 ─────────
 // 콰삭 진동: 첫 파열은 짧고 굵게, 같이 으스러진 마리 수만큼 잔진동 (안드로이드). 아이폰 사파리는 웹에서 진동을 낼 방법이 없다
@@ -611,7 +589,7 @@ function onUp(e){
   pointers.delete(e.pointerId);
   const d=ball.release(e.pointerId);
   if(e.type==='pointerup') SFX.gesture('release',d?Math.abs(d.k):0.2,wetMix());
-  if(e.type==='pointerup'&&d&&d.k>0.42&&!tossing) spawnStrand(d);   // 깊게 눌렀다 떼면 실처럼 늘어난다
+  if(e.type==='pointerup'&&d&&d.k>0.42&&!tossing) pullSound(d);   // 깊게 눌렀다 떼면 쩌억 늘어났다 똑 끊기는 소리
   try{if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}catch(err){}
 }
 function cancelAll(){ for(const id of [...pointers.keys()]){ pointers.delete(id); ball?.release(id); } viewPtrs.clear(); pinchD=0; SFX.rub(0); }
@@ -701,7 +679,7 @@ function frame(){
     g.position.set(-k*k*7.5,BOARD_TOP+FLOOR+Math.sin(k*Math.PI)*2.6-k*k*1.2,k*1.5); g.rotation.z=k*2.6; g.rotation.x=k*0.8;
     if(k>=1){ tossing=null; appPaused=true; if(window.parent!==window)parent.postMessage({type:'slime-lab-tossed'},location.origin); }
   }
-  updateSplats(dt); updateStrands(dt); updateView(dt); renderer.render(scene,camera);
+  _debugFx:()=>({drops:dropList.length,stains:stainCount}),
 }
 
 
