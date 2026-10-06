@@ -187,68 +187,45 @@ class SlimeSfx{
     else this.burst({dur:0.035,gain:0.06+k*0.05,freq:620,q:1,freqEnd:220,att:0.004});
   }
 
-  rub(level,mix=1){
+    rub(level,mix=1){
     if(!this.ctx)return;
     const c=this.ctx, t=c.currentTime;
-    const l=Math.sqrt(clamp(level))*(0.7+0.3*clamp(mix));
+    const l=Math.sqrt(clamp(level));
     this.rubLevel=l;
-
     this.rubGain.gain.setTargetAtTime(0,t,0.025);
     this.rubGain2.gain.setTargetAtTime(0,t,0.025);
-    if(l<0.035){
-      this.nextRub=0;
-      this.nextGrit=0;
-      return;
+
+    if(!this.wetRequested){
+      this.wetRequested=true;
+      fetch('https://cdn.freesound.org/previews/433/433822_652422-hq.mp3')
+        .then(r=>{
+          if(!r.ok)throw Error(r.status);
+          return r.arrayBuffer();
+        })
+        .then(data=>c.decodeAudioData(data))
+        .then(buffer=>{
+          const s=c.createBufferSource();
+          s.buffer=buffer;
+          s.loop=true;
+          s.loopStart=0.05;
+          s.loopEnd=buffer.duration-0.2;
+          s.playbackRate.value=0.95;
+          this.wetGain=c.createGain();
+          this.wetGain.gain.value=0;
+          s.connect(this.wetGain);
+          this.wetGain.connect(this.master);
+          s.start(0,0.05);
+          this.wetSource=s;
+        })
+        .catch(e=>console.warn('wet sound load failed',e));
     }
 
-    if(t>=(this.nextRub||0)){
-      this.nextRub=t+rand(0.08,0.12);
-
-      // 촉촉한 소리를 유지한 뒤 미끄러지듯 감쇠
-      const src=c.createBufferSource();
-      src.buffer=this.noiseBuf;
-      src.playbackRate.value=rand(0.75,0.95);
-      const f=c.createBiquadFilter();
-      f.type='bandpass';
-      f.Q.value=2.4;
-      f.frequency.setValueAtTime(rand(850,1300),t);
-      f.frequency.exponentialRampToValueAtTime(
-        rand(280,450),t+0.16
+    if(this.wetGain)
+      this.wetGain.gain.setTargetAtTime(
+        l>0.035?1.5+l*2:0,t,0.05
       );
 
-      const g=c.createGain(), peak=0.12+l*0.2;
-      g.gain.setValueAtTime(0.0001,t);
-      g.gain.exponentialRampToValueAtTime(peak,t+0.012);
-      g.gain.setValueAtTime(peak,t+0.08);
-      g.gain.exponentialRampToValueAtTime(0.0001,t+0.19);
-      src.connect(f);
-      f.connect(g);
-      g.connect(this.master);
-      src.start(t,rand(0,1.5));
-      src.stop(t+0.21);
-      src.onended=()=>{
-        src.disconnect();
-        f.disconnect();
-        g.disconnect();
-      };
-
-      // 낮고 부드러운 물기
-      this.burst({
-        dur:0.14,gain:0.07+l*0.12,type:'lowpass',
-        freq:580,freqEnd:230,q:0.9,att:0.015
-      });
-
-      // 작은 물방울이 눌려 빠져나오는 소리
-      if(Math.random()<0.55){
-        const f=rand(220,360);
-        this.ping({
-          t:0.025,dur:0.035,gain:0.015+l*0.025,
-          freq:f,freqEnd:f*1.8,type:'sine',att:0.004
-        });
-      }
-    }
-
-    // 다 부순 뒤의 은은한 아삭거림
+    if(l<=0.035){this.nextGrit=0;return;}
     if(mix>=0.999&&t>=(this.nextGrit||0)){
       this.nextGrit=t+rand(0.17,0.28);
       this.tiny(0.2+l*0.25);
@@ -414,7 +391,10 @@ function frame(){
       SFX.tiny(0.2+motion*0.45);
     p.speed*=Math.exp(-6*dt);
   }
-  SFX.rub(rubLevel,wetMix());
+  let slideLevel=0;
+  for(const p of pointers.values())
+    slideLevel=Math.max(slideLevel,p.speed);
+  SFX.rub(clamp(slideLevel*1.2),wetMix());
 
 
 
