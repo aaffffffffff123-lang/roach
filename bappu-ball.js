@@ -812,21 +812,28 @@ export class BappuBall{
     const touched=this._touched||(this._touched=new Uint8Array(NP));
     touched.fill(0);
     let moving=false;
-    const rough=this.allBroken();
-    const choices=[1,3,6,7,8,9,11,13,15,17,19,21];
 
-    for(const r of this.roaches){
-      if(!r.used)continue;
-      let pick=-1;
-      if(rough&&r.i%3!==2){
-        const start=Math.floor(hash(r.i*7.1)*choices.length);
-        for(let j=0;j<choices.length;j++){
-          const slot=choices[(start+j)%choices.length];
-          if(r.frag[slot]){pick=slot;break;}
-        }
-      }
 
-      for(let slot=0;slot<SLOTS;slot++){
+ const rough=this.allBroken();
+this.shards.visible=!rough;
+const choices=[0,1,2,3,6,7,8,9];
+
+for(const r of this.roaches){
+  if(!r.used)continue;
+  const picks=[];
+  if(rough){
+    const start=Math.floor(hash(r.i*7.1)*choices.length);
+    for(let j=0;j<choices.length&&picks.length<2;j++){
+      const slot=choices[(start+j*3)%choices.length];
+      if(r.frag[slot])picks.push(slot);
+    }
+  }
+
+  for(let slot=0;slot<SLOTS;slot++){
+
+
+
+
         const f=r.frag[slot];
         if(!f)continue;
         f.t+=dt;
@@ -844,7 +851,7 @@ export class BappuBall{
           f.q.premultiply(dq);
         }
 
-        const expose=slot===pick;
+        const expose=picks.includes(slot);
         if(sp>2e-5||sink<1||this.fragDirty||expose){
           const [mi,ii]=this.instanceSlot(r,slot);
           let drawPos=f.p;
@@ -873,11 +880,10 @@ export class BappuBall{
                 );
               }
 
-              // 중심은 묻히고 가장자리 일부만 드러낸다
-              const tip=Math.min(
-                0.045+hash(r.i*3.7+slot)*0.035,
-                support*0.6
-              );
+          const tip=Math.min(
+  0.06+hash(r.i*3.7+slot)*0.04,
+  support*0.75
+);
               tgt.addScaledVector(normal,-(support-tip));
               drawPos=tgt;
             }
