@@ -274,23 +274,28 @@ class SlimeSfx{
     else this.burst({dur:0.035,gain:0.06+k*0.05,freq:620,q:1,freqEnd:220,att:0.004});
   }
 
+      // 문지르는 소리: freesound의 축축한 녹음(바깥 서버)을 받아 쓴다. 받기에 실패하면 잠시 뒤 다시 받아 보고
+    // (3초·6초·12초… 최대 30초 간격, 6번까지, 12초 넘게 답이 없으면 끊고 다시), 그동안은 직접 만든 축축한 소리로 대신한다.
+    // 처음 받는 1.5초 동안은 예전처럼 조용히 기다린다 (보통은 그 안에 받아져서 직접 만든 소리가 끼어들지 않는다)
     rub(level,mix=1){
     if(!this.ctx)return;
     const c=this.ctx, t=c.currentTime;
     const l=Math.sqrt(clamp(level));
     this.rubLevel=l;
-    this.rubGain.gain.setTargetAtTime(0,t,0.025);
-    this.rubGain2.gain.setTargetAtTime(0,t,0.025);
 
-    if(!this.wetRequested){
-      this.wetRequested=true;
-      fetch('https://cdn.freesound.org/previews/433/433822_652422-hq.mp3')
+    if(!this.wetGain&&!this.wetRequested&&(this.wetTries||0)<6&&performance.now()>=(this.wetRetryAt||0)){
+      this.wetRequested=true; this.wetTries=(this.wetTries||0)+1;
+      if(!this.wetT0)this.wetT0=performance.now();
+      const ac=typeof AbortController!=='undefined'?new AbortController():null;
+      const giveUp=setTimeout(()=>{ if(ac)ac.abort(); },12000);
+      fetch('https://cdn.freesound.org/previews/433/433822_652422-hq.mp3',ac?{signal:ac.signal}:undefined)
         .then(r=>{
           if(!r.ok)throw Error(r.status);
           return r.arrayBuffer();
         })
         .then(data=>c.decodeAudioData(data))
         .then(buffer=>{
+          clearTimeout(giveUp);
           const s=c.createBufferSource();
           s.buffer=buffer;
           s.loop=true;
@@ -304,13 +309,31 @@ class SlimeSfx{
           s.start(0,0.05);
           this.wetSource=s;
         })
-        .catch(e=>console.warn('wet sound load failed',e));
+        .catch(e=>{
+          clearTimeout(giveUp);
+          console.warn('wet sound load failed',e);
+          this.wetFailed=true;
+          this.wetRetryAt=performance.now()+Math.min(30000,3000*2**(this.wetTries-1));
+          this.wetRequested=false;
+        });
     }
 
-    if(this.wetGain)
+    if(this.wetGain){
+      this.rubGain.gain.setTargetAtTime(0,t,0.025);
+      this.rubGain2.gain.setTargetAtTime(0,t,0.025);
       this.wetGain.gain.setTargetAtTime(
         l>0.035?0.6+l*0.8:0,t,0.05
       );
+    }else if(this.wetFailed||(this.wetT0&&performance.now()-this.wetT0>1500)){
+      // 녹음을 못 받았거나 너무 늦으면 직접 만든 축축한 소리로 대신한다. 녹음을 쓰기 전 크기는 너무 작아서 키웠다
+      // (녹음과 같은 모양: 문지르기 시작하면 바로 일정 크기, 세게 문지를수록 조금 더)
+      const on=l>0.035;
+      this.rubGain.gain.setTargetAtTime(on?0.25+0.35*l:0,t,0.045);
+      this.rubGain2.gain.setTargetAtTime(on?0.12+0.2*l:0,t,0.045);
+    }else{
+      this.rubGain.gain.setTargetAtTime(0,t,0.025);
+      this.rubGain2.gain.setTargetAtTime(0,t,0.025);
+    }
 
     if(l<=0.035){this.nextGrit=0;return;}
     if(mix>=0.999&&t>=(this.nextGrit||0)){
@@ -321,6 +344,9 @@ class SlimeSfx{
 
 
 }
+
+
+
 const SFX=new SlimeSfx();
 for(const ev of ['pointerdown','pointerup','touchend','click','keydown']) window.addEventListener(ev,()=>SFX.ensure(),{capture:true,passive:true});
 
