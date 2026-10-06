@@ -802,32 +802,101 @@ export class BappuBall{
     for(let i=0;i<this.crumbN;i++){ p.set(this.crumbRest[i*3],this.crumbRest[i*3+1],this.crumbRest[i*3+2]); this.interiorPoint(p,o); this.crumbPos[i*3]=o.x; this.crumbPos[i*3+1]=o.y; this.crumbPos[i*3+2]=o.z; }
     this.crumbs.geometry.attributes.position.needsUpdate=true;
   }
-  /** 슬라임 속 조각: 표면보다 한 박자 늦게 따라오고, 밀리는 동안 돈다 */
+
+
   updateFragments(dt){
-    const T=this.T, tgt=this._tmp[1], m=this._m[0], q=this._q[0], dq=this._q[1], vel=this._tmp[2];
-    const touched=this._touched||(this._touched=new Uint8Array(NP)); touched.fill(0); let moving=false;
+    const tgt=this._tmp[1], m=this._m[0];
+    const dq=this._q[1], vel=this._tmp[2];
+    const dir=this._tmp[17], normal=this._tmp[18];
+    const localN=this._tmp[19], invQ=this._q[2];
+    const touched=this._touched||(this._touched=new Uint8Array(NP));
+    touched.fill(0);
+    let moving=false;
+    const rough=this.allBroken();
+    const choices=[1,3,6,7,8,9,11,13,15,17,19,21];
+
     for(const r of this.roaches){
       if(!r.used)continue;
+      let pick=-1;
+      if(rough&&r.i%3!==2){
+        const start=Math.floor(hash(r.i*7.1)*choices.length);
+        for(let j=0;j<choices.length;j++){
+          const slot=choices[(start+j)%choices.length];
+          if(r.frag[slot]){pick=slot;break;}
+        }
+      }
+
       for(let slot=0;slot<SLOTS;slot++){
-        const f=r.frag[slot]; if(!f)continue;
-        f.t+=dt; const sink=clamp(f.t/f.dur,0,1);
+        const f=r.frag[slot];
+        if(!f)continue;
+        f.t+=dt;
+        const sink=clamp(f.t/f.dur,0,1);
         this.interiorPoint(f.rest,tgt);
         const rate=sink<1?(1.5+sink*7):10;
         const k=1-Math.exp(-rate*dt);
-        vel.copy(tgt).sub(f.p); f.p.addScaledVector(vel,k);
+        vel.copy(tgt).sub(f.p);
+        f.p.addScaledVector(vel,k);
         const sp=vel.length()*k;
-        if(sink<1) f.q.slerpQuaternions(f.q0,f.q1,sink*sink*(3-2*sink));
-        else if(sp>1e-4){ dq.setFromAxisAngle(f.axis,Math.min(0.3,sp*9)); f.q.premultiply(dq); }
-        if(sp>2e-5||sink<1||this.fragDirty){ const [mi,ii]=this.instanceSlot(r,slot); m.compose(f.p,f.q,f.s).multiply(this.pieceCenM[mi]); this.meshes[mi].setMatrixAt(ii,m); touched[mi]=1; if(sp>2e-5||sink<1)moving=true; }
+        if(sink<1)
+          f.q.slerpQuaternions(f.q0,f.q1,sink*sink*(3-2*sink));
+        else if(sp>1e-4){
+          dq.setFromAxisAngle(f.axis,Math.min(0.3,sp*9));
+          f.q.premultiply(dq);
+        }
+
+        const expose=slot===pick;
+        if(sp>2e-5||sink<1||this.fragDirty||expose){
+          const [mi,ii]=this.instanceSlot(r,slot);
+          let drawPos=f.p;
+
+          if(expose){
+            dir.copy(f.rest).normalize();
+            if(dir.y>-0.55){
+              this.surfaceFrame(dir,tgt,normal);
+              localN.copy(normal)
+                .applyQuaternion(invQ.copy(f.q).invert())
+                .multiply(f.s);
+              const geo=this.pieceGeo[mi];
+              const P=geo.attributes.position.array;
+              const I=geo.index?geo.index.array:null;
+              const center=this.pieceCen[mi];
+              const count=I?I.length:P.length/3;
+              let support=0;
+
+              // 이 조각에 포함된 정점만 계산한다
+              for(let j=0;j<count;j++){
+                const v=(I?I[j]:j)*3;
+                support=Math.max(support,
+                  (P[v]-center.x)*localN.x+
+                  (P[v+1]-center.y)*localN.y+
+                  (P[v+2]-center.z)*localN.z
+                );
+              }
+
+              // 중심은 묻히고 가장자리 일부만 드러낸다
+              const tip=Math.min(
+                0.045+hash(r.i*3.7+slot)*0.035,
+                support*0.6
+              );
+              tgt.addScaledVector(normal,-(support-tip));
+              drawPos=tgt;
+            }
+          }
+
+          m.compose(drawPos,f.q,f.s).multiply(this.pieceCenM[mi]);
+          this.meshes[mi].setMatrixAt(ii,m);
+          touched[mi]=1;
+          if(sp>2e-5||sink<1)moving=true;
+        }
       }
     }
-    for(let mi=0;mi<NP;mi++) if(touched[mi]) this.meshes[mi].instanceMatrix.needsUpdate=true;
+
+    for(let mi=0;mi<NP;mi++)
+      if(touched[mi])this.meshes[mi].instanceMatrix.needsUpdate=true;
+
+    // 작은 부스러기는 원래처럼 슬라임 안에서 움직인다
     if(this.shardList.length){
       let up=false;
-      const rough=this.allBroken();
-      const step=Math.max(1,Math.ceil(this.shardList.length/60));
-      const dir=this._tmp[17], normal=this._tmp[18];
-
       for(let i=0;i<this.shardList.length;i++){
         const s=this.shardList[i];
         s.t+=dt;
@@ -836,7 +905,6 @@ export class BappuBall{
         vel.copy(tgt).sub(s.p);
         const sp=vel.length();
         s.p.addScaledVector(vel,k);
-
         if(sp>2e-5||this.fragDirty){
           dq.setFromAxisAngle(
             this._tmp[3].set(1,0.3,0.2).normalize(),
@@ -844,30 +912,17 @@ export class BappuBall{
           );
           s.q.premultiply(dq);
         }
-
-        // 다 부순 뒤에는 일부 조각의 끝만 표면에 남긴다
-        dir.copy(s.rest).normalize();
-        if(rough&&i%step===0&&dir.y>-0.55){
-          this.surfaceFrame(dir,tgt,normal);
-          tgt.addScaledVector(normal,0.004);
-          q.setFromUnitVectors(this._tmp[3].set(0,1,0),normal);
-          m.compose(
-            tgt,q,
-            this._tmp[4].set(s.s*1.6,s.s*3.8,s.s*1.1)
-          );
-          this.shards.setMatrixAt(i,m);
-          up=true;
-        }else if(sp>2e-5||this.fragDirty||rough){
-          m.compose(s.p,s.q,this._tmp[4].setScalar(s.s));
-          this.shards.setMatrixAt(i,m);
-          up=true;
-        }
+        m.compose(s.p,s.q,this._tmp[4].setScalar(s.s));
+        this.shards.setMatrixAt(i,m);
+        up=true;
       }
       if(up)this.shards.instanceMatrix.needsUpdate=true;
-
     }
-    this.fragDirty=false; return moving;
+    this.fragDirty=false;
+    return moving;
   }
+
+
 
   dispose(){ this.goo.dispose(); for(const im of this.meshes){ im.geometry.dispose(); } this.slimeGeo.dispose(); this.envMap.dispose(); this.crumbTex.dispose(); this.crumbs.geometry.dispose(); this.crumbs.material.dispose(); this.matFront.dispose(); this.matBack.dispose(); this.matWing.dispose(); if(this.shadow){ this.shadow.material.map.dispose(); this.shadow.material.dispose(); } }
 }
