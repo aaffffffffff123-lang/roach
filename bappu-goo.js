@@ -18,11 +18,12 @@ const disp=(T,hex)=>new T.Color().setRGB(((hex>>16)&255)/255,((hex>>8)&255)/255,
 const LEN_MAX=0.26;      // 이보다 길어진 줄기는 둘로 나뉜다 (겹쳐서 이어진 줄무늬가 된다)
 const STRETCH=0.6;       // 손가락이 끄는 흐름에 진물이 얼마나 잘 늘어나는지
 const RAD_MIN=0.0085;    // 이보다 가늘어지면 슬라임에 녹아든다
-const DEPTH_MIN=0.42;    // 공 중심 쪽 한계 (조각과 같다)
-const DEPTH_MAX=0.955;
+const DEPTH_MIN=0;       // 안쪽에 가상의 벽을 두지 않는다: 주무를 때 중심을 지나 순환한다
+const DEPTH_MAX=1.0;
 const SEG=3;             // 덩어리 하나를 겹친 세 마디로 그린다
 const SEG_OFF=[-0.62,0,0.62], SEG_CURVE=[0.55,1,0.55], SEG_RAD=[0.9,1.12,0.9];
-const CURL=0.16;         // 가만히 있어도 길이의 이만큼 굽어 있다
+const CURL=0.30;         // 젖은 덩어리처럼 짧게 휘어 있다
+const GOO_OPACITY=0.38;  // 진물도 반투명: 페이드 갱신 때 이 값을 유지한다
 const BEND_GAIN=2.2, BEND_MAX=0.6;   // 흐름 차이 → 굽힘 목표, 길이 대비 최대 굽힘
 const GRIND=1.1;         // 갈리는 속도
 const DISSOLVE=0.08;     // 녹는 속도
@@ -54,18 +55,18 @@ export class GooLayer{
   buildMesh(){
     const T=this.T, geo=new T.SphereGeometry(1,12,8);
     const P=geo.attributes.position, n=P.count, col=new Float32Array(n*3);
-    const cream=new T.Color(0xdcb86a), gut=new T.Color(0x5e3a1c);   // 크림색 곤죽, 소화관 갈색 (sRGB→linear)
+    const cream=new T.Color(0xe8d4a3), gut=new T.Color(0x9b7956);   // 연한 진물 속에 흐릿한 소화관 줄
     for(let i=0;i<n;i++){
       const x=P.getX(i), y=P.getY(i), z=P.getZ(i);
       // 줄기 방향(y)을 따라 달리는 갈색 줄: x≈0 면 근처를 구불구불 지난다. 방향에 따라 보였다 안 보였다 한다
-      const vein=sstep(0.30,0.06,Math.abs(x+0.22*Math.sin(y*5.5+z*2.0)))*sstep(-0.95,-0.55,y)*sstep(0.95,0.55,y);
+      const vein=0.25*sstep(0.30,0.06,Math.abs(x+0.22*Math.sin(y*5.5+z*2.0)))*sstep(-0.95,-0.55,y)*sstep(0.95,0.55,y);
       const wob=0.92+0.08*Math.sin(y*9.0+z*5.0);
       col[i*3]  =lerp(cream.r,gut.r,vein)*wob;
       col[i*3+1]=lerp(cream.g,gut.g,vein)*wob;
       col[i*3+2]=lerp(cream.b,gut.b,vein)*wob;
     }
     geo.setAttribute('color',new T.Float32BufferAttribute(col,3));
-    this.mat=new T.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:0.42,metalness:0,clearcoat:0.65,clearcoatRoughness:0.3,transparent:true,opacity:1});
+    this.mat=new T.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:0.18,metalness:0,clearcoat:0.65,clearcoatRoughness:0.14,envMap:this.ball.envMap,envMapIntensity:0.65,transparent:true,opacity:GOO_OPACITY,depthWrite:false});
     this.mesh=new T.InstancedMesh(geo,this.mat,this.cap*SEG);
     this.mesh.count=0; this.mesh.frustumCulled=false; this.mesh.renderOrder=4;
     this.mesh.instanceMatrix.setUsage(T.DynamicDrawUsage);
@@ -304,7 +305,7 @@ export class GooLayer{
     this.initBend(c); if(b.bend){ c.bend.copy(b.bend); c.bendT.copy(b.bendT); }
     return c;
   }
-  keepInside(v){ const r=v.length(); if(r<1e-6){ v.set(0,DEPTH_MIN,0); return; } v.multiplyScalar(clamp(r,DEPTH_MIN,DEPTH_MAX)/r); }
+  keepInside(v){ const r=v.length(); if(r<1e-6) return; v.multiplyScalar(clamp(r,DEPTH_MIN,DEPTH_MAX)/r); }
 
   // ── 매 프레임 (bappu-ball update 에서) ──
   update(dt){
@@ -347,12 +348,16 @@ export class GooLayer{
       // 주무를 때 생긴 굽힘은 목표를 따라갔다가 서서히 풀린다
       if(b.bendT.lengthSq()>1e-12||b.bend.lengthSq()>1e-12){ b.bend.lerp(b.bendT,kb); b.bendT.multiplyScalar(decay); if(b.bendT.lengthSq()<1e-12) b.bendT.set(0,0,0); any=true; }
       if(any||this.gooDirty||this.mesh.count!==drawN){
-        const g=b.grow*b.grow*(3-2*b.grow), len=b.len*lerp(0.35,1,g), rad=b.rad*g;
+        // 100번 주물러도 실루엣이 뻣뻣한 가는 막대가 되지 않게 한다.
+        // 물리 상태의 부피·분쇄·녹음은 그대로 두고 화면에서만 길이/반경을 4 이하로 묶는다.
+        const g=b.grow*b.grow*(3-2*b.grow);
+        const rawLen=Math.min(b.len,Math.cbrt(b.vol*16)), rawRad=Math.sqrt(b.vol/Math.max(rawLen,1e-6));
+        const len=rawLen*lerp(0.35,1,g), rad=rawRad*g;
         // 굽힘 = 저절로 굽은 것(curl) + 주무른 것(bend), 둘 다 축에 수직으로 다시 맞춘다
         b.curl.addScaledVector(b.axis,-b.axis.dot(b.curl)); if(b.curl.lengthSq()<1e-6) b.curl.set(0,0,1).addScaledVector(b.axis,-b.axis.z); b.curl.normalize();
         bv.copy(b.curl).multiplyScalar(CURL*len).add(b.bend); bv.addScaledVector(b.axis,-bv.dot(b.axis));
         for(let j=0;j<SEG;j++) P[j].copy(b.p).addScaledVector(b.axis,SEG_OFF[j]*len).addScaledVector(bv,SEG_CURVE[j]);
-        c.setRGB(lerp(1,0.84,b.tone),lerp(1,0.79,b.tone),lerp(1,0.66,b.tone));
+        c.setRGB(lerp(1,0.94,b.tone),lerp(1,0.91,b.tone),lerp(1,0.88,b.tone));
         for(let j=0;j<SEG;j++){
           tg.copy(P[Math.min(SEG-1,j+1)]).sub(P[Math.max(0,j-1)]); if(tg.lengthSq()<1e-10) tg.copy(b.axis); tg.normalize();
           q.setFromUnitVectors(this._Y,tg);
@@ -363,7 +368,7 @@ export class GooLayer{
     }
     if(this.mesh.count!==drawN){ this.mesh.count=drawN; any=true; }
     if(any||this.gooDirty){ this.mesh.instanceMatrix.needsUpdate=true; if(this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate=true; }
-    const op=B.fade; if(this.mat.opacity!==op){ this.mat.opacity=op; }
+    const op=B.fade*GOO_OPACITY; if(this.mat.opacity!==op){ this.mat.opacity=op; }
     this.mesh.visible=n>0;
   }
   // 진물이 표면 가까이 있는 자리를 슬라임 정점에 찍는다

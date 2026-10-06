@@ -603,7 +603,7 @@ export class BappuBall{
         d._mixMove.copy(d.dir).sub(d._mixDir).multiplyScalar(0.42)
           .addScaledVector(d.shear,0.7)
           .addScaledVector(d._mixShear,-0.7);
-      // 깊어지는 동안만 속으로 밀어 넣는다. 손을 떼는 건 되돌리지 않는다 (눌린 모양은 surfacePoint가 보여 준다).
+      // 실제로 누르거나 끈 양만 재료를 순환시킨다. 정지·스프링 복귀는 섞는 작업이 아니다.
       d._mixDK=d.on?Math.max(0,dk):0;
       d._mixPower=Math.max(k,d._mixK);
       d._mixK=k;
@@ -616,32 +616,42 @@ export class BappuBall{
     }
     if(!flows.length) return;
 
-    const n=this._tmp[2], away=this._tmp[3], motion=this._tmp[4];
+    const n=this._tmp[2], motion=this._tmp[4];
+    const mid=this._tmp[6], v0=this._tmp[7], v1=this._tmp[8];
+    const boundary=1.01, boundary2=boundary*boundary;
+    // 손가락 방향의 안쪽 흐름과 옆/반대편의 되돌아오는 흐름을 한 쌍으로 만든다.
+    // curl(F*(dir × p)) 형태라 중심으로 빨려 들어가는 수축 항이 없고,
+    // 구의 경계에서는 접선 방향으로 흐른다. 중심에서도 끊기지 않는다.
+    const circulation=(p,d,out)=>{
+      const rr=p.lengthSq(), s=p.dot(d.dir), width=Math.max(0.15,d.w), w2=width*width;
+      const rho2=Math.max(0,rr-s*s), H=1-rr/boundary2, G=Math.exp(-rho2/w2);
+      const F=-H*G, FR=G*(1/boundary2+H/w2), Fs=2*s*F/w2;
+      return out.copy(d.dir).multiplyScalar(2*F+2*FR*rr+Fs*s)
+        .addScaledVector(p,-(2*FR*s+Fs));
+    };
     const transport=(rest,strength)=>{
       const x=rest.x,y=rest.y,z=rest.z;
       for(const d of flows){
+        const drag=Math.sqrt(d._mixMove.lengthSq())*d._mixPower;
+        const amount=strength*(0.12*d._mixDK+0.10*drag);
+        const steps=Math.max(1,Math.ceil(amount/0.02)), step=amount/steps;
+        // 중간점 적분: 긴 프레임/빠른 드래그도 흐름을 건너뛰지 않는다.
+        for(let i=0;i<steps;i++){
+          circulation(rest,d,v0);
+          mid.copy(rest).addScaledVector(v0,step*0.5);
+          circulation(mid,d,v1);
+          rest.addScaledVector(v1,step);
+          if(rest.lengthSq()>boundary2) rest.setLength(boundary);
+        }
         const r=rest.length();
         if(r<1e-6) continue;
         n.copy(rest).multiplyScalar(1/r);
         const c=clamp(n.dot(d.dir),-1,1);
         const a=Math.acos(c), w=Math.max(0.15,d.w);
-        const core=Math.exp(-a*a/(0.85*w*w));
-        const ring=Math.exp(-Math.pow((a-1.35*w)/(0.55*w),2));
         const local=Math.exp(-a*a/(2.2*w*w));
 
-        // 깊이(반지름) 변화는 여기서만. 누르며 깊어질 때와 누른 채 끌 때 손가락 밑 조각이 속으로 들어가고,
-        // 그만큼 공 전체가 아주 조금씩 겉으로 되밀린다 (부피 보존 — 조각이 속에 쌓이지 않고 천천히 다시 떠오른다).
-        // 둘레가 부푸는 건 surfacePoint 의 임시 변형이 보여 주므로 영구 좌표에는 넣지 않는다.
-        const drag=Math.sqrt(d._mixMove.lengthSq())*d._mixPower;
-        const work=d._mixDK+2*drag;
-        const rNew=r+strength*(-(0.12*d._mixDK+0.25*drag)*core
-          +(r<0.82?work*0.004*(0.82-r)/0.4:0));
+        // 깊이는 위의 순환으로만 바꾼다. 눌린 모양은 surfacePoint의 임시 변형으로 그린다.
         if(local>=0.005){
-          away.copy(n).multiplyScalar(c).sub(d.dir);
-          if(away.lengthSq()>1e-8)
-            rest.addScaledVector(away.normalize(),
-              d._mixDK*strength*0.10*ring);
-
           // 끌기는 조각을 접선 방향으로 섞는다.
           motion.copy(d._mixMove)
             .addScaledVector(n,-d._mixMove.dot(n));
@@ -652,7 +662,7 @@ export class BappuBall{
         // 접선 이동은 깊이를 바꾸지 않는다 (더하기만 하면 매번 조금씩 겉으로 밀려 나간다)
         const rr=rest.length();
         if(rr>1e-6)
-          rest.multiplyScalar(clamp(rNew,0.42,0.96)/rr);
+          rest.multiplyScalar(Math.min(r,boundary)/rr);
       }
       return Math.abs(rest.x-x)+Math.abs(rest.y-y)
         +Math.abs(rest.z-z)>1e-8;
