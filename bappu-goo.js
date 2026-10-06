@@ -84,7 +84,7 @@ export class GooLayer{
     }
     geo.setAttribute('color',new T.Float32BufferAttribute(col,3));
     // 마디마다 불투명도 (두께에 따라)
-    this.alphaAttr=new T.InstancedBufferAttribute(new Float32Array(this.cap*SEG).fill(1),1);
+    this.alphaAttr=new T.InstancedBufferAttribute(new T.Float32BufferAttribute(this.cap*SEG,1).array.fill(1),1);   // 배열은 T로 만든다: 1라운드는 다른 창(게임 창)의 THREE가 그려서, 이 파일에서 만든 배열은 받지 않는다
     this.alphaAttr.setUsage(T.DynamicDrawUsage);
     geo.setAttribute('aGooA',this.alphaAttr);
     this.mat=new T.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:0.3,metalness:0,clearcoat:0.75,clearcoatRoughness:0.2,envMap:this.ball.envMap,envMapIntensity:0.6,transparent:true,opacity:1,depthWrite:false});
@@ -98,7 +98,7 @@ export class GooLayer{
     this.mesh=new T.InstancedMesh(geo,this.mat,this.cap*SEG);
     this.mesh.count=0; this.mesh.frustumCulled=false; this.mesh.renderOrder=4;
     this.mesh.instanceMatrix.setUsage(T.DynamicDrawUsage);
-    this.mesh.instanceColor=new T.InstancedBufferAttribute(new Float32Array(this.cap*SEG*3).fill(1),3);
+    this.mesh.instanceColor=new T.InstancedBufferAttribute(new T.Float32BufferAttribute(this.cap*SEG*3,3).array.fill(1),3);
     this.mesh.instanceColor.setUsage(T.DynamicDrawUsage);
     const zero=new T.Matrix4().makeScale(0,0,0); for(let i=0;i<this.cap*SEG;i++) this.mesh.setMatrixAt(i,zero);
     this.ball.group.add(this.mesh);
