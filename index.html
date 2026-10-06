@@ -266,7 +266,7 @@ const introGo=document.getElementById('introGo');
 const mailEl=document.getElementById('mail');
 const mailOk=document.getElementById('mailOk');
 let introActive=false, startWhenReady=false;
-let mailOpen=false, mailDone=null, mailPausedGame=false;
+let mailOpen=false, mailDone=null, mailPausedGame=false, mailTok=0;   // mailTok: 편지마다 번호를 매겨, 앞 편지의 늦은 타이머가 다음 편지를 건드리지 못하게 한다
 let lastLetterAt=-1e9, feedSeen=false, labLetterShown=false;
 let killBurst=[], deathPending=0;
 
@@ -318,10 +318,12 @@ function pickFact(list){
   if(!factBag.length)factBag=list.slice().sort(()=>Math.random()-.5);
   return factBag.pop();
 }
+
 function showLetter(kind,onDone){
   const L=LETTER[kind];
   if(!L||mailOpen)return false;
   mailOpen=true;mailDone=onDone||null;
+  const tok=++mailTok;
   lastLetterAt=performance.now()/1000;
   mailEl.style.setProperty('--lc',L.color);
   const body=document.getElementById('mailBody');
@@ -344,7 +346,7 @@ function showLetter(kind,onDone){
   mailEl.classList.add('show');
   mailEl.setAttribute('aria-hidden','false');
   sfxMailIn();
-  setTimeout(()=>{if(mailOpen)mailEl.classList.add('open');},650);
+  setTimeout(()=>{if(mailOpen&&tok===mailTok)mailEl.classList.add('open');},650);
   return true;
 }
 function closeLetter(){
@@ -353,11 +355,15 @@ function closeLetter(){
   lastLetterAt=performance.now()/1000;
   sfxMailOut();
   mailEl.classList.add('closing');
-  setTimeout(()=>{mailEl.classList.remove('show','open','closing');mailEl.setAttribute('aria-hidden','true');},280);
+  // 닫히는 0.28초 사이에 다음 편지가 열리면 그 편지는 건드리지 않는다 (예전엔 새 편지까지 숨겨서, 게임이 멈춘 채 화면엔 아무것도 없었다)
+  const tok=mailTok;
+  setTimeout(()=>{ if(mailOpen||tok!==mailTok)return; mailEl.classList.remove('show','open','closing'); mailEl.setAttribute('aria-hidden','true'); },280);
   if(mailPausedGame&&G){G.paused=false;G.r1.touch?.();}
   mailPausedGame=false;
   const done=mailDone;mailDone=null;done?.();
 }
+
+
 mailOk.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeLetter();});
 mailEl.addEventListener('pointerdown',()=>{if(mailOpen)mailEl.classList.add('open');});
 
