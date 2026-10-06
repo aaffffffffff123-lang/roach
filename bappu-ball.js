@@ -64,6 +64,8 @@ export const PIECES=[
   {id:'fem2',kind:'fem',leg:2},{id:'tib2',kind:'tib',leg:2},
   {id:'ant',kind:'ant'},
 ];
+// 터지기 전 마디 틈으로 배어 나오는 진물 방울 자리 (바퀴 몸 좌표: 배 옆 둘 + 가슴과 앞가슴판 사이 하나)
+const BEAD_POS=[[0.125,0.05,-0.12],[-0.115,0.05,-0.30],[0.06,0.08,0.17]];
 export const BODY_PIECES=10;       // 앞 10개가 몸통 조각
 const NP=PIECES.length;            // 17 종류
 // 바퀴 한 마리가 차지하는 인스턴스 슬롯: 몸통 10 + 다리 12(6종×좌우) + 더듬이 6마디
@@ -168,6 +170,7 @@ export class BappuBall{
     this.buildRoaches(opts.materials);
     this.buildPieceCenters();
     this.buildCrumbs();
+    this.buildBeads();
     this.goo=new GooLayer(this);
     if(opts.shadow!==false) this.buildShadow();
     this.roaches=Array.from({length:this.count},(_,i)=>this.emptyRoach(i));
@@ -246,6 +249,7 @@ export class BappuBall{
     this.bubbleRest=[];
     const m=new T.Matrix4(), v=new T.Vector3();
     for(let i=0;i<14;i++){ const d=new T.Vector3(hash(i*3.1)-0.5,hash(i*5.7)-0.5,hash(i*9.3)-0.5).normalize().multiplyScalar(0.25+hash(i*2.2)*0.55); this.bubbleRest.push({p:d,s:0.012+hash(i*4.4)*0.02}); m.makeScale(1,1,1).setPosition(d); this.bubbles.setMatrixAt(i,m); }
+    this.bubbleAnim=new Float32Array(14).fill(-1);   // 터지는 중인 기포의 경과 시간 (-1: 가만히)
     this.group.add(this.bubbles);
   }
 
@@ -328,6 +332,16 @@ export class BappuBall{
     this.crumbTex=new T.CanvasTexture(c);
     this.crumbs=new T.Points(g,new T.PointsMaterial({color:0x3a1a0a,size:this.crumbSize*1.25,sizeAttenuation:true,map:this.crumbTex,transparent:true,opacity:0.9,depthWrite:false}));
     this.crumbs.frustumCulled=false; this.crumbs.renderOrder=3; this.group.add(this.crumbs);
+  }
+  // 터지기 전 마디 틈으로 배어 나오는 진물 방울 (바퀴마다 셋). 손가락에 눌리는 만큼 부풀고, 껍질이 터지면 진물로 튀어 나간다
+  buildBeads(){
+    const T=this.T, cap=this.count*3;
+    this._zeroM=new T.Matrix4().makeScale(0,0,0);
+    this.beadMat=new T.MeshPhysicalMaterial({color:0xece0bf,roughness:0.18,metalness:0,clearcoat:0.9,clearcoatRoughness:0.1});
+    this.beads=new T.InstancedMesh(new T.SphereGeometry(1,10,8),this.beadMat,cap);
+    this.beads.instanceMatrix.setUsage(T.DynamicDrawUsage); this.beads.count=0; this.beads.frustumCulled=false; this.beads.renderOrder=1; this.beads.castShadow=false;
+    for(let i=0;i<cap;i++) this.beads.setMatrixAt(i,this._zeroM);
+    this.group.add(this.beads);
   }
   buildShadow(){
     const T=this.T, c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d');
@@ -449,43 +463,45 @@ export class BappuBall{
   kick(v){ this.wob.vel+=v; this.dirty=true; }
 
  
+  /** 세게 눌러 부수기: 손가락 밑만 부서진다 (가까이 2단계, 둘레 1단계). 손이 닿지 않은 반대편은 그대로라서
+   *  공을 돌려 가며 남은 놈을 찾아 터뜨려야 한다. 다만 판에 깔려 안 보이는 바닥 쪽은 위에서 꾹 누를 때 판에 같이 짓눌린다.
+   *  burst: 이번에 껍질이 터진 바퀴의 겉 위치·법선·세기, 터지기 전 배어 나온 진물 양 (진물이 튀는 자리) */
   crush(dirW,strength=1){
-    const out={
-      wings:0,shells:0,legs:0,bodies:0,near:0,changed:0
-    };
-    const nW=this._tmp[17];
+    const out={wings:0,shells:0,legs:0,bodies:0,near:0,changed:0,burst:[]};
+    const nW=this._tmp[17], bp=this._tmp[18], bn=this._tmp[19], bf=this._tmp[23];
+    const fromTop=dirW.y>0.35;
     this.crushCount++;
     for(const r of this.roaches){
       if(!r.used||r.stage>=4) continue;
-      nW.copy(this.anchorDir[r.anchor])
-        .applyQuaternion(this.rollQ);
+      nW.copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ);
       const a=Math.acos(clamp(nW.dot(dirW),-1,1));
-      const add=a<0.62?2:a<1.25?1:
-        Math.random()<0.4*strength?1:0;
-      const st=Math.min(4,r.stage+add);
-      if(a<0.62) out.near++;
-      if(st>r.stage){
-        const before=r.state.slice();
-        this.setStage(r,st,a<0.9);
-        out.changed++;
-        for(let slot=0;slot<SLOTS;slot++){
-          if(before[slot]!==0||r.state[slot]===0) continue;
-          if(slot>=6&&slot<10) out.wings++;
-          else if(slot<6) out.shells++;
-          else if(slot<22) out.legs++;
-        }
-      }
       r.crush=Math.max(r.crush,1-Math.min(1,a/1.4));
+      let add=a<0.62?2:a<1.25?1:0;
+      if(!add&&fromTop&&nW.y<-0.72) add=1;                 // 판에 깔린 놈: 위에서 누르면 판에 짓눌린다
+      if(a<0.62) out.near++;
+      if(!add) continue;
+      const st=Math.min(4,r.stage+add);
+      if(st<=r.stage) continue;
+      const before=r.state.slice();
+      if(a<1.25&&((r.stage<2&&st>=2)||(st>=4&&r.stage<4))){
+        this.anchorFrame(r.anchor,r.spin,bp,bn,bf);
+        out.burst.push({p:bp.clone(),n:bn.clone(),k:r.stage<2?(a<0.62?1:0.6):0.4,bead:r.squeeze||0});
+      }
+      if(r.squeeze){ r.squeeze=0; for(let j=0;j<3;j++) this.beads.setMatrixAt(r.i*3+j,this._zeroM); this.beads.instanceMatrix.needsUpdate=true; }
+      this.setStage(r,st,a<0.9);
+      out.changed++;
+      for(let slot=0;slot<SLOTS;slot++){
+        if(before[slot]!==0||r.state[slot]===0) continue;
+        if(slot>=6&&slot<10) out.wings++;
+        else if(slot<6) out.shells++;
+        else if(slot<22) out.legs++;
+      }
     }
     this.wob.vel+=0.6;
     this.dirty=true;
-    this.brokenCount=this.roaches
-      .filter(r=>r.used&&r.stage>=4).length;
+    this.brokenCount=this.roaches.filter(r=>r.used&&r.stage>=4).length;
     return out;
   }
-
-
-
 
   allBroken(){ let u=0,b=0; for(const r of this.roaches){ if(r.used){u++; if(r.stage>=4)b++;} } return u>0&&u===b; }
   /** 단계 적용. near: 손가락 가까이(조각이 더 많이 흩어짐) */
@@ -581,6 +597,8 @@ export class BappuBall{
     this.goo.reset();
     this.crumbN=0; this.crumbs.geometry.setDrawRange(0,0); this.shardList=[]; this.shards.count=0; this.rollQ.identity(); this.rollQInv.identity();
     const zero=this._m[0].makeScale(0,0,0); for(const im of this.meshes){ const cap=im.instanceMatrix.count; for(let i=0;i<cap;i++) im.setMatrixAt(i,zero); im.instanceMatrix.needsUpdate=true; }
+    if(this.beads){ const bc=this.beads.instanceMatrix.count; for(let i=0;i<bc;i++) this.beads.setMatrixAt(i,this._zeroM); this.beads.instanceMatrix.needsUpdate=true; this.beads.count=0; }
+    this.bubbleAnim?.fill(-1);
     this.setDrawCount(0); this.dirty=true; this.fadeRoaches(1);
   }
   fadeRoaches(a){ this.fade=a; }
@@ -609,7 +627,9 @@ export class BappuBall{
     }
     if(slot<SLOT_BODY+SLOT_LEG){
       const k=Math.floor((slot-SLOT_BODY)/2), isTib=(slot-SLOT_BODY)%2===1, s=k<3?1:-1, i=k%3, d=this.legDef[i], a=r.legs;
-      const hipRy=a[k*4], femRz=a[k*4+1]+(r.twitch>0&&r.twitchLeg===k?Math.sin(r.twitchT*34)*0.35*r.twitch:0), kneeRz=a[k*4+2]+(r.twitch>0&&r.twitchLeg===k?Math.sin(r.twitchT*30+1)*0.6*r.twitch:0), kneeRy=a[k*4+3];
+      // 손가락이 근처를 누르면(agit) 다리 여섯 개가 제각각 미친 듯이 버둥거린다
+      const ag=r.agit||0, ph=this.time*(24+ag*12)+k*1.9+r.antPhase;
+      const hipRy=a[k*4]+Math.sin(ph*0.6+k)*0.28*ag, femRz=a[k*4+1]+(r.twitch>0&&r.twitchLeg===k?Math.sin(r.twitchT*34)*0.35*r.twitch:0)+Math.sin(ph)*0.42*ag, kneeRz=a[k*4+2]+(r.twitch>0&&r.twitchLeg===k?Math.sin(r.twitchT*30+1)*0.6*r.twitch:0)+Math.sin(ph*1.13+1.1)*0.55*ag, kneeRy=a[k*4+3];
       // hip(위치·y회전) → fem(z회전) → [knee(x이동, y·z회전)]
       e.set(0,hipRy,0,'XYZ'); L.makeRotationFromEuler(e); L.setPosition(s*HIP_X,HIP_Y,d.z);
       e.set(0,0,femRz,'XYZ'); Dm.makeRotationFromEuler(e); L.multiply(Dm);
@@ -618,7 +638,7 @@ export class BappuBall{
       return out.multiplyMatrices(M,L);
     }
     // 더듬이: 좌우 × 3마디, 살아 있으면 흔들린다
-    const k=slot-SLOT_BODY-SLOT_LEG, s=k<3?1:-1, seg=k%3, t=this.time*2.5, ph=r.antPhase, sw=r.alive?1:0;
+    const k=slot-SLOT_BODY-SLOT_LEG, s=k<3?1:-1, seg=k%3, t=this.time*(2.5+(r.agit||0)*9), ph=r.antPhase, sw=r.alive?1+(r.agit||0)*2.2:0;
     const w=Math.sin(t*1.7+s+ph)*0.22*sw;
     e.set(1.25+Math.sin(t+s*2+ph)*0.12*sw,s*(0.42+w),0,'YXZ'); L.makeRotationFromEuler(e); L.setPosition(s*ANT_BASE[0],ANT_BASE[1],ANT_BASE[2]);
     for(let j=0;j<=seg;j++){ e.set(-0.1+Math.sin(t*2.3+j+s+ph)*0.1*sw+(j===seg?dx:0),0,0,'XYZ'); Dm.makeRotationFromEuler(e); Dm.setPosition(0,j?0.38:0,0); L.multiply(Dm); }
@@ -655,6 +675,7 @@ export class BappuBall{
     if(any) this.dirty=true;
     this.knead(dt);
     this.goo.update(dt);
+    this.updateLife(dt);
     // 살아 있는 바퀴 경련
     for(const r of this.roaches){ if(!r.used||!r.alive)continue; if(r.twitch>0){ r.twitchT+=dt; r.twitch-=dt*1.6; if(r.twitch<=0){r.twitch=0; this.markLeg(r);} else this.markLeg(r); } else if(Math.random()<dt*0.12){ r.twitch=1; r.twitchT=0; r.twitchLeg=Math.floor(Math.random()*6); } }
     if(this.dirty){ this.updateSlime(); this.updateRoaches(); this.updateCrumbs(); this.dirty=false; this.fragDirty=true; }
@@ -663,6 +684,60 @@ export class BappuBall{
   }
 
 
+  /** 손가락 밑에 아직 터질 게 얼마나 있나 (0이면 없음). 터지기 전 버팀 소리와 누름 속도에 쓴다 */
+  pressureAt(dirW){
+    let s=0; const nW=this._tmp[15];
+    for(const r of this.roaches){ if(!r.used||r.stage>=4) continue; nW.copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ); const a=Math.acos(clamp(nW.dot(dirW),-1,1)); if(a<0.62) s+=(r.stage<2?1:0.45)*(1-0.5*a/0.62); }
+    return s;
+  }
+  /** 살아 있는 놈의 반응과 진물 방울: 손가락이 근처를 누르면 다리·더듬이를 버둥거리고, 바로 밑에서 눌리는 놈은 마디 틈으로 진물이 배어 나온다 */
+  updateLife(dt){
+    const nW=this._tmp[15], m=this._m[0], L=this._m[1];
+    const ka=1-Math.exp(-7*dt), kb=1-Math.exp(-2.2*dt), ks=1-Math.exp(-6*dt);
+    let beadsUp=false, agitated=false;
+    for(const r of this.roaches){
+      if(!r.used) continue;
+      let ag=0, sq=0;
+      if(r.alive&&r.stage<2){
+        nW.copy(this.anchorDir[r.anchor]).applyQuaternion(this.rollQ);
+        for(const d of this.dents){
+          const k=clamp(d.k,0,1); if(!d.on&&k<0.04) continue;
+          const a=Math.acos(clamp(nW.dot(d.dir),-1,1)); if(a>1.7) continue;
+          ag=Math.max(ag,Math.exp(-(a*a)/1.2)*(0.35+0.65*k));
+          if(a<0.9) sq=Math.max(sq,clamp((k-0.22)/0.5,0,1)*Math.exp(-(a*a)/0.3));
+        }
+      }
+      const pa=r.agit||0; r.agit=pa+(ag-pa)*(ag>pa?ka:kb); if(r.agit<0.02) r.agit=0; else agitated=true;
+      const pq=r.squeeze||0; r.squeeze=pq+(sq-pq)*(sq>pq?ks:kb); if(r.squeeze<0.01) r.squeeze=0;
+      if(r.squeeze>0||pq>0){
+        beadsUp=true;
+        for(let j=0;j<3;j++){
+          if(r.squeeze<=0){ this.beads.setMatrixAt(r.i*3+j,this._zeroM); continue; }
+          const bp=BEAD_POS[j], s=0.08*Math.sqrt(r.squeeze)*(0.75+0.5*hash(r.i*5.1+j)), side=j===2&&hash(r.i*2.3)<0.5?-1:1;
+          L.makeScale(s,s*0.8,s).setPosition(bp[0]*side,bp[1],bp[2]);
+          m.multiplyMatrices(r.anchorMat,L); this.beads.setMatrixAt(r.i*3+j,m);
+        }
+      }
+    }
+    if(beadsUp){ this.beads.count=this.count*3; this.beads.instanceMatrix.needsUpdate=true; }
+    if(agitated) this.dirty=true;
+    // 터진 기포: 작아지며 사라졌다가 잠시 뒤 다른 자리에서 다시 생긴다
+    const A=this.bubbleAnim; let bub=false;
+    for(let i=0;i<A.length;i++){
+      if(A[i]<0) continue; A[i]+=dt; bub=true;
+      if(A[i]>1.9) A[i]=-1;
+      else if(A[i]>1.5&&!this.bubbleRest[i].moved){ this.bubbleRest[i].p.set(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize().multiplyScalar(0.25+Math.random()*0.55); this.bubbleRest[i].moved=true; }
+    }
+    if(bub) this.dirty=true;
+  }
+  /** 손가락 가까운 기포 하나를 터뜨린다 */
+  popBubble(dirW){
+    let best=-1, bd=-2; const v=this._tmp[15];
+    for(let i=0;i<this.bubbleRest.length;i++){ if(this.bubbleAnim[i]>=0) continue; const d=v.copy(this.bubbleRest[i].p).normalize().dot(dirW); if(d>bd){ bd=d; best=i; } }
+    if(best>=0&&bd>0.2){ this.bubbleAnim[best]=0; this.bubbleRest[best].moved=false; this.dirty=true; return true; }
+    return false;
+  }
+  bubbleScale(i){ const t=this.bubbleAnim?this.bubbleAnim[i]:-1; if(t<0) return 1; if(t<0.07) return 1-t/0.07; if(t<1.5) return 0; return Math.min(1,(t-1.5)/0.4); }
   knead(dt){
     const T=this.T, flows=[];
     for(const d of this.dents){
@@ -809,7 +884,7 @@ export class BappuBall{
     for(let i=0;i<pos.count;i++){ n.set(base[i*3],base[i*3+1],base[i*3+2]); this.surfacePoint(n,o); arr[i*3]=o.x; arr[i*3+1]=o.y; arr[i*3+2]=o.z; }
     pos.needsUpdate=true; this.slimeGeo.computeVertexNormals(); this.slimeGeo.computeBoundingSphere();
     const m=this._m[0];
-    for(let i=0;i<this.bubbleRest.length;i++){ const b=this.bubbleRest[i]; this.interiorPoint(b.p,o); m.makeScale(b.s,b.s,b.s); m.setPosition(o); this.bubbles.setMatrixAt(i,m); }
+    for(let i=0;i<this.bubbleRest.length;i++){ const b=this.bubbleRest[i]; this.interiorPoint(b.p,o); const bs=b.s*this.bubbleScale(i); m.makeScale(bs,bs,bs); m.setPosition(o); this.bubbles.setMatrixAt(i,m); }
     this.bubbles.instanceMatrix.needsUpdate=true;
     if(this.shadow){ const k=1-this.lift; this.shadow.scale.setScalar((0.75+0.3*(1-this.lift)+this.spreadV*0.1)*(1+0.12*this.squat)); this.shadow.material.opacity=k*0.95*this.fade; this.shadow.visible=k>0.02; }
     this.matFront.opacity=this.fade; this.matBack.opacity=this.fade; this.bubbles.material.opacity=0.35*this.fade;
@@ -923,7 +998,7 @@ export class BappuBall{
 
 
 
-  dispose(){ this.goo.dispose(); for(const im of this.meshes){ im.geometry.dispose(); } this.slimeGeo.dispose(); this.envMap.dispose(); this.crumbTex.dispose(); this.crumbs.geometry.dispose(); this.crumbs.material.dispose(); this.matFront.dispose(); this.matBack.dispose(); this.matWing.dispose(); if(this.shadow){ this.shadow.material.map.dispose(); this.shadow.material.dispose(); } }
+  dispose(){ this.beads.geometry.dispose(); this.beadMat.dispose(); this.goo.dispose(); for(const im of this.meshes){ im.geometry.dispose(); } this.slimeGeo.dispose(); this.envMap.dispose(); this.crumbTex.dispose(); this.crumbs.geometry.dispose(); this.crumbs.material.dispose(); this.matFront.dispose(); this.matBack.dispose(); this.matWing.dispose(); if(this.shadow){ this.shadow.material.map.dispose(); this.shadow.material.dispose(); } }
 }
 
 function setSlimeMurk(mat,level){

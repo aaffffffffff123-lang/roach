@@ -18,6 +18,11 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#e9e0d0;tou
 #viewHome:active{transform:translateY(2px)}
 #viewHint{position:fixed;z-index:4;left:50%;bottom:calc(72px + env(safe-area-inset-bottom));transform:translateX(-50%);width:max-content;max-width:min(560px,80vw);padding:9px 14px;border-radius:999px;background:rgba(25,17,13,.8);color:#f8f0dc;font:800 12px/1.35 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center;word-break:keep-all;opacity:0;transition:opacity .25s;pointer-events:none}
 #viewHint.show{opacity:1}
+#ordinal{position:fixed;z-index:3;left:50%;top:calc(17px + env(safe-area-inset-top));transform:translateX(-50%);padding:8px 13px;border-radius:999px;background:rgba(248,240,220,.88);color:#302017;font:900 12px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 1px 0 rgba(114,76,43,.55);opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+#ordinal.show{opacity:1}
+#wipeBtn{position:fixed;z-index:4;right:calc(12px + env(safe-area-inset-right));bottom:calc(68px + env(safe-area-inset-bottom));height:44px;padding:0 15px;border:0;border-radius:999px;background:rgba(248,240,220,.94);color:#302017;font:900 13px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 2px 0 rgba(114,76,43,.7),0 7px 20px rgba(0,0,0,.3);opacity:0;visibility:hidden;transition:opacity .2s,visibility 0s linear .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#wipeBtn.show{opacity:1;visibility:visible;transition:opacity .2s}
+#wipeBtn:active{transform:translateY(2px)}
 
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
@@ -27,9 +32,12 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#e9e0d0;tou
 <div id="err" role="alert"></div>
 <button id="viewHome" type="button">시점 원위치</button>
 <div id="viewHint"></div>
+<div id="ordinal"></div>
+<button id="wipeBtn" type="button">바닥 닦기</button>
 <script type="module">
 import * as THREE from 'three';
 import {BappuBall,FLOOR,ROACH_COUNT} from './bappu-ball.js';
+import {Tally} from './tally.js';
 
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const lerp=(a,b,t)=>a+(b-a)*t;
@@ -148,6 +156,48 @@ class SlimeSfx{
   }
 
 
+  /** 터지기 전 버팀: 껍질이 끼익거리고 자글자글 금 가는 소리. level 0~1 (누른 깊이), amount 손가락 밑에 터질 게 얼마나 있나 */
+  strain(level,amount=1){
+    this.ensure(); if(!this.ctx)return; const t=this.ctx.currentTime;
+    if(t<(this.nextStrain||0))return;
+    const l=clamp(level), a=clamp(amount,0.35,1.6);
+    this.nextStrain=t+lerp(0.13,0.028,l)*rand(0.75,1.25);
+    this.grains(0,0.02+l*0.03,1+Math.round(l*3),(0.035+l*0.12)*a,2200,6500,2);                       // 자글자글 금 가는 소리
+    if(Math.random()<0.18+l*0.5){ const f=rand(520,880); this.burst({dur:rand(0.035,0.07),gain:(0.03+l*0.08)*a,freq:f,q:7,freqEnd:f*rand(0.6,0.8),att:0.006,pan:rand(-0.3,0.3)}); }   // 끼익
+    if(l>0.55&&Math.random()<l*0.35) this.ping({dur:0.008,gain:(0.04+l*0.06)*a,freq:rand(2800,4200),freqEnd:rand(1400,2000),type:'triangle',pan:rand(-0.4,0.4)});   // 마디 하나가 먼저 톡
+  }
+  /** 슬라임 속 공기 방울이 터지는 뽁 */
+  pop(size=0.5){
+    this.ensure(); if(!this.ctx)return; const s=clamp(size,0.2,1), f=rand(900,1600)*(1.25-s*0.45);
+    this.ping({dur:0.03+s*0.02,gain:0.09+s*0.08,freq:f,freqEnd:f*0.42,type:'sine',att:0.0015,pan:rand(-0.5,0.5)});
+    this.burst({dur:0.004,gain:0.06+s*0.05,type:'highpass',freq:3000,q:0.7});
+    this.ping({t:0.004,dur:0.02,gain:0.05*s,freq:220,freqEnd:120,type:'sine'});
+  }
+  /** 손가락에 들러붙어 쩌억 늘어나는 소리 */
+  stretch(k){
+    this.ensure(); if(!this.ctx)return; const s=clamp(k,0.3,1);
+    this.burst({dur:0.12+s*0.1,gain:0.05+s*0.07,freq:420,q:3.5,freqEnd:1300,att:0.02,rate:0.7});
+    this.burst({dur:0.1,gain:0.03+s*0.04,type:'lowpass',freq:300,freqEnd:500,att:0.02});
+  }
+  /** 실이 끊기며 똑 */
+  snap(k){
+    this.ensure(); if(!this.ctx)return; const s=clamp(k,0.3,1);
+    this.ping({dur:0.025,gain:0.1+s*0.06,freq:rand(950,1250),freqEnd:330,type:'sine',att:0.001});
+    this.burst({dur:0.006,gain:0.05+s*0.04,freq:2600,q:1.2});
+    this.burst({t:0.02,dur:0.06,gain:0.04,type:'lowpass',freq:380,freqEnd:160,att:0.004});
+  }
+  /** 진물 방울이 판에 떨어지는 톡 (콰삭 직후라 축축한 소리처럼 눌리지 않게 콰삭 길로) */
+  drip(size){
+    this.ensure(); if(!this.ctx)return; const t=this.ctx.currentTime; if(t-(this.lastDrip||0)<0.022)return; this.lastDrip=t; const s=clamp(size,0.2,1);
+    this.ping({dur:0.018+s*0.02,gain:0.014+s*0.022,freq:rand(700,1300)*(1.2-s*0.4),freqEnd:rand(250,400),type:'sine',att:0.001,pan:rand(-0.6,0.6),out:this.crunchBus});
+    this.burst({dur:0.012,gain:0.012+s*0.016,type:'lowpass',freq:900,freqEnd:300,att:0.001,out:this.crunchBus});
+  }
+  /** 바닥 닦기: 걸레로 두 번 쓱 */
+  wipe(){
+    this.ensure(); if(!this.ctx)return;
+    for(const [t,g] of [[0,0.16],[0.32,0.13]]){ this.burst({t,dur:0.26,gain:g,freq:900,q:0.9,freqEnd:2600,att:0.05,rate:0.9}); this.burst({t:t+0.02,dur:0.22,gain:g*0.6,type:'lowpass',freq:500,freqEnd:260,att:0.04}); }
+    for(let i=0;i<5;i++) this.ping({t:0.05+i*0.11,dur:0.02,gain:0.02,freq:rand(500,900),freqEnd:rand(300,400),type:'sine'});
+  }
   /** 축축한 슬라임 */
   wet(strength=0.5,force=false){
     this.ensure(); if(!this.ctx)return; const t=this.ctx.currentTime; if(!force&&t-this.lastWet<0.13)return; this.lastWet=t; const s=clamp(strength,0.15,1);
@@ -309,6 +359,140 @@ function makeBall(){
   window.__labBall=ball;   // 점검용
 }
 
+// ───────── 진물 방울 · 판 얼룩 ─────────
+// 콰삭 순간 껍질이 터진 바퀴 자리에서 진물이 튀어 판에 떨어지고, 떨어진 자리마다 얼룩이 쌓여 공 둘레가 점점 젖는다.
+// 얼룩은 공을 버리고 새로 만들어도 남는다. 「바닥 닦기」로만 지워진다.
+const BOARD_W=5.6, BOARD_D=4.6, STAIN_W=1024, STAIN_H=Math.round(1024*BOARD_D/BOARD_W);
+const stainCanvas=document.createElement('canvas'); stainCanvas.width=STAIN_W; stainCanvas.height=STAIN_H;
+const sg=stainCanvas.getContext('2d');
+const stainTex=new THREE.CanvasTexture(stainCanvas); stainTex.colorSpace=THREE.SRGBColorSpace; stainTex.anisotropy=4;
+const stainPlane=new THREE.Mesh(new THREE.PlaneGeometry(BOARD_W,BOARD_D),new THREE.MeshPhysicalMaterial({map:stainTex,transparent:true,roughness:0.26,metalness:0,clearcoat:0.8,clearcoatRoughness:0.18,depthWrite:false}));
+stainPlane.rotation.x=-Math.PI/2; stainPlane.position.y=BOARD_TOP+0.0015; stainPlane.receiveShadow=true; scene.add(stainPlane);
+let stainCount=0, stainDirty=false, wiping=null, wipeShown=false, wetShown=0;
+// 공 둘레가 전체적으로 젖어 어두워지는 판 (얼룩이 쌓일수록 짙어진다)
+const wetTex=(()=>{ const c=document.createElement('canvas'); c.width=c.height=256; const x=c.getContext('2d'); const g=x.createRadialGradient(128,128,20,128,128,128); g.addColorStop(0,'rgba(120,92,58,1)'); g.addColorStop(0.45,'rgba(120,92,58,0.75)'); g.addColorStop(1,'rgba(120,92,58,0)'); x.fillStyle=g; x.fillRect(0,0,256,256); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t; })();
+const wetPlane=new THREE.Mesh(new THREE.PlaneGeometry(4.4,4.4),new THREE.MeshPhysicalMaterial({map:wetTex,transparent:true,opacity:0,roughness:0.2,metalness:0,clearcoat:0.9,clearcoatRoughness:0.15,depthWrite:false}));
+wetPlane.rotation.x=-Math.PI/2; wetPlane.position.y=BOARD_TOP+0.0008; wetPlane.visible=false; scene.add(wetPlane);
+const DROP_CAP=220;
+const drops=new THREE.InstancedMesh(new THREE.SphereGeometry(1,10,8),new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:0.18,metalness:0,clearcoat:0.9,clearcoatRoughness:0.1}),DROP_CAP);
+drops.instanceMatrix.setUsage(THREE.DynamicDrawUsage); drops.frustumCulled=false; drops.castShadow=false;
+const CREAM=new THREE.Color(0xe9dcbc), GUT=new THREE.Color(0x8e6640);
+drops.setColorAt(0,CREAM); drops.count=0; scene.add(drops);
+const dropList=[];
+const _dm=new THREE.Matrix4(), _dq=new THREE.Quaternion(), _dv=new THREE.Vector3(), _dy=new THREE.Vector3(0,1,0), _ds=new THREE.Vector3(), _bc=new THREE.Vector3(), _dn=new THREE.Vector3(), _dt=new THREE.Vector3();
+// 판 얼룩 하나: 크림색 곤죽(가끔 소화관 갈색), 가장자리는 짙게 마른 테두리, 둘레에 작게 튄 점
+function stamp(x,z,r,gut){
+  const px=(x+BOARD_W/2)/BOARD_W*STAIN_W, py=(z+BOARD_D/2)/BOARD_D*STAIN_H, pr=Math.max(3,r/BOARD_W*STAIN_W);
+  if(px<-pr||py<-pr||px>STAIN_W+pr||py>STAIN_H+pr)return;
+  const base=gut?'118,84,52':'224,207,168', rim=gut?'82,56,32':'172,142,98';
+  sg.save(); sg.translate(px,py); sg.rotate(Math.random()*Math.PI);
+  const sx=1+Math.random()*0.6;
+  for(let i=0,n=3+Math.floor(Math.random()*3);i<n;i++){
+    const ox=(Math.random()-0.5)*pr*0.8, oy=(Math.random()-0.5)*pr*0.5, rr=pr*(0.55+Math.random()*0.5);
+    const g=sg.createRadialGradient(ox,oy,0,ox,oy,rr);
+    g.addColorStop(0,`rgba(${base},${(0.6+Math.random()*0.2).toFixed(2)})`); g.addColorStop(0.7,`rgba(${base},0.55)`); g.addColorStop(0.9,`rgba(${rim},0.72)`); g.addColorStop(1,`rgba(${rim},0)`);
+    sg.fillStyle=g; sg.beginPath(); sg.ellipse(ox,oy,rr*sx,rr,0,0,Math.PI*2); sg.fill();
+  }
+  sg.fillStyle=`rgba(${base},0.7)`;
+  for(let i=0,n=2+Math.floor(Math.random()*4);i<n;i++){ const a=Math.random()*Math.PI*2, d=pr*(1.2+Math.random()*1.6), rr=pr*(0.08+Math.random()*0.16); sg.beginPath(); sg.arc(Math.cos(a)*d,Math.sin(a)*d,rr,0,Math.PI*2); sg.fill(); }
+  sg.restore();
+  stainCount++; stainDirty=true;
+}
+/** 껍질이 터진 자리마다 진물이 튄다. 터지기 전 많이 배어 나왔을수록 크고 많다 */
+function spawnSplat(burst){
+  if(!burst||!burst.length||!ball)return;
+  const g=ball.group; g.updateMatrixWorld(); let made=0;
+  for(const b of burst){
+    const n=b.k>0.8?1+(Math.random()<0.5?1:0)+((b.bead||0)>0.5?1:0):(Math.random()<0.5?1:0);
+    for(let i=0;i<n&&made<12&&dropList.length<DROP_CAP;i++,made++){
+      const p=g.localToWorld(b.p.clone()); _dn.copy(b.n).transformDirection(g.matrixWorld);
+      _dt.set(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5); _dt.addScaledVector(_dn,-_dt.dot(_dn)).normalize();
+      const v=_dn.clone().multiplyScalar(rand(1.3,2.6)*(0.7+0.5*b.k)).addScaledVector(_dt,rand(0.3,1.1)); v.y+=rand(0.6,1.5);
+      dropList.push({p:p.addScaledVector(_dn,0.02),v,r:rand(0.012,0.026)*(1+(b.bead||0)*0.6),gut:Math.random()<0.25,t:0});
+    }
+  }
+}
+function clearFlying(){ dropList.length=0; drops.count=0; for(const st of strands){ scene.remove(st.m,st.tip); } strands.length=0; }
+function updateSplats(dt){
+  const c=ball.group.position, R=ball.R;
+  for(let i=dropList.length-1;i>=0;i--){
+    const d=dropList[i]; d.t+=dt; d.v.y-=7.5*dt; d.p.addScaledVector(d.v,dt);
+    _bc.copy(d.p).sub(c);
+    if(d.t>0.06&&_bc.length()<0.97*R&&d.p.y>BOARD_TOP+0.05){ dropList.splice(i,1); continue; }   // 공으로 다시 떨어지면 슬라임에 먹힌다
+    if(d.p.y<=BOARD_TOP+d.r*0.5){
+      if(Math.hypot(d.p.x-c.x,d.p.z-c.z)>1.05*R) stamp(d.p.x,d.p.z,d.r*rand(2.6,4.2),d.gut);
+      SFX.drip(d.r/0.03); dropList.splice(i,1); continue;
+    }
+    if(d.t>3) dropList.splice(i,1);
+  }
+  drops.count=dropList.length;
+  for(let i=0;i<dropList.length;i++){
+    const d=dropList[i], sp=d.v.length();
+    _dv.copy(d.v).multiplyScalar(1/Math.max(sp,1e-4)); _dq.setFromUnitVectors(_dy,_dv); _ds.set(d.r,d.r*(1+Math.min(1.6,sp*0.22)),d.r);
+    _dm.compose(d.p,_dq,_ds); drops.setMatrixAt(i,_dm); drops.setColorAt(i,d.gut?GUT:CREAM);
+  }
+  if(dropList.length){ drops.instanceMatrix.needsUpdate=true; drops.instanceColor.needsUpdate=true; }
+  if(wiping) updateWipe(dt);
+  if(stainDirty){ stainTex.needsUpdate=true; stainDirty=false; }
+  const wetT=wiping?0:Math.min(0.42,stainCount*0.0042); if(Math.abs(wetT-wetShown)>0.002){ wetShown+=(wetT-wetShown)*(1-Math.exp(-(wiping?6:1.5)*dt)); wetPlane.material.opacity=wetShown; wetPlane.visible=wetShown>0.004; }
+  const want=stainCount>0&&!wiping&&!tossing;
+  if(want!==wipeShown){ wipeShown=want; wipeBtn.classList.toggle('show',want); }
+}
+// 바닥 닦기: 걸레가 왼쪽에서 오른쪽으로 쓸고 지나간 자리부터 지워진다
+const wipeBtn=document.getElementById('wipeBtn');
+function startWipe(){ if(wiping||!stainCount)return; wiping={t:0}; SFX.wipe(); }
+function updateWipe(dt){
+  wiping.t+=dt; const k=clamp(wiping.t/0.62), x=k*(STAIN_W+260)-130;
+  sg.save(); sg.globalCompositeOperation='destination-out';
+  const g=sg.createLinearGradient(x-130,0,x+130,0); g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  sg.fillStyle=g; sg.fillRect(0,0,Math.min(STAIN_W,x+130),STAIN_H); sg.restore(); stainDirty=true;
+  if(k>=1){ sg.clearRect(0,0,STAIN_W,STAIN_H); stainCount=0; wiping=null; }
+}
+wipeBtn.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); startWipe(); });
+
+// ───────── 손가락에 늘어나는 실 ─────────
+// 깊게 눌렀다 떼면 슬라임이 손가락에 들러붙어 실처럼 늘어났다가 똑 끊기고 되돌아간다. 슬라임이 물들면 실도 같이 물든다
+const strandGeo=new THREE.LatheGeometry(Array.from({length:14},(_,i)=>{ const y=i/13; return new THREE.Vector2(0.16+0.84*Math.pow(1-y,3.2),y); }),16);
+const tipGeo=new THREE.SphereGeometry(1,12,10);
+const strandMat=new THREE.MeshPhysicalMaterial({color:0xbfeee6,roughness:0.05,metalness:0,transparent:true,opacity:0.78,clearcoat:1,clearcoatRoughness:0.05,envMapIntensity:2.2,depthWrite:false,depthTest:false,side:THREE.DoubleSide});   // 당겨 올린 실은 늘 공보다 앞이라 바퀴에 가려지지 않게
+const strands=[], CLEAR_TINT=new THREE.Color(0xbfeee6), DYE_TINT=new THREE.Color(0xc99a62), _sn=new THREE.Vector3(), _sp=new THREE.Vector3(), _sq=new THREE.Vector3();
+function spawnStrand(d){
+  if(strands.length>=3||!ball)return;
+  const k=clamp(d.k,0,1), g=ball.group; g.updateMatrixWorld();
+  const n=d.dir.clone().normalize(); ball.surfaceFrame(n,_sp,_sn); g.localToWorld(_sp); _sn.transformDirection(g.matrixWorld);
+  const toCam=camera.position.clone().sub(_sp).normalize(), up=new THREE.Vector3(0,1,0).applyQuaternion(camera.quaternion);
+  const dir=_sn.clone().multiplyScalar(0.35).addScaledVector(up,0.8).addScaledVector(toCam,0.15).normalize();   // 화면에서 위로 늘어나 보이게
+  const m=new THREE.Mesh(strandGeo,strandMat), tip=new THREE.Mesh(tipGeo,strandMat);
+  m.renderOrder=22; tip.renderOrder=22; m.frustumCulled=false; tip.frustumCulled=false; scene.add(m,tip);
+  if(ball.envMap){ strandMat.envMap=ball.envMap; strandMat.needsUpdate=true; }
+  strands.push({n,dir,k,t:0,snapAt:0.14+0.12*k+rand(0,0.06),maxLen:0.26+0.36*k,r0:0.07+0.05*k,m,tip,snapped:false,len:0});
+  SFX.stretch(k);
+}
+function updateStrands(dt){
+  if(!strands.length)return;
+  strandMat.color.copy(CLEAR_TINT).lerp(DYE_TINT,(ball.goo?.dyeShown||0)*0.75);
+  const g=ball.group;
+  for(let i=strands.length-1;i>=0;i--){
+    const s=strands[i]; s.t+=dt; let r;
+    if(!s.snapped){ const u=clamp(s.t/s.snapAt); s.len=s.maxLen*(1-Math.pow(1-u,2.2)); r=s.r0*(1-0.45*u); if(u>=1){ s.snapped=true; s.t=0; SFX.snap(s.k); ball.kick(0.25); } }
+    else{ s.len*=Math.exp(-18*dt); r=s.r0*0.55*Math.exp(-7*s.t); if(s.t>0.32){ scene.remove(s.m,s.tip); strands.splice(i,1); continue; } }
+    ball.surfaceFrame(s.n,_sp,_sq); g.localToWorld(_sp);
+    _dq.setFromUnitVectors(_dy,s.dir);
+    s.m.position.copy(_sp); s.m.quaternion.copy(_dq); s.m.scale.set(r,Math.max(0.001,s.len),r);
+    s.tip.position.copy(_sp).addScaledVector(s.dir,s.len); s.tip.scale.setScalar(s.snapped?r*0.3:r*0.34);
+  }
+}
+
+// ───────── 진동 · 번째 ─────────
+// 콰삭 진동: 첫 파열은 짧고 굵게, 같이 으스러진 마리 수만큼 잔진동 (안드로이드). 아이폰 사파리는 웹에서 진동을 낼 방법이 없다
+function buzz(n){
+  if(!navigator.vibrate)return;
+  const pat=[26]; for(let i=1;i<Math.min(5,n);i++) pat.push(Math.round(rand(18,30)),Math.round(rand(9,15)));
+  try{ navigator.vibrate(pat); }catch(e){}
+}
+const ordEl=document.getElementById('ordinal');
+function showOrdinal(){ const n=Tally.get('bappu'); ordEl.textContent=n>0?`${n}번째 바뿌볼`:''; ordEl.classList.toggle('show',n>0); }
+
 // ───────── 손가락 ─────────
 const pointers=new Map();
 const raycaster=new THREE.Raycaster(), ndc=new THREE.Vector2(), hitLocal=new THREE.Vector3(), tmpV=new THREE.Vector3(), tmpV2=new THREE.Vector3();
@@ -427,6 +611,7 @@ function onUp(e){
   pointers.delete(e.pointerId);
   const d=ball.release(e.pointerId);
   if(e.type==='pointerup') SFX.gesture('release',d?Math.abs(d.k):0.2,wetMix());
+  if(e.type==='pointerup'&&d&&d.k>0.42&&!tossing) spawnStrand(d);   // 깊게 눌렀다 떼면 실처럼 늘어난다
   try{if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}catch(err){}
 }
 function cancelAll(){ for(const id of [...pointers.keys()]){ pointers.delete(id); ball?.release(id); } viewPtrs.clear(); pinchD=0; SFX.rub(0); }
@@ -453,11 +638,14 @@ function strongPress(p){
       lastKind=kind; crunched=true;
       // 부술수록 작아지던 것을 없앴다: 마지막 한 마리까지 같은 세기로 콰삭
       SFX.crunch(kind,1,{wings:res.wings,shells:res.shells,legs:res.legs,near:res.near,changed:res.changed});
+      spawnSplat(res.burst); buzz(Math.max(1,res.near));
     }
     if(ball.allBroken())wetStage=true;
   }
   // 콰삭이 난 순간에는 꾹 눌리는 축축한 소리를 겹치지 않는다 (콰삭이 묻히지 않게)
   if(!crunched) SFX.gesture('press',0.95,wetMix());
+  // 다 부순 뒤 꾹 누르면 속 공기 방울이 뽁 터진다
+  if(wetStage&&Math.random()<0.6){ const dir=p.dent.dir.clone(); setTimeout(()=>{ if(!appPaused&&ball){ SFX.pop(rand(0.4,1)); ball.popBubble(dir); } },rand(40,180)); }
   if(wetStage||ball.fragmentContact(p.dent.dir)>0.15)
     SFX.tiny(wetStage?0.3:0.45);
   ball.kick(wetStage?0.8:1.1);
@@ -477,7 +665,11 @@ function frame(){
   let rubLevel=0, pinch=0;
   if(pointers.size>=2){ const ps=[...pointers.values()]; const d0=Math.hypot(ps[0].x0-ps[1].x0,ps[0].y0-ps[1].y0)||1, d1=Math.hypot(ps[0].x-ps[1].x,ps[0].y-ps[1].y); pinch=clamp((d0-d1)/d0*2.2,0,1); }
   for(const p of pointers.values()){
-    const d=p.dent; p.held+=dt; d.target=Math.min(1,Math.max(d.target,0.3+p.held*1.25+pinch*0.8));
+    const d=p.dent; p.held+=dt;
+    // 터지기 전 버팀: 손가락 밑에 터질 게 있으면 조금 천천히 깊어지고, 껍질이 끼익·자글자글 금 가는 소리가 점점 커진다
+    const intact=wetStage?0:ball.pressureAt(d.dir);
+    d.target=Math.min(1,Math.max(d.target,0.3+p.held*(intact>0.05?0.95:1.25)+pinch*0.8));
+    if(!p.strong&&intact>0.05) SFX.strain(clamp((d.k-0.3)/0.44),intact);
     if(!p.strong&&d.k>0.74) strongPress(p);
     
     
@@ -492,6 +684,8 @@ function frame(){
     if(motion>0.08&&
        Math.random()<dt*motion*3*(p.contact||0))
       SFX.tiny(0.2+motion*0.45);
+    // 세게 주무를수록 속 공기 방울이 뽁뽁 터진다
+    if(d.k>0.35&&motion>0.12&&Math.random()<dt*motion*d.k*2.4){ SFX.pop(rand(0.3,0.9)); ball.popBubble(d.dir); }
     p.speed*=Math.exp(-6*dt);
   }
   let slideLevel=0;
@@ -507,7 +701,7 @@ function frame(){
     g.position.set(-k*k*7.5,BOARD_TOP+FLOOR+Math.sin(k*Math.PI)*2.6-k*k*1.2,k*1.5); g.rotation.z=k*2.6; g.rotation.x=k*0.8;
     if(k>=1){ tossing=null; appPaused=true; if(window.parent!==window)parent.postMessage({type:'slime-lab-tossed'},location.origin); }
   }
-  updateView(dt); renderer.render(scene,camera);
+  updateSplats(dt); updateStrands(dt); updateView(dt); renderer.render(scene,camera);
 }
 
 
@@ -546,16 +740,17 @@ function enter(payload={}){
   }
  
  
-  wetStage=ball.allBroken(); started=true; resetView(); appPaused=false; cancelAll(); wake(); ball.kick(0.6); return api;
+  wetStage=ball.allBroken(); started=true; resetView(); showOrdinal(); appPaused=false; cancelAll(); wake(); ball.kick(0.6); return api;
 }
 function sleep(){ appPaused=true; cancelAll(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } SFX.suspend(); return api; }
 function wake(){ if(disposed)return api; appPaused=false; last=performance.now()/1000; resize(); if(!rafId)rafId=requestAnimationFrame(frame); SFX.resume(); return api; }
-function reset(){ cancelAll(); resetView(); tossing=null; if(ball){ ball.reset(); ball.group.position.set(0,BOARD_TOP+FLOOR,0); ball.group.rotation.set(0,0,0); ball.group.scale.setScalar(ball.R); } wetStage=false; started=false; return api; }
+function reset(){ cancelAll(); resetView(); clearFlying(); tossing=null; if(ball){ ball.reset(); ball.group.position.set(0,BOARD_TOP+FLOOR,0); ball.group.rotation.set(0,0,0); ball.group.scale.setScalar(ball.R); } wetStage=false; started=false; return api; }
 /** 바뿌볼 버리기: 던지는 연출 뒤 부모 창에 slime-lab-tossed 를 보낸다 */
 function toss(){ if(!ball||tossing)return api; cancelAll(); tossing={t:0}; SFX.ensure(); SFX.wet(1,true); SFX.burst({dur:0.42,gain:0.22,freq:900,freqEnd:260,q:0.8,att:0.03,rate:0.8}); SFX.burst({t:0.62,dur:0.09,gain:0.3,type:'lowpass',freq:380,freqEnd:120,att:0.004}); SFX.ping({t:0.62,dur:0.08,gain:0.16,freq:90,freqEnd:45,type:'triangle'}); return api; }
 function getState(){ return ball?ball.getState():null; }
 function sendClose(){ if(window.parent!==window)parent.postMessage({type:'slime-lab-close'},location.origin); }
 const api={init,enter,sleep,wake,reset,toss,getState,isWet:()=>wetStage,
+  _debugFx:()=>({strands:strands.length,drops:dropList.length,stains:stainCount}),   // 점검용
   _debugStrong(x,y){ const h=hitBall(x,y); if(!h)return false; const d=ball.press('dbg',h.clone().normalize(),{depth:0.9}); d.k=0.9; strongPress({dent:d,strong:false}); ball.release('dbg'); return true; }}; // 점검용
 window.SlimeLab=api;
 resize();

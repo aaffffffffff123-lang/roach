@@ -1,6 +1,7 @@
 // slime-mode.js — 1라운드 「슬라임」 아이템과 바뿌볼 화면 연결 (index.html에서 불러 쓴다)
 // 족집게와 같은 방식: 게임 창의 three.js로 공을 만들어 게임 장면에 넣고, 입력은 게임 Input 앞에서 가로챈다.
 import {BappuBall,extractRoachGeos,bakeRoachPose,ROACH_COUNT,FLOOR} from './bappu-ball.js';
+import {Tally} from './tally.js';
 
 const R=0.25;                    // 공 반지름(게임 단위). 바퀴 길이 0.148의 3.4배 → 지름 12cm쯤
 const CONTACT=0.62;              // 바닥에 닿는 면 반지름 (R 배수)
@@ -353,7 +354,7 @@ export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     c.g.visible=false; G.r1.grp.remove(c.g);
     ball.anchorUsed[c.anchor]=0; ball.attach(c.idx,c.anchor,c.spin,pose);
     count++; updateSlot();
-    if(count>=ROACH_COUNT&&!complete){ complete=true; updateSlot(); buildPayload(); }
+    if(count>=ROACH_COUNT&&!complete){ complete=true; Tally.add('bappu'); updateSlot(); buildPayload(); }   // 바뿌볼 하나 완성 = 누적 한 개
   }
   function finishAllCaps(){ for(let i=caps.length-1;i>=0;i--)finishCap(caps[i],i); }
 
