@@ -157,49 +157,34 @@ export class GooLayer{
     b.curl=c.normalize(); b.bend=new T.Vector3(); b.bendT=new T.Vector3();
   }
 
-  // 순환을 따라 움직이는 양은 마모가 아니다. 손가락이 실제로 세게 누르거나
-  // 비빈 자리의 작업량만 센다. 깊은 조각과 손가락에서 먼 조각은 갈리지 않는다.
-  abrasionAt(rest,flows){
-    const r=rest.length(); if(r<0.65) return 0;
-    const contact=sstep(0.65,0.90,r); let work=0;
-    for(const d of flows){
-      const power=d._mixPower||0, w=Math.max(0.15,d.w);
-      const a=Math.acos(clamp(rest.dot(d.dir)/r,-1,1));
-      const local=Math.exp(-a*a/(0.85*w*w)); if(local<0.001) continue;
-      const mv=d._mixMove, normal=mv.dot(rest)/r;
-      const rub=Math.sqrt(Math.max(0,mv.lengthSq()-normal*normal))
-        *power*sstep(0.30,0.72,power);
-      const press=0.35*(d._mixDK||0)*sstep(0.70,0.92,power);
-      work+=contact*local*(rub+press);
-    }
-    return work;
-  }
-  // ── 조각 갈기: 손가락 접촉으로 누적된 마모만 더 작은 조각으로 만든다 ──
-  grind(flows){
+  // ── 조각 갈기: 주물러져 움직인 만큼 닳고, 다 닳으면 더 작은 것이 된다 ──
+  grind(){
     const B=this.ball;
     for(const r of B.roaches){
       if(!r.used) continue;
       for(let slot=0;slot<r.frag.length;slot++){
         const f=r.frag[slot]; if(!f) continue;
-        const work=this.abrasionAt(f.rest,flows); if(work<1e-8) continue;
-        if(f._gw==null){ f._gw=0; f._gj=rnd(0.7,1.35); }
-        f._gw+=work*GRIND;
+        if(!f._gl){ f._gl=f.rest.clone(); f._gw=0; f._gj=rnd(0.7,1.35); continue; }
+        const d=f.rest.distanceTo(f._gl), dr=Math.abs(f.rest.length()-f._gl.length()); f._gl.copy(f.rest); if(d<1e-6) continue;
+        f._gw+=Math.sqrt(Math.max(0,d*d-dr*dr))*GRIND;      // 비벼진(접선) 이동만 닳게 한다. 속으로 들어가는 건 닳지 않는다
         const thr=(slot<6?1.25:slot<10?0.5:0.65)*f._gj;   // 껍질은 질기고, 날개·다리는 금방
         if(f._gw>thr) this.grindFrag(r,slot,f);
       }
     }
     for(let i=B.shardList.length-1;i>=0;i--){
       const sh=B.shardList[i];
-      const work=this.abrasionAt(sh.rest,flows); if(work<1e-8) continue;
-      if(sh._gw==null){ sh._gw=0; sh._gj=rnd(0.7,1.35); }
-      sh._gw+=work*GRIND;
+      if(!sh._gl){ sh._gl=sh.rest.clone(); sh._gw=0; sh._gj=rnd(0.7,1.35); continue; }
+      const d=sh.rest.distanceTo(sh._gl), dr=Math.abs(sh.rest.length()-sh._gl.length()); sh._gl.copy(sh.rest); if(d<1e-6) continue;
+      sh._gw+=Math.sqrt(Math.max(0,d*d-dr*dr))*GRIND;
       if(sh._gw>1.5*sh._gj){ B.shardList.splice(i,1); B.shards.count=B.shardList.length; B.fragDirty=true; this.addCrumbs(sh.rest,2); this.grime+=0.4; }
     }
-    const CR=B.crumbRest, p=this._tmp[0];
+    const CR=B.crumbRest, CL=this.crumbLast;
+    if(this.crumbLastN!==B.crumbN){ for(let i=this.crumbLastN;i<B.crumbN;i++){ CL[i*3]=CR[i*3]; CL[i*3+1]=CR[i*3+1]; CL[i*3+2]=CR[i*3+2]; } this.crumbLastN=B.crumbN; }
     for(let i=B.crumbN-1;i>=0;i--){
-      const j=i*3; p.set(CR[j],CR[j+1],CR[j+2]);
-      const work=this.abrasionAt(p,flows); if(work<1e-8) continue;
-      if(Math.random()<1-Math.exp(-work*0.35*GRIND)) this.removeCrumb(i);
+      const j=i*3, d=Math.abs(CR[j]-CL[j])+Math.abs(CR[j+1]-CL[j+1])+Math.abs(CR[j+2]-CL[j+2]);
+      CL[j]=CR[j]; CL[j+1]=CR[j+1]; CL[j+2]=CR[j+2];
+      if(d<1e-6) continue;
+      if(Math.random()<d*0.35*GRIND) this.removeCrumb(i);        // 알갱이는 문질러지다 때가 되어 사라진다
     }
   }
   grindFrag(r,slot,f){
@@ -294,8 +279,7 @@ export class GooLayer{
       }
       // 문질러지는 만큼 조금씩 슬라임에 녹는다 (가늘수록 빨리)
       const thin=sstep(0.045,0.012,b.rad);
-      const contactWork=this.abrasionAt(b.rest,flows);
-      const loss=b.vol*clamp(contactWork*(0.07+0.15*thin)*DISSOLVE,0,0.05);
+      const loss=b.vol*clamp(mv*(0.07+0.15*thin)*DISSOLVE,0,0.05);
       b.vol-=loss; this.dissolved+=loss;
       b.rad=Math.sqrt(Math.max(1e-9,b.vol)/b.len);
       this.keepInside(b.rest);
@@ -311,7 +295,7 @@ export class GooLayer{
       b.smear=(b.smear||0)+mv;
     }
     for(const c of born) this.blobs.push(c);
-    this.grind(flows);
+    this.grind();
     if(moved) this.gooDirty=true;
     return moved;
   }
