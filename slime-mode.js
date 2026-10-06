@@ -278,7 +278,13 @@ export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     if(hand.phase==='lift'){ const k=clamp(hand.t/0.42); const d=screenDownDir(); x+=d.x*k*k*3.6; z+=d.z*k*k*3.6; }
     ball.group.position.set(x,y,z);
   }
-  /** 바닥에 닿아 있는 동안: 손가락 따라 미끄러지며 구르고, 밑에 깔린 산 바퀴가 붙는다 */
+
+
+
+  /** 바닥에 닿아 있는 동안: 손가락 따라 미끄러지며 구르고, 밑에 깔린 산 바퀴가 붙는다.
+   *  찍을 때(안 굴림)는 밑에 깔린 놈을 하나씩 최대 4마리, 굴릴 때는 지나가며 깔린 놈을 전부 한꺼번에 붙인다
+   *  — 미끼로 몰아 놓은 무리를 쓸고 지나가면 우르르 붙는다. 굴릴 때는 공이 짓눌려 퍼져서 닿는 면이 조금 넓다 */
+  const ROLL_REACH=1.2;             // 굴릴 때 닿는 면 넓이 배율 (CONTACT 기준). 클수록 한 번에 많이 쓸어 담는다
   function updateDown(dt){
     const {G}=env;
     const dx=hand.fx-hand.x, dz=hand.fz-hand.z, dist=Math.hypot(dx,dz);
@@ -289,27 +295,32 @@ export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     // 손가락이 위에서 누르는 자국
     const d=ball.dent('hand'); if(d){ d.target=0.5+Math.min(0.3,dist*1.2); }
     // 붙이기
+    if(count+caps.length>=ROACH_COUNT) return;
     const now=performance.now()/1000;
-    const rolling=hand.moved>0.02;
-    const capPerPress=rolling?999:4, gap=rolling?0.07:0;
-    if(hand.stuck<capPerPress&&now-hand.lastStick>=gap&&count+caps.length<ROACH_COUNT){
-      let best=null,bd=1e9;
-      for(const r of G.r1.roaches){
-        if(!r||r.gone||r.state==='dead'||r.dead>0||!r.m?.g?.visible)continue;
-        if(G.r1.underCushion?.(r.x,r.z))continue;
-        const dd=Math.hypot(r.x-hand.x,r.z-hand.z); if(dd<=R*CONTACT&&dd<bd){bd=dd;best=r;}
+    const live=r=>r&&!r.gone&&r.state!=='dead'&&!(r.dead>0)&&r.m?.g?.visible&&!G.r1.underCushion?.(r.x,r.z);
+    if(hand.moved>0.02){
+      // 굴리기: 지금 공 밑에 깔린 놈 전부
+      const reach=R*CONTACT*ROLL_REACH; let n=0;
+      for(const r of G.r1.roaches.slice()){
+        if(count+caps.length>=ROACH_COUNT) break;
+        if(live(r)&&Math.hypot(r.x-hand.x,r.z-hand.z)<=reach&&stick(r,true)) n++;
       }
-      if(best){ stick(best); hand.stuck++; hand.lastStick=now; }
+      if(n){ hand.stuck+=n; hand.lastStick=now; sfx.stick(Math.min(6,n)); }
+    }else if(hand.stuck<4){
+      // 찍기: 밑에 깔린 놈 중 가장 가까운 놈 하나씩, 최대 4마리
+      let best=null,bd=1e9;
+      for(const r of G.r1.roaches){ if(!live(r))continue; const dd=Math.hypot(r.x-hand.x,r.z-hand.z); if(dd<=R*CONTACT&&dd<bd){bd=dd;best=r;} }
+      if(best&&stick(best)){ hand.stuck++; hand.lastStick=now; }
     }
   }
-  /** 바퀴 한 마리가 슬라임 바닥에 눌려 붙는다 */
-  function stick(r){
+  /** 바퀴 한 마리가 슬라임 바닥에 눌려 붙는다. quiet: 여러 마리가 한꺼번에 붙을 때는 소리를 한 번에 몰아서 낸다 */
+  function stick(r,quiet){
     const {G,THREE}=env;
     // 닿은 자리 방향 → 공 로컬에서 가장 가까운 빈 자리
     const dirW=TMP.d.set(r.x-hand.x,-0.6*R,r.z-hand.z).normalize();
     const local=TMP.s.copy(dirW); ball.worldDirToLocal(local,local);
-    const a=ball.nearestFreeAnchor(local); if(a<0)return;
-    const idx=count+caps.length; if(idx>=ROACH_COUNT)return;
+    const a=ball.nearestFreeAnchor(local); if(a<0)return false;
+    const idx=count+caps.length; if(idx>=ROACH_COUNT)return false;
     const i=G.r1.roaches.indexOf(r); if(i>=0)G.r1.roaches.splice(i,1);
     r.gone=true; r.captured=true;
     // 바닥에서의 머리 방향을 그대로 유지한 채 붙는다
@@ -319,9 +330,12 @@ export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     ball.anchorUsed[a]=1;                               // 자리를 먼저 잡아 둔다 (붙는 동안 다른 놈이 못 쓰게)
     const g=r.m.g; g.updateMatrixWorld(true);
     caps.push({r,m:r.m,g,idx,anchor:a,spin,t:0,p0:g.position.clone(),q0:g.quaternion.clone(),done:false});
-    sfx.stick(1);
+    if(!quiet) sfx.stick(1);
     finishCap(caps[caps.length-1],caps.length-1);
+    return true;
   }
+
+
   const _pq=[];
   function updateCaps(dt){
     const {G,THREE}=env;
