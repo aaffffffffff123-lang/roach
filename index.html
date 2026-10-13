@@ -88,6 +88,20 @@ iframe{display:block;width:100%;height:100%;border:0;background:#efe8dc}
 #arcadeFace[data-pos="tl"]{left:calc(6px + env(safe-area-inset-left));top:calc(6px + env(safe-area-inset-top))}
 #arcadeFace[data-pos="tr"]{right:calc(6px + env(safe-area-inset-right));top:calc(6px + env(safe-area-inset-top))}
 #arcadeFace[data-pos="br"]{right:calc(6px + env(safe-area-inset-right));bottom:calc(6px + env(safe-area-inset-bottom))}
+/* 폰을 가로로 눕히면 화면 높이가 낮아 안내문·편지·카드가 화면 밖으로 넘쳐 「시작하기」·「확인」을 누를 수 없었다.
+   넘칠 때는 위에서부터 보이며 스크롤되게 하고, 낮은 화면에서는 글자·여백을 줄인다 */
+html #intro,html #mail,html #slimeDone,html #petName{place-items:normal}
+html #intro .box,html #mail .card,html #slimeDone .card,html #petName .card{margin:auto}
+@media (max-height:560px){
+  html #intro,html #mail,html #slimeDone,html #petName{overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y}
+  html #intro{padding:10px 22px}
+  html #intro .box{font-size:14px;line-height:1.5}
+  html #intro .tag{margin-bottom:10px}
+  html #intro p{margin-bottom:6px}
+  html #introGo{margin-top:8px;height:46px}
+  html #mail,html #slimeDone,html #petName{padding:12px}
+  html #mail .card,html #slimeDone .card,html #petName .card{zoom:.82}
+}
 </style>
 
 <div id="intro" hidden>
@@ -343,7 +357,7 @@ function pickFact(list){
 function showLetter(kind,onDone){
   const L=LETTER[kind];
   if(!L||mailOpen)return false;
-  mailOpen=true;mailDone=onDone||null;
+  mailOpen=true;mailDone=onDone||null;mailEl._at=performance.now();
   const tok=++mailTok;
   lastLetterAt=performance.now()/1000;
   mailEl.style.setProperty('--lc',L.color);
@@ -385,7 +399,7 @@ function closeLetter(){
 }
 
 
-mailOk.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeLetter();});
+mailOk.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(performance.now()-(mailEl._at||0)<900)return;closeLetter();});   // 뜨고 0.9초 안에 눌린 건 잡던 손이라 닫지 않는다
 mailEl.addEventListener('pointerdown',()=>{if(mailOpen)mailEl.classList.add('open');});
 
 const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!pet.isBusy()&&!mailOpen&&!cut.isOpen()&&!introActive&&!cap;
@@ -685,6 +699,14 @@ function updateCapture(dt){
       finishCapture();
     }else{
       labPendingOpen=true;          // 실험실이 아직 안 떴으면 바퀴를 든 채 계속 버둥대게 둔다
+      if(t>CAP_LIFT+10){            // 10초가 지나도 안 뜨면(인터넷이 끊겼거나 화면을 못 만들면) 바퀴를 내려놓고 다음에 다시 불러온다
+        cap=null;labPendingOpen=false;labState='none';
+        r.captured=false;g.position.y=0;g.rotation.set(0,c.h,0);r.x=g.position.x;r.z=g.position.z;
+        if(!G.r1.roaches.includes(r))G.r1.roaches.push(r);
+        G.r1.flee?.(r,r.x,r.z);
+        tweezerRig.visible=false;tweezerRig.userData.setGrip(0);
+        G.ui.hint?.('실험실을 열지 못했습니다. 잠시 뒤 다시 해 보세요.',2.2,0,true);
+      }
     }
   }
 }
@@ -779,7 +801,7 @@ function installTweezerMode(){
   G.input.onPress=(x,y,type,id)=>{
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
       lastPointer={x,y,type};
-      captureAt(x,y,type);
+      if(type==='mouse')captureAt(x,y,type); else tweezerRig.userData.press={x,y,type,id};   // 손가락은 뗄 때 집는다 — 화면을 옮기려고 댄 손가락에 바퀴가 집히지 않게
       return;
     }
     originalPress?.(x,y,type,id);
@@ -793,12 +815,12 @@ function installTweezerMode(){
     originalDrag?.(x,y,id);
   };
   G.input.onRelease=(id)=>{
-    if(G.state==='r1'&&(G.r1.item==='tweezer'||cap))return;
+    if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){ const p=tweezerRig.userData.press; tweezerRig.userData.press=null; if(p&&(id==null||p.id==null||p.id===id))captureAt(p.x,p.y,p.type); return; }
     originalRelease?.(id);
   };
   G.input.onCancel=()=>{
     if(G.state==='r1'&&(G.r1.item==='tweezer'||cap)){
-      if(!cap)tweezerRig?.userData.setGrip?.(0);
+      if(tweezerRig)tweezerRig.userData.press=null; if(!cap)tweezerRig?.userData.setGrip?.(0);
       return;
     }
     originalCancel?.();
@@ -890,7 +912,7 @@ window.addEventListener('message',e=>{
   if(e.source!==labFrame.contentWindow)return;
   if(e.data?.type==='specimen-lab-ready'){
     labState='ready';
-    if(labPendingOpen&&cap){
+    if(labPendingOpen&&cap&&!slime.isOpen()&&!pet.isOpen()&&!mailOpen){   // 다른 창(바뿌볼 카드·테라리움·편지)이 떠 있으면 그게 닫히고 게임이 다시 돌 때 연다
       labPendingOpen=false;
       finishCapture();
     }else if(!labOpen){
