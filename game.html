@@ -666,7 +666,8 @@ function buildRoom(scene){
   R.cushion=cyl(0.225,0.215,0.05,M.std(0x6d7a3c,{roughness:0.98}),0.1,0.025,-0.4,26); scene.add(R.cushion);
   { const seam=new THREE.Mesh(new THREE.TorusGeometry(0.212,0.008,6,30),M.std(0x5d6c2c,{roughness:0.95})); seam.rotation.x=Math.PI/2; seam.position.set(0.1,0.03,-0.4); seam.castShadow=true; scene.add(seam);
     const btn=cyl(0.018,0.018,0.012,M.std(0x4e5a24,{roughness:0.9}),0.1,0.046,-0.4,10); scene.add(btn);
-    for(let i=0;i<4;i++){ const a=i/4*TAU+0.4; const d=cyl(0.012,0.012,0.008,M.std(0x66752f,{roughness:0.95}),0.1+Math.cos(a)*0.12,0.049,-0.4+Math.sin(a)*0.12,8); scene.add(d); } }
+    for(let i=0;i<4;i++){ const a=i/4*TAU+0.4; const d=cyl(0.012,0.012,0.008,M.std(0x66752f,{roughness:0.95}),0.1+Math.cos(a)*0.12,0.049,-0.4+Math.sin(a)*0.12,8); scene.add(d); R.cushion.attach(d); }
+    R.cushion.attach(seam); R.cushion.attach(btn); }   // 솔기·단추·점을 방석에 붙여 같이 움직이게 한다 (예전엔 방석이 뒤집히거나 들려도 바닥에 동그라미가 남았다)
   // 움직이지 않는 가구는 재질이 같은 것끼리 한 덩어리로 합친다. 가구를 하나하나 따로 그리면 그림자까지 매 장면 100번 넘게 그려져 버벅인다.
   // R에 담아 두고 나중에 건드리는 것(바닥·문·커튼·쿠션·스탠드·창 등)과 묶음(Group) 안의 것은 그대로 둔다. 보이는 모습은 같다.
   { const keep=new Set(Object.values(R)), groups=new Map(), nm=new THREE.Matrix3(), v=new THREE.Vector3();
@@ -1174,7 +1175,10 @@ class Corpses{
   prewarm(){ const jobs=[]; for(const mode in CORPSE_VARIANTS) for(let v=0;v<CORPSE_VARIANTS[mode];v++) jobs.push(()=>this.variant(mode,v));
     for(const st of ['splayP','splayN','curl','fold']) for(let i=0;i<3;i++) jobs.push(()=>this.legs(st,i));
     const step=()=>{ const j=jobs.shift(); if(!j) return; j(); setTimeout(step,40); }; setTimeout(step,300); }
-  clear(){ for(const c of this.list) if(c) this.drop(c); this.list.length=0; this.head=0; this.twitching.clear(); }
+  clear(){ for(const c of this.list) if(c) this.drop(c); this.list.length=0; this.head=0; this.twitching.clear();
+    // 치운 시체 칸까지 계속 그리지 않게 묶음을 비운다
+    const all=[...Object.values(this.legMesh)]; for(const K of Object.values(this.kinds)) for(const V of K) if(V){ all.push(V.shell); if(V.goo) all.push(V.goo); }
+    for(const m of all){ m.count=0; m.visible=false; m.userData.free.length=0; m.userData.top=0; } }
   add(x,z,h,mode='crushed'){
     if(!CORPSE_VARIANTS[mode]) mode='crushed';
     const slot=this.head%this.cap; this.head++; if(this.list[slot]) this.drop(this.list[slot]);
@@ -1328,13 +1332,13 @@ class Puffs{
   clear(){ for(const q of this.p) q.on=false; for(let i=0;i<this.n;i++){ this.dummy.position.set(0,-10,0); this.dummy.scale.setScalar(0.0001); this.dummy.updateMatrix(); this.mesh.setMatrixAt(i,this.dummy.matrix);} this.mesh.instanceMatrix.needsUpdate=true; }
   emit(kind,x,y,z,dx,dz,n=3,spd=1.6){
     const base=Math.atan2(dz,dx);
-    for(let i=0;i<n;i++){ const q=this.p[this.next]; this.next=(this.next+1)%this.n; const a=base+rand(-0.3,0.3), s=rand(0.5,1)*spd; q.on=true; q.kind=kind; q.x=x; q.y=y; q.z=z; q.vx=Math.cos(a)*s; q.vz=Math.sin(a)*s; q.vy=kind==='flame'?(y>0.3?rand(-2.2,-1.2):rand(0.2,0.6)):(y>0.3?rand(-2.6,-1.4):rand(-0.25,0.05)); q.life=kind==='flame'?(y>0.3?rand(0.45,0.7):rand(0.18,0.35)):(y>0.3?rand(0.7,1.1):rand(0.35,0.7)); q.r=kind==='flame'?rand(0.012,0.03):rand(0.01,0.025); }
+    this.acc=(this.acc||0)+n*clamp((this.dt||1/60)*60,0.25,3); n=Math.floor(this.acc); this.acc-=n; for(let i=0;i<n;i++){ const q=this.p[this.next]; this.next=(this.next+1)%this.n; const a=base+rand(-0.3,0.3), s=rand(0.5,1)*spd; q.on=true; q.kind=kind; q.x=x; q.y=y; q.z=z; q.vx=Math.cos(a)*s; q.vz=Math.sin(a)*s; q.vy=kind==='flame'?(y>0.3?rand(-2.2,-1.2):rand(0.2,0.6)):(y>0.3?rand(-2.6,-1.4):rand(-0.25,0.05)); q.life=kind==='flame'?(y>0.3?rand(0.45,0.7):rand(0.18,0.35)):(y>0.3?rand(0.7,1.1):rand(0.35,0.7)); q.r=kind==='flame'?rand(0.012,0.03):rand(0.01,0.025); }
   }
   update(dt){
     let any=false;
     for(let i=0;i<this.n;i++){ const q=this.p[i]; if(!q.on) continue; any=true; q.life-=dt;
       if(q.life<=0||q.y<0){ q.on=false; this.dummy.position.set(0,-10,0); this.dummy.scale.setScalar(0.0001); }
-      else { q.x+=q.vx*dt; q.y+=q.vy*dt; q.z+=q.vz*dt; q.vx*=0.94; q.vz*=0.94; const grow=q.kind==='flame'?1+ (0.35-q.life)*1.5:1+dt*2; this.dummy.position.set(q.x,q.y,q.z); this.dummy.scale.setScalar(q.r*grow);
+      else { q.x+=q.vx*dt; q.y+=q.vy*dt; q.z+=q.vz*dt; this.dt=dt; const dk=Math.pow(0.94,dt*60); q.vx*=dk; q.vz*=dk; /* 화면 빠르기(60·120Hz)와 상관없이 같은 거리만큼 퍼진다 */ const grow=q.kind==='flame'?1+ (0.35-q.life)*1.5:1+dt*2; this.dummy.position.set(q.x,q.y,q.z); this.dummy.scale.setScalar(q.r*grow);
         if(q.kind==='flame'){ const k=clamp(q.life/0.35,0,1); this.col.setRGB(1,0.25+0.7*k*k,0.02+0.5*k*k*k); } else this.col.setRGB(0.93,0.96,1);
         this.mesh.setColorAt(i,this.col); }
       this.dummy.updateMatrix(); this.mesh.setMatrixAt(i,this.dummy.matrix);
@@ -1378,7 +1382,7 @@ class DeathFX{
     this.t=0;
     this.roll=Math.random()<0.5?-1:1;
     this.resize();
-    this.c.classList.add('show');
+    this.c.classList.add('show'); document.body.style.background='#000';   // 화면이 기울 때 드러나는 가장자리를 검게
 
     const slow=type==='poison'||type==='trap';
     const cx=this.w*0.5;
@@ -1437,7 +1441,7 @@ class DeathFX{
 
   stop(){
     this.active=false;
-    this.c.classList.remove('show');
+    this.c.classList.remove('show'); document.body.style.background='';
     this.g.clearRect(0,0,this.w||1,this.h||1);
     this.G.canvas.style.transform='';
     this.G.canvas.style.filter='';
@@ -1800,7 +1804,8 @@ class Round1{
     const i=this.oothecae.indexOf(o);
     if(i>=0) this.oothecae.splice(i,1);
     this.grp.remove(o.mesh);
-    o.mesh.traverse(m=>{
+    // 알집 모양·재질은 모든 알집과 산 바퀴가 같이 쓰는 것이라 버리지 않는다. 버리면 다음 알집을 그릴 때마다 셰이더를 새로 만드느라 화면이 멈칫했다
+    o.mesh.traverse(m=>{ if(m.geometry===_ootheca||m.material===MAT.roachShell) return;
       if(!m.isMesh) return;
       if(m.geometry) m.geometry.dispose();
       if(Array.isArray(m.material)) m.material.forEach(x=>x&&x.dispose&&x.dispose());
@@ -1992,16 +1997,16 @@ class Round1{
   itemYaw(k){ const U=this.G.camUp; const up=Math.atan2(U.x,U.z);
     if(k==='pan') return up+Math.PI; if(k==='hand') return up; if(k==='slipper') return up+rand(-0.35,0.35); if(k==='book') return rand(-0.6,0.6); if(k==='tissue') return rand(TAU); return up; }
   press(sx,sy,type,pid){ if(!this.active||this.intro) return; const p=this.floorPoint(sx,sy); if(!p) return; this.touch(); const it=ITEMS[this.item];
-    if(it.bait){ this.placeBait(this.item,p.x,p.z); return; }
-    if(it.hold){ this.startHold(p.x,p.z,pid); return; }
+    if(it.bait){ (this.pendingBaits||(this.pendingBaits=[])).push({kind:this.item,x:p.x,z:p.z,pid}); return; }   // 미끼는 손가락을 뗄 때 놓는다 — 두 손가락으로 화면을 옮길 때 미끼가 떨어지지 않게
+    if(it.hold){ const h=this.hold; if(h&&h.pid!=null&&pid!=null&&pid!==h.pid&&this.G.input.pointers.has(h.pid)) return; this.startHold(p.x,p.z,pid); return; }   // 뿌리는 손가락이 따로 있으면 다른 손가락으로 두드려도 계속 뿌린다 (예전엔 두드린 손가락으로 넘어가 그 손을 떼면 멈췄다)
     this.beginStrike(p.x,p.z,type); }
   // 끌기·손 떼기는 뿌리는 도구를 쥔 손가락만 따른다 — 다른 손가락으로 두드리는 동안에도 계속 뿌려진다
   drag(sx,sy,pid){ const h=this.hold; if(!h) return; if(pid!=null&&h.pid!=null&&pid!==h.pid) return; const p=this.floorPoint(sx,sy); if(!p) return; this.touch(); const mx=p.x-h.x, mz=p.z-h.z, d=Math.hypot(mx,mz);
     if(d>0.012){ let nx=h.dx*0.45+mx/d*0.55, nz=h.dz*0.45+mz/d*0.55; const n=Math.hypot(nx,nz)||1; h.dx=nx/n; h.dz=nz/n; }
     h.x=p.x; h.z=p.z; }
-  release(pid){ const h=this.hold; if(h&&(pid==null||h.pid==null||pid===h.pid)) this.stopHold(); }
+  release(pid){ const h=this.hold; if(h&&(pid==null||h.pid==null||pid===h.pid)) this.stopHold(); const L=this.pendingBaits; if(L&&L.length){ const i=L.findIndex(b=>pid==null||b.pid==null||b.pid===pid); if(i>=0){ const b=L.splice(i,1)[0]; this.placeBait(b.kind,b.x,b.z); } } }
   // 화면 이동으로 바뀌면 아직 내려오는 중인 타격과 뿌리기를 거둔다
-  cancel(){ for(let i=this.strikes.length-1;i>=0;i--){ const s=this.strikes[i]; if(s.phase==='windup'){ this.freeStrike(s); this.strikes.splice(i,1); } } if(this.hold) this.stopHold(); }
+  cancel(){ this.pendingBaits=[]; for(let i=this.strikes.length-1;i>=0;i--){ const s=this.strikes[i]; if(s.phase==='windup'){ this.freeStrike(s); this.strikes.splice(i,1); } } if(this.hold) this.stopHold(); }
   clearStrikes(){ for(const s of this.strikes) this.freeStrike(s); this.strikes.length=0; for(const k in this.itemPool) for(const m of this.itemPool[k]){ m.visible=false; m.userData.busy=false; } }
   freeStrike(s){ s.m.visible=false; s.m.userData.busy=false; }
   // 같은 도구로 여러 번 동시에 내려칠 수 있게 도구 모형을 몇 벌 둔다
@@ -2027,6 +2032,8 @@ class Round1{
     this.baitsUsed.add(kind);
     this.touch();
     SFX.spawnBait();
+    // 침대·냉장고 같은 가구나 방 밖을 누르면 미끼가 가구 밑에 숨어 보이지도 않고 바퀴도 못 갔다 — 가장 가까운 빈 바닥으로 옮긴다
+    if(!this.okPos(x,z)){ let best=null; for(let r=0.05;r<1.5&&!best;r+=0.05) for(let k=0;k<24;k++){ const a=k/24*TAU, px=x+Math.sin(a)*r, pz=z+Math.cos(a)*r; if(this.okPos(px,pz)){ best=[px,pz]; break; } } if(best){ x=best[0]; z=best[1]; } }
 
     {
       const dx=x-CUSHION.x,dz=z-CUSHION.z,d=Math.hypot(dx,dz);
@@ -2195,7 +2202,7 @@ class Round1{
           if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
             const ddx=h.x-q.x, ddz=h.z-q.z, d=Math.hypot(ddx,ddz);
             if(d<0.08){ this.killRoach(q,'vacuum',h.x,h.z,n++); SFX.vacuumSuck(); }
-            else { q.x+=ddx/d*dt*1.9; q.z+=ddz/d*dt*1.9; q.h=Math.atan2(-ddx,-ddz); q.startle=null; }
+            else { const s=Math.min(d-0.07,dt*1.9), [px,pz]=roachMove(q.x,q.z,q.x+ddx/d*s,q.z+ddz/d*s); q.x=px; q.z=pz; q.h=Math.atan2(-ddx,-ddz); q.startle=null; }   // 벽·가구는 뚫고 끌려가지 않는다
           }
         }
         for(const q of [...this.nymphs]){
@@ -2203,7 +2210,7 @@ class Round1{
           if(this.inCone(q,h.x,h.z,yaw,c.len,c.ang)){
             const ddx=h.x-q.x, ddz=h.z-q.z, d=Math.hypot(ddx,ddz);
             if(d<0.07){ this.killNymph(q,'vacuum'); SFX.vacuumSuck(); }
-            else { q.x+=ddx/d*dt*2.2; q.z+=ddz/d*dt*2.2; q.h=Math.atan2(-ddx,-ddz); }
+            else { const s=Math.min(d-0.06,dt*2.2), [px,pz]=roachMove(q.x,q.z,q.x+ddx/d*s,q.z+ddz/d*s); q.x=px; q.z=pz; q.h=Math.atan2(-ddx,-ddz); }
           }
         }
         // 바닥에 널린 시체도 빨아들인다 (진물 자국은 못 치운다)
@@ -2239,6 +2246,8 @@ class Round1{
       }
 
       if(b.amount<=0){
+        // 다 먹은 닭뼈·콜라 자국은 바닥에 남기되 최근 것 4개까지만 둔다 (계속 쌓이면 그릴 것이 늘어 폰이 버벅인다)
+        if(b.food){ const left=this.baitMeshes.filter(m=>m.userData.food&&!this.baits.some(q=>q!==b&&q.mesh===m)); while(left.length>4){ const o=left.shift(); this.grp.remove(o); this.baitMeshes.splice(this.baitMeshes.indexOf(o),1); o.userData.food.dispose(); } }
         if(b.mesh&&!b.food){
           this.grp.remove(b.mesh);
           this.baitMeshes.splice(this.baitMeshes.indexOf(b.mesh),1);
@@ -2291,7 +2300,7 @@ class Round1{
     const m=r.m;
     // 죽는 즉시 시체로 바꾼다. 막 죽은 시체는 다리가 한동안 경련한다.
     if(r.state==='dead'){ if(!r.baked){ r.baked=true; this.G.paint.corpse(r.x,r.z,r.h,this.level(),r.bakeMode); this.G.corpses.add(r.x,r.z,r.h,r.bakeMode); } r.remove=true; return; }
-    if(r.state==='poison'){ r.t-=dt; r.twitch+=dt*rand(10,30); m.pose(0.6+0.4*Math.sin(r.twitch),dt*rand(0.5,3),0.15); if(Math.random()<dt*3) SFX.poisonTwitch(); if(r.t<=0){ this.killRoach(r,'spray',r.x,r.z); } return; }
+    if(r.state==='poison'){ r.t-=dt; r.twitch+=dt*rand(10,30); m.pose(0.6+0.4*Math.sin(r.twitch),dt*rand(0.5,3),0.15); m.g.position.x=r.x; m.g.position.z=r.z; /* 청소기에 끌려가는 동안 모형도 따라간다 */ if(Math.random()<dt*3) SFX.poisonTwitch(); if(r.t<=0){ this.killRoach(r,'spray',r.x,r.z); } return; }
   
     if(r.startle){ r.layEgg=null; r.startle.t-=dt; m.pose(0,dt,0); m.g.position.set(r.x,0,r.z); m.g.rotation.y=r.h; if(r.startle.t<=0){ const s=r.startle; r.startle=null; this.flee(r,s.ax,s.az); } return; }
     if(r.layEgg){
@@ -2455,7 +2464,7 @@ class NavGrid{
     for(let j=0;j<this.nz;j++) for(let i=0;i<this.nx;i++){ const x=ROOM.x1+(i+0.5)*this.cs, z=ROOM.z1+(j+0.5)*this.cs; let b=(x<ROOM.x1+0.24||x>ROOM.x2-0.24||z<ROOM.z1+0.24||z>ROOM.z2-0.24)?1:0; if(!b) for(const o of OBST){ if(!o.human&&inObst(o,x,z,0.24)){ b=1; break; } } this.blk[j*this.nx+i]=b; } }
   cell(x,z){ return [clamp(Math.floor((x-ROOM.x1)/this.cs),0,this.nx-1),clamp(Math.floor((z-ROOM.z1)/this.cs),0,this.nz-1)]; }
   free(i,j){ return i>=0&&j>=0&&i<this.nx&&j<this.nz&&!this.blk[j*this.nx+i]; }
-  nearestFree(i,j){ if(this.free(i,j)) return [i,j]; for(let r=1;r<8;r++) for(let dj=-r;dj<=r;dj++) for(let di=-r;di<=r;di++){ if(this.free(i+di,j+dj)) return [i+di,j+dj]; } return [i,j]; }
+  nearestFree(i,j){ if(this.free(i,j)) return [i,j]; for(let r=1;r<8;r++){ let best=null,bd=1e9; for(let dj=-r;dj<=r;dj++) for(let di=-r;di<=r;di++){ if(this.free(i+di,j+dj)&&di*di+dj*dj<bd){ bd=di*di+dj*dj; best=[i+di,j+dj]; } } if(best) return best; } return [i,j]; }   // 가장 가까운 빈칸 (예전엔 훑는 순서상 먼저 나온 칸이라 엉뚱한 모서리로 갔다)
   path(x0,z0,x1,z1){
     let [si,sj]=this.nearestFree(...this.cell(x0,z0)); let [gi,gj]=this.nearestFree(...this.cell(x1,z1));
     const N=this.nx*this.nz, g=new Float32Array(N).fill(1e9), f=new Float32Array(N).fill(1e9), from=new Int32Array(N).fill(-1), closed=new Uint8Array(N);
@@ -2466,7 +2475,7 @@ class NavGrid{
     if(from[goal]<0&&goal!==s) return [[x1,z1]];
     const out=[]; let c=goal; while(c>=0&&c!==s){ out.push([ROOM.x1+(c%this.nx+0.5)*this.cs,ROOM.z1+((c/this.nx|0)+0.5)*this.cs]); c=from[c]; } out.reverse();
     const sm=[]; let cur=[x0,z0]; let k=0; while(k<out.length){ let far=k; for(let m=out.length-1;m>k;m--){ if(this.clear(cur[0],cur[1],out[m][0],out[m][1])){ far=m; break; } } sm.push(out[far]); cur=out[far]; k=far+1; }
-    if(sm.length) sm[sm.length-1]=[x1,z1]; else sm.push([x1,z1]); return sm;
+    { const [ti,tj]=this.cell(x1,z1); if(sm.length){ if(this.free(ti,tj)) sm[sm.length-1]=[x1,z1]; } else sm.push(this.free(ti,tj)?[x1,z1]:[ROOM.x1+(gi+0.5)*this.cs,ROOM.z1+(gj+0.5)*this.cs]); } return sm;   // 가구 속 지점이면 그 앞 빈칸에서 멈춘다
   }
   clear(x0,z0,x1,z1){ const n=Math.ceil(Math.hypot(x1-x0,z1-z0)/0.05); for(let k=1;k<n;k++){ const t=k/n; const [i,j]=this.cell(lerp(x0,x1,t),lerp(z0,z1,t)); if(!this.free(i,j)) return false; } return true; }
 }
@@ -2603,7 +2612,7 @@ this.G.room.blanket.visible=true;
 
     this.deathFX.stop();
     G.camera.up.set(0,1,0);
-    G.input.idleStick();
+    G.input.idleStick(); G.input.consumeLook(); G.input.dashReq=false; SFX.stopLoop('spray'); SFX.stopLoop('flame'); SFX.stopLoop('vacuum');   // 앞 세대에서 이어지던 사람 무기 소리·시점 끌기를 털어 낸다
 
     G.setLighting('dim');
     this.G.room.door.rotation.y=0;
@@ -2925,7 +2934,7 @@ clearTraps(){
       if(n.state==='hide'){ n.t-=dt; if(n.t<=0&&!(A.searchHole===n.hole&&A.state==='search')){ n.hidden=false; m.g.visible=true; n.state='wander'; n.spd=rand(0.15,0.3); n.t=rand(0.6,2); const [ex,ez]=this.spotExit(n.hole); n.x=ex+(n.hole.rect?rand(-0.3,0.3):0); n.z=ez; n.h=Math.atan2(n.hole.dx,n.hole.dz)+rand(-0.6,0.6); n.fleeSoon=-1; m.g.position.set(n.x,0,n.z); } continue; }
       if(A.lightsOn&&n.fleeSoon<0&&n.state==='wander'&&!n.bold&&!n.trap) n.fleeSoon=rand(3,11);
       if(n.fleeSoon>0){ n.fleeSoon-=dt; if(n.fleeSoon<=0&&n.state==='wander') this.npcFlee(n); }
-      if(n.state!=='eat'&&(A.awake||A.state==='sit')&&n.startle<=0&&Math.hypot(n.x-A.x,n.z-A.z)<(n.bold?0.32:0.55)){ n.startle=n.bold?rand(1.0,1.6):n.slug?rand(0.6,1.0):rand(0.2,0.4); }
+      if(n.state!=='eat'&&n.state!=='flee'&&(A.awake||A.state==='sit')&&n.startle<=0&&Math.hypot(n.x-A.x,n.z-A.z)<(n.bold?0.32:0.55)){ n.startle=n.bold?rand(1.0,1.6):n.slug?rand(0.6,1.0):rand(0.2,0.4); }
       if(n.startle>0){ n.startle-=dt; if(n.startle<=0){ n.startle=0; this.npcFlee(n); } m.pose(0,dt,0); m.g.position.set(n.x,0,n.z); m.g.rotation.y=n.h; continue; }
       let spd=0;
       if(n.state==='wander'){ n.t-=dt; if(n.t<0){ if(n.spd>0){ n.spd=0; n.t=rand(0.5,2.2); } else { n.spd=rand(0.12,0.3); n.t=rand(0.6,2.2); n.turn=rand(-1,1); } } if(n.spd>0){ n.h+=n.turn*dt; spd=n.spd; } if(Math.random()<dt*0.025) this.npcFlee(n);
@@ -3017,11 +3026,11 @@ clearTraps(){
       if(dE<Math.min(W.reach||0.8,0.8)&&A.rec<=0){ this.beginStrike(E.x,E.z,false); A.strike.egg=true; return; }
       if(!A.target||dist2(A.target[0],A.target[1],E.x,E.z)>0.04){ this.goTo(E.x,E.z); } this.walk(dt);
     } else {
-      if(!A.searchHole){
+      if(!A.searchHole||A.searchFor!==A.target){   // 다른 일(쫓기·살피기)을 하다 오면 숨는 자리까지 다시 걸어간다 — 예전엔 그 자리에 선 채 멀리 있는 숨는 자리를 뒤졌다
         let best=null,bs=1e9; const cool=22;
         for(const h of HOLES){ const last=A.searched[h.n]; if(last!==undefined&&this.G.time-last<cool) continue; let s=Math.hypot(h.x-A.x,h.z-A.z); if(this.lastHideHole===h) s*=0.35; if(this.egg&&this.egg.spot===h) s*=0.8; if(s<bs){bs=s;best=h;} }
         if(!best){ A.searched={}; best=HOLES[Math.floor(rand(HOLES.length))]; }
-        A.searchHole=best; A.reached=false; const dn=Math.hypot(best.dx,best.dz)||1; const SR=best.rect?best.rz+0.5:0.62; this.goTo(best.x+best.dx/dn*SR,best.z+best.dz/dn*SR);
+        A.searchHole=best; A.reached=false; const dn=Math.hypot(best.dx,best.dz)||1; const SR=best.rect?best.rz+0.5:0.62; this.goTo(best.x+best.dx/dn*SR,best.z+best.dz/dn*SR); A.searchFor=A.target;
       }
       if(this.walk(dt)){ A.state='search'; A.t=0; }
     }
@@ -3029,8 +3038,11 @@ clearTraps(){
   }
   showWarn(x,z,r,k){ const w=this.warn; w.visible=true; w.position.set(x,0.004,z); const s=r*(2.1-1.1*k); w.scale.set(s,s,1); w.material.opacity=0.1+0.45*k; }
   hideWarn(){ this.warn.visible=false; this.warn.material.opacity=0; }
+  // 사람이 내려치는 도구는 무기마다 한 벌만 만들어 다시 쓴다 (내려칠 때마다 새로 만들면 메모리가 계속 늘고 잠깐씩 버벅인다)
+  // 뿌리는 무기(스프레이·불·청소기)를 든 사람은 알집을 손바닥으로 내려친다 — 뿌리는 무기엔 내려치기 수치가 없어서, 예전엔 알집을 밟으러 갔다가 사람이 그 자리에 멈춰 사라졌다
+  strikeItem(k){ const c=this.strikeCache||(this.strikeCache={}); if(this.ai.W.cone) k='hand'; const m=c[k]||(c[k]=makeItem(k)); if(k==='hand') m.scale.setScalar(1.35); return m; }
   beginStrike(sx,sz,intoHole){
-    const A=this.ai, H=this.human, W=A.W; const dx=sx-A.x, dz=sz-A.z, d=Math.hypot(dx,dz); const rd=Math.min(d,W.reach); const nx=d>0.001?dx/d:0, nz=d>0.001?dz/d:1;
+    const A=this.ai, H=this.human, W=A.W.cone?HW.hand:A.W; const dx=sx-A.x, dz=sz-A.z, d=Math.hypot(dx,dz); const rd=Math.min(d,W.reach); const nx=d>0.001?dx/d:0, nz=d>0.001?dz/d:1;
     
     const rx=nz;
     const rz=-nx;
@@ -3064,7 +3076,7 @@ clearTraps(){
       this.weaponMesh.visible=false;
     }
 
-    const sm=this.strikeMesh=makeItem(
+    const sm=this.strikeMesh=this.strikeItem(
       A.weapon==='hand'
         ? 'hand'
         : A.weapon
@@ -3119,7 +3131,7 @@ clearTraps(){
     this.showWarn(A.strike.x,A.strike.z,W.r+0.03,0);
   }
   updateStrike(dt){
-    const A=this.ai, H=this.human, W=A.W, S=A.strike, P=this.p; S.t+=dt; const sm=this.strikeMesh; const WU=W.windup+A.windupAdd;
+    const A=this.ai, H=this.human, W=A.W.cone?HW.hand:A.W, S=A.strike, P=this.p; S.t+=dt; const sm=this.strikeMesh; const WU=W.windup+A.windupAdd;
     const k=Math.min(1,S.t/WU);
     H.crouch=damp(H.crouch,W.crouch,10,dt); H.headPitch=0.7;
     if(!S.hit){
@@ -3311,7 +3323,7 @@ clearTraps(){
 
 
       if(k>=1){ S.hit=true; this.hideWarn(); sm.position.y=0.005; const nearMe=this.phase==='play'&&Math.hypot(P.x-S.x,P.z-S.z)<W.r+0.03; const hidOk=!P.hidden||S.intoHole; this.G.shake(0.9);
-        let hitNpc=false; for(const n of this.npcs){ if(n.hidden||n.state==='dead') continue; if(Math.hypot(n.x-S.x,n.z-S.z)<W.r+0.03){ this.killNpc(n,A.weapon); hitNpc=true; } }
+        let hitNpc=false; for(const n of this.npcs){ if(n.hidden||n.state==='dead') continue; if(Math.hypot(n.x-S.x,n.z-S.z)<W.r+0.03){ this.killNpc(n,A.W.cone?'hand':A.weapon); hitNpc=true; } }
         if(S.egg&&this.egg&&!this.ready&&Math.hypot(this.egg.x-S.x,this.egg.z-S.z)<W.r+0.06){ this.destroyEgg(); }
         if(nearMe&&hidOk){ this.killPlayer('crush'); } else if(!hitNpc){ SFX.thud(Math.hypot(P.x-S.x,P.z-S.z),0,A.weapon==='book'||A.weapon==='pan'?1.2:0.8); } }
     } else { if(S.t>WU+W.rec*0.45){ A.state='hunt'; A.rec=W.rec*0.5; H.strikeAnim=false; H.armR.sh.rotation.x=0; H.armR.el.rotation.x=-0.25; this.grp.remove(sm); this.strikeMesh=null; if(this.weaponMesh) this.weaponMesh.visible=true; A.strike=null; } }
@@ -3353,7 +3365,7 @@ clearTraps(){
  
   placeEgg(){
     const P=this.p;
-    const spot=spotAt(P.x,P.z);
+    const spot=spotAt(...roachMove(P.x,P.z,P.x-Math.sin(P.h)*0.06,P.z-Math.cos(P.h)*0.06));   // 바퀴 자리 말고 알집이 실제로 놓이는 자리로 숨었는지 본다
 
     // 알은 꽁무니 쪽에 놓되, 벽이나 가구 안으로 파고들지 않게 바퀴가 갈 수 있는 자리까지만 (다음 세대가 거기서 태어나므로)
     const [ex,ez]=roachMove(P.x,P.z,P.x-Math.sin(P.h)*0.06,P.z-Math.cos(P.h)*0.06);
@@ -3743,7 +3755,7 @@ clearTraps(){
   toWatch(){
     const E=this.egg;
 
-    this.phase='watch';
+    this.phase='watch'; this.resetCushion();   // 방석 밑에서 죽었을 때 들린 채·비친 채 남지 않게
 
     this.G.blackout(false,false);
     this.G.ui.vignette(false);
@@ -3816,7 +3828,7 @@ clearTraps(){
 
 
   // ── 엔딩: 사람이 떠난다 ──
-  beginLeave(){ const A=this.ai, H=this.human; this.phase='leave'; this.G.blackout(false); this.G.setLighting('on'); A.lightsOn=true; A.state='leave'; A.leaveT=0; A.leaveStep=0; A.done=false; A.doorShut=false; this.eggMesh.visible=false; this.ring.visible=false; this.hatchMesh.visible=false; this.hideWarn(); this.clearNpcs(); this.clearHatchNymphs(); this.clearTraps(); this.resetCushion(); this.G.ui.vignette(false); this.G.ui.tox(0); this.G.ui.eggState('none'); this.G.ui.eggBar(null); this.G.ui.hintClear(); this.G.ui.genLabel(null); this.G.ui.miniOn(false);
+  beginLeave(){ const A=this.ai, H=this.human; this.phase='leave'; SFX.stopLoop('spray'); SFX.stopLoop('flame'); SFX.stopLoop('vacuum'); this.G.blackout(false); this.G.setLighting('on'); A.lightsOn=true; A.state='leave'; A.leaveT=0; A.leaveStep=0; A.done=false; A.doorShut=false; this.eggMesh.visible=false; this.ring.visible=false; this.hatchMesh.visible=false; this.hideWarn(); this.clearNpcs(); this.clearHatchNymphs(); this.clearTraps(); this.resetCushion(); this.G.ui.vignette(false); this.G.ui.tox(0); this.G.ui.eggState('none'); this.G.ui.eggBar(null); this.G.ui.hintClear(); this.G.ui.genLabel(null); this.G.ui.miniOn(false);
     if(this.weaponMesh){ H.hold.remove(this.weaponMesh); this.weaponMesh=null; } if(this.strikeMesh){ this.grp.remove(this.strikeMesh); this.strikeMesh=null; }
     if(this.vac){ this.grp.remove(this.vac); this.grp.remove(this.vacTube); this.vac=null; this.vacTube=null; }
     H.root.visible=true; H.root.rotation.set(0,0,0); H.hips.rotation.x=0; H.crouch=0; H.headPitch=0.2; H.strikeAnim=false; A.x=BEDSIDE.x; A.z=BEDSIDE.z; A.h=0; this.G.room.blanket.visible=true;
@@ -3837,7 +3849,7 @@ clearTraps(){
     const mk=(g,m)=>{ const I=new THREE.InstancedMesh(g,m,n); I.castShadow=true; I.frustumCulled=false; this.grp.add(I); return I; };
     const mesh=mk(GS.body,MAT.roachShell), heads=mk(legA,MAT.roachLimb), legs=mk(legB,MAT.roachLimb);
     const list=[]; for(let i=0;i<n;i++){ const h=HOLES[i%HOLES.length]; list.push({x:h.x+rand(-0.05,0.05),z:h.z+rand(-0.05,0.05),h:Math.atan2(h.dx,h.dz)+rand(-0.9,0.9),sp:rand(0.35,0.95),delay:rand(0,3.4),t:rand(TAU),turn:rand(-0.6,0.6),tx:rand(-1.2,1.4),tz:rand(-1.2,2.2),arrived:false}); }
-    this.swarm={mesh,legs,heads,list,d:new THREE.Object3D(),zero:new THREE.Matrix4().makeScale(0,0,0)}; }
+    this.swarm={mesh,legs,heads,list,d:new THREE.Object3D(),zero:new THREE.Matrix4().makeScale(0,0,0)}; this.updateSwarm(0); }   // 첫 장면부터 제자리에 둔다 (예전엔 방 한가운데 커다란 바퀴가 한 장면 겹쳐 보였다)
   // 떼거리: 몸통 하나 + 번갈아 딛는 다리 자세 두 벌을 깜빡여 달리는 것처럼 보이게 한다
   updateSwarm(dt){ const S=this.swarm; if(!S) return; const d=S.d;
     for(let i=0;i<S.list.length;i++){ const r=S.list[i]; r.delay-=dt; if(r.delay>0){ S.mesh.setMatrixAt(i,S.zero); S.heads.setMatrixAt(i,S.zero); S.legs.setMatrixAt(i,S.zero); continue; }
@@ -4070,7 +4082,7 @@ clearTraps(){
 
   // 죽은 뒤에는 알집 곁에서 사람이 다가오는 것을 지켜본다
   watchCamera(dt){ const E=this.egg, cam=this.G.camera, A=this.ai;
-    if(!E){ this.applyCam(this.p.x,this.p.z,this.camYaw,this.camPitch,0,null); return; }
+    if(!E){ if(this.watchCam&&this.phase==='over') return; this.applyCam(this.p.x,this.p.z,this.camYaw,this.camPitch,0,null); return; }   // 알집이 밟혀 사라지면 카메라를 그 자리에 둔다
     const yaw=Math.atan2(A.x-E.x,A.z-E.z); this.watchYaw=angleDamp(this.watchYaw===undefined?yaw:this.watchYaw,yaw,2.2,dt);
     // 알집 뒤 0.5m에 두되, 가구·문 속이면 거리를 줄이고, 그래도 없으면 옆으로 돌려 빈자리를 찾는다. 자리가 바뀔 때 튀지 않게 부드럽게 옮긴다.
     let bx=clamp(E.x-Math.sin(this.watchYaw)*0.5,-1.9,1.9), bz=clamp(E.z-Math.cos(this.watchYaw)*0.5,-2.9,2.9), found=false;
@@ -4088,7 +4100,7 @@ class UI{
     for(const k of [...SLOT_ORDER,...BAIT_SLOTS]){ const d=document.createElement('div'); d.className='slot'+(BAIT_SLOTS.includes(k)?' bait':''); d.textContent=LABEL[k]; d.addEventListener('pointerdown',e=>{ e.stopPropagation(); e.preventDefault(); SFX.ensure(); G.r1.selectItem(k); }); (BAIT_SLOTS.includes(k)?bcol:wcol).appendChild(d); this.slotEls[k]=d; }
     this.killsEl=document.getElementById('kills'); this.killsN=this.killsEl.querySelector('.n');
     this.quit=document.getElementById('quit'); this.confirm=document.getElementById('confirm');
-    this.quit.addEventListener('pointerdown',e=>{ e.stopPropagation(); SFX.ensure(); this.quit.style.transition='none'; this.quit.classList.remove('show'); setTimeout(()=>{ this.quit.style.transition=''; },50); this.confirm.classList.add('show'); G.state='confirm'; });
+    this.quit.addEventListener('pointerdown',e=>{ e.stopPropagation(); SFX.ensure(); this.quit.style.transition='none'; this.quit.classList.remove('show'); setTimeout(()=>{ this.quit.style.transition=''; },50); G.r1.cancel(); G.input.reset(); this.confirm.classList.add('show'); G.state='confirm'; });
     this.confirm.querySelector('.more').addEventListener('pointerdown',e=>{ e.stopPropagation(); this.confirm.classList.remove('show'); G.state='r1'; G.r1.touch(); this.quit.style.transition='none'; this.showQuit(true); setTimeout(()=>{ this.quit.style.transition=''; },50); });
     this.confirm.querySelector('.stop').addEventListener('pointerdown',e=>{ e.stopPropagation(); this.confirm.classList.remove('show'); G.toRound2(); });
     this.tapfx=document.getElementById('tapfx'); G.input.onDashTap=(x,y)=>{ const t=this.tapfx; t.style.left=x+'px'; t.style.top=y+'px'; t.classList.remove('go'); void t.offsetWidth; t.classList.add('go'); };
@@ -4141,7 +4153,7 @@ class UI{
     if(d.human){ c.fillStyle='rgba(210,60,40,0.95)'; c.beginPath(); c.arc(px(d.human[0]),pz(d.human[1]),9,0,TAU); c.fill(); }
     if(d.me){ c.fillStyle='#FFFFFF'; c.beginPath(); c.arc(px(d.me[0]),pz(d.me[1]),5,0,TAU); c.fill(); c.strokeStyle='#FFFFFF'; c.lineWidth=2.5; c.beginPath(); c.moveTo(px(d.me[0]),pz(d.me[1])); c.lineTo(px(d.me[0])+Math.sin(d.me[2])*11,pz(d.me[1])+Math.cos(d.me[2])*11); c.stroke(); }
   }
-  hint(text,dur=4.5,delay=0,dark=false){ this.hq=this.hq||[]; this.hq.push({text,dur,delay,dark}); if(!this.hintBusy) this.hintNext(); }
+  hint(text,dur=4.5,delay=0,dark=false){ this.hq=this.hq||[]; if(this.hq.some(h=>h.text===text)||(this.hintBusy&&document.getElementById('hint').textContent===text)) return; this.hq.push({text,dur,delay,dark}); if(!this.hintBusy) this.hintNext(); }   // 같은 문구가 이미 떠 있거나 기다리고 있으면 또 넣지 않는다
   hintNext(){ const el=document.getElementById('hint'); const q=this.hq; if(!q||!q.length){ this.hintBusy=false; return; } this.hintBusy=true; const h=q.shift(); this.hintTimer=setTimeout(()=>{ el.textContent=h.text; el.classList.toggle('dark',!!h.dark); el.classList.add('show'); this.hintTimer=setTimeout(()=>{ el.classList.remove('show'); this.hintTimer=setTimeout(()=>this.hintNext(),600); },h.dur*1000); },h.delay*1000); }
   hintClear(){ this.hq=[]; clearTimeout(this.hintTimer); this.hintBusy=false; document.getElementById('hint').classList.remove('show'); }
   genLabel(text,sub){ const el=document.getElementById('genlabel'); clearTimeout(this.genTimer); if(!text){ el.classList.remove('show'); return; } el.innerHTML=text+(sub?`<small>${sub}</small>`:''); el.classList.add('show'); this.genTimer=setTimeout(()=>el.classList.remove('show'),2600); }
@@ -4212,7 +4224,7 @@ G.setLighting=function(mode){
   }
 };
 G.shake=function(a){ G.shakeAmt=Math.max(G.shakeAmt,a); };
-G.blackout=function(on,instant=true){ const f=document.getElementById('fade'); f.style.transition=instant?'none':'opacity .6s'; f.style.background='#000'; f.style.opacity=on?'1':'0'; };
+G.blackout=function(on,instant=true){ const f=document.getElementById('fade'); f.style.transition=instant?'none':'opacity .6s'; f.style.background='#000'; f.style.opacity=on?'1':'0'; if(instant) void f.offsetWidth; };   // 바로 바꾼 값을 먼저 반영해 둔다 — 안 그러면 다음 fade가 엉뚱한 값에서 시작해 화면이 번쩍였다
 G.flash=function(col){ const f=document.getElementById('fade'); f.style.transition='none'; f.style.background=col; f.style.opacity='1'; setTimeout(()=>{ f.style.transition='background .5s'; f.style.background='#000'; },80); };
 G.view={w:1.5,h:3.3}; G.ppm=260;
 G.resize=function(){ const w=innerWidth,h=innerHeight; G.renderer.setSize(w,h,false); G.renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5)); G.camera.aspect=w/h; G.ppm=clamp(Math.min(w,h)/1.5,200,340); G.portrait=h>=w; G.camera.updateProjectionMatrix(); const V=h/G.ppm; G.topH=V/(2*Math.tan(G.camera.fov*Math.PI/360)); if(G.portrait){ G.view.h=V; G.view.w=V*w/h; } else { G.view.w=V; G.view.h=V*w/h; } };
