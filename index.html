@@ -161,7 +161,7 @@ iframe{display:block;width:100%;height:100%;border:0;background:#efe8dc}
 // 족집게 모델은 반드시 게임 창의 three.js로 만들어야 한다.
 // 이 창에서 따로 불러온 three.js로 만든 도형은 게임 렌더러가 읽지 못해 매 프레임 렌더 에러가 나고 화면이 멈춘다.
 let THREE=null;
-import {createSlimeMode} from './slime-mode.js'; import {createPetMode} from './pet-mode.js';
+import {createSlimeMode} from './slime-mode.js'; import {createPetMode} from './pet-mode.js'; import {createCutscene} from './cutscene.js';
 import {installTallyHud} from './tally.js';
 
 const gameFrame=document.getElementById('gameFrame');
@@ -211,6 +211,8 @@ const pet=PET_ON?createPetMode({
     },2400);
   }
 }):{install(){},reset(){},isOpen:()=>false,isBusy:()=>false,isTankOpen:()=>false};
+// 죽일 때 가끔: 「사랑이 이긴다」 편지 대신 바퀴 두 마리가 대화하는 창 (지금은 ?bamung=1 일 때만)
+const cut=PET_ON?createCutscene({getG:()=>G,getSfx:()=>GSFX,onClose:()=>{lastLetterAt=performance.now()/1000;}}):{preload(){},play:()=>false,isOpen:()=>false,reset(){}};
 
 const showError=text=>{
   errorEl.textContent=text;
@@ -386,7 +388,7 @@ function closeLetter(){
 mailOk.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeLetter();});
 mailEl.addEventListener('pointerdown',()=>{if(mailOpen)mailEl.classList.add('open');});
 
-const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!pet.isBusy()&&!mailOpen&&!introActive&&!cap;
+const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!pet.isBusy()&&!mailOpen&&!cut.isOpen()&&!introActive&&!cap;
 const sinceLetter=()=>performance.now()/1000-lastLetterAt;
 let deathSeen=false, killsSinceLetter=0;
 
@@ -423,7 +425,9 @@ function watchKill(){
   killBurst=[];
   deathPending=setTimeout(()=>{
     deathPending=0;
-    if(letterFree()&&showLetter('death')){deathSeen=true;killsSinceLetter=0;}
+        if(!letterFree())return;
+    if(deathSeen&&Math.random()<.5&&cut.play()){killsSinceLetter=0;return;}
+    if(showLetter('death')){deathSeen=true;killsSinceLetter=0;cut.preload();}
   },700);
 }
 function installLetters(){
