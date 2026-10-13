@@ -211,8 +211,8 @@ const pet=PET_ON?createPetMode({
     },2400);
   }
 }):{install(){},reset(){},isOpen:()=>false,isBusy:()=>false,isTankOpen:()=>false};
-// 죽일 때 가끔: 「사랑이 이긴다」 편지 대신 바퀴 두 마리가 대화하는 창 (지금은 ?bamung=1 일 때만)
-const cut=PET_ON?createCutscene({getG:()=>G,getSfx:()=>GSFX,onClose:()=>{lastLetterAt=performance.now()/1000;}}):{preload(){},play:()=>false,isOpen:()=>false,reset(){}};
+// 죽일 때 가끔: 「사랑이 이긴다」 편지 대신 바퀴 두 마리가 대화하는 창
+const cut=createCutscene({getG:()=>G,getSfx:()=>GSFX,onClose:()=>{lastLetterAt=performance.now()/1000;}});
 
 const showError=text=>{
   errorEl.textContent=text;
