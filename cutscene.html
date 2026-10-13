@@ -60,7 +60,8 @@ const scene=new THREE.Scene(); scene.background=new THREE.Color(0xefe6d2);
 const pmrem=new THREE.PMREMGenerator(renderer); scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture; scene.environmentIntensity=0.42;
 const camera=new THREE.PerspectiveCamera(30,1,0.01,10);
 
-function canvasTex(w,h,draw,repeat){ const c=document.createElement('canvas'); c.width=w; c.height=h; draw(c.getContext('2d'),w,h); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; if(repeat) t.repeat.set(repeat[0],repeat[1]); t.anisotropy=8; return t; }
+// 결 무늬에 픽셀을 한 번 읽어 와 잡티를 섞으므로, 처음부터 읽기 쉬운 캔버스로 만든다 (안 그러면 읽어 올 때 화면이 멈칫한다)
+function canvasTex(w,h,draw,repeat){ const c=document.createElement('canvas'); c.width=w; c.height=h; draw(c.getContext('2d',{willReadFrequently:true}),w,h); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; if(repeat) t.repeat.set(repeat[0],repeat[1]); t.anisotropy=8; return t; }
 const rnd=(a,b)=>a+Math.random()*(b-a);
 // 바닥: 게임 방과 같은 노란 마루. 바퀴 눈높이에서 보므로 결을 촘촘히 그리고 살짝 도드라지게 한다 (널은 벽과 나란히)
 const floorTex=canvasTex(1024,1024,(g,W,H)=>{
