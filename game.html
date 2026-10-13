@@ -2051,6 +2051,8 @@ class Round1{
     const detailed=makeFoodBait(THREE,kind);
     if(detailed){
       b.mesh=detailed;
+      // 닭뼈는 바닥에 놓인 것처럼 그린다. 위에서 내려다보면 살이 바퀴 머리를 덮어서 공중에 떠 있는 것 같았다 — 시체처럼 산 바퀴 밑에 깔리게 한다
+      if(kind==='bone') detailed.traverse(o=>{ if(o.isMesh&&!o.material.transparent) o.renderOrder=-2; });
       b.food=detailed.userData.food;
     }else{
       if(kind!=='rice') this.G.paint.bait(kind,x,z);
@@ -2065,7 +2067,11 @@ class Round1{
     }
   }
 
-  aimBait(r,b){
+  // 먹을 자리가 벽·가구 속이면 바퀴가 닿지 못하고 그 앞에서 계속 버둥거린다. 닿을 수 있는 자리가 나올 때까지 미끼 둘레로 방향을 조금씩 바꿔 가며 고른다
+  aimBait(r,b){ const x=r.x, z=r.z;
+    for(let i=0;i<10;i++){ const a=i?(i%2?1:-1)*Math.ceil(i/2)*0.6:0, c=Math.cos(a), s=Math.sin(a), dx=x-b.x, dz=z-b.z;
+      r.x=b.x+c*dx+s*dz; r.z=b.z-s*dx+c*dz; this.aimBaitAt(r,b); r.x=x; r.z=z; if(this.okPos(r.tx,r.tz)) return; } }
+  aimBaitAt(r,b){
     if(!b.food){
       r.tx=b.x+rand(-b.spread,b.spread);
       r.tz=b.z+rand(-b.spread,b.spread);
@@ -2306,7 +2312,8 @@ class Round1{
 
     if(r.state==='wander'){ if(r.underGoal&&dist2(r.x,r.z,CUSHION.x,CUSHION.z)>0.8*0.8) r.underGoal=false; r.t-=dt; if(r.t<0){ if(r.spd>0){ r.spd=0; r.t=rand(0.4,1.8); } else if(Math.random()<0.15){ r.spd=rand(0.6,0.9); r.t=rand(0.25,0.5); r.turn=rand(-0.5,0.5); } else { r.spd=rand(0.12,0.32); r.t=rand(0.6,2.2); r.turn=rand(-1.2,1.2); } }
       if(r.spd>0){ r.h+=r.turn*dt; spd=r.spd; }
-      if(!r.bait){
+      if(r.baitWait>0) r.baitWait-=dt;   // 막혀서 미끼를 포기한 바퀴는 잠깐 딴 데로 갔다가 다시 온다
+      else if(!r.bait){
         for(const b of this.baits){
           if(
             b.amount>0&&
@@ -2337,7 +2344,11 @@ class Round1{
         r.h=angleDamp(r.h,Math.atan2(dx,dz),6,dt);
         spd=b.food
           ?Math.min(0.5,d*4,d/Math.max(dt,0.001))
-          :0.5;
+          :Math.min(0.5,d*4);   // 밥도 닭뼈·콜라처럼 가까워질수록 천천히 다가간다. 예전엔 밥만 늘 같은 빠르기로 달려서, 밥 자리 둘레를 빙글빙글 돌기만 하고 닿지를 못했다
+        // 벽·가구에 막혀 1.2초 넘게 조금도 다가가지 못하면 그 자리에서 버둥대지 말고, 잠깐 딴 데로 갔다가 다시 온다
+        if(d<(r.feedD||9)-0.02*dt) r.feedStuck=0; else r.feedStuck=(r.feedStuck||0)+dt;
+        r.feedD=d;
+        if(r.feedStuck>1.2){ r.feedStuck=0; r.feedD=9; r.bait=null; r.state='wander'; r.spd=rand(0.3,0.5); r.t=rand(0.8,1.5); r.turn=rand(-1,1); r.h+=rand(1.8,2.8)*(Math.random()<0.5?1:-1); r.baitWait=rand(1.5,3); spd=0; }
       }else{
         let touching=true;
 
