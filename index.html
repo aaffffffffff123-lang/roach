@@ -288,7 +288,7 @@ const mailEl=document.getElementById('mail');
 const mailOk=document.getElementById('mailOk');
 let introActive=false, startWhenReady=false;
 let mailOpen=false, mailDone=null, mailPausedGame=false, mailTok=0;   // mailTok: 편지마다 번호를 매겨, 앞 편지의 늦은 타이머가 다음 편지를 건드리지 못하게 한다
-let lastLetterAt=-1e9, feedSeen=false, labLetterShown=false;
+let lastLetterAt=-1e9, feedSeen=false, labLetterShown=false, lastFeedAt=-1e9;
 let killBurst=[], deathPending=0;
 
 { // 우표 톱니
@@ -390,7 +390,7 @@ mailEl.addEventListener('pointerdown',()=>{if(mailOpen)mailEl.classList.add('ope
 
 const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!pet.isBusy()&&!mailOpen&&!cut.isOpen()&&!introActive&&!cap;
 const sinceLetter=()=>performance.now()/1000-lastLetterAt;
-let deathSeen=false, killsSinceLetter=0;
+let deathSeen=false, killsSinceLetter=0, cutSeen=false;
 
 // 먹이: 바퀴가 먹이에 입을 대고 1초쯤 먹으면 검사. 처음은 반드시, 이후엔 간격이 지났을 때 가끔.
 function watchFeeding(dt){
@@ -403,8 +403,8 @@ function watchFeeding(dt){
     if(before<1&&r.__eat>=1&&!r.__eatChecked){
       r.__eatChecked=true;
       if(!letterFree())continue;
-      if(!feedSeen||(sinceLetter()>LETTER_GAP&&Math.random()<.15)){
-        if(showLetter('feed')){feedSeen=true;killsSinceLetter=0;}
+      if(!feedSeen||(sinceLetter()>LETTER_GAP&&performance.now()/1000-lastFeedAt>180&&Math.random()<.1)){   // 처음 한 번은 꼭, 그다음엔 먹이 편지끼리 3분은 띄우고 가끔만
+        if(showLetter('feed')){feedSeen=true;killsSinceLetter=0;lastFeedAt=performance.now()/1000;}
       }
     }
   }
@@ -420,13 +420,14 @@ function watchKill(){
   if(deathPending||!letterFree())return;
   let go=false;
   if(!deathSeen)go=killsSinceLetter>=5&&sinceLetter()>2;
+  else if(!cutSeen)go=sinceLetter()>15&&(killsSinceLetter>=12||killBurst.length>=3);   // 첫 대화 창: 편지 닫고 15초 지나 12마리(또는 한 번에 3마리)
   else if(sinceLetter()>LETTER_GAP)go=(killBurst.length>=3&&Math.random()<.4)||killsSinceLetter>=30;
   if(!go)return;
   killBurst=[];
   deathPending=setTimeout(()=>{
     deathPending=0;
         if(!letterFree())return;
-    if(deathSeen&&Math.random()<.5&&cut.play()){killsSinceLetter=0;return;}
+    if(deathSeen&&(!cutSeen||Math.random()<.5)&&cut.play()){cutSeen=true;killsSinceLetter=0;return;}
     if(showLetter('death')){deathSeen=true;killsSinceLetter=0;cut.preload();}
   },700);
 }
