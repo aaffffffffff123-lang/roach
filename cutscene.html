@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>바퀴벌레 대화</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gaegu:wght@700&display=swap">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#efe6d2;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+#gl,#ui{position:fixed;inset:0;width:100%;height:100%;display:block}
+#gl{opacity:0;transition:opacity .25s ease-out}
+#gl.on{opacity:1}
+#ui{pointer-events:none}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="ui"></canvas>
+<script type="module">
+// cutscene.html — 1라운드에서 죽이다 보면 가끔 뜨는 짧은 대화 창 (index.html의 cutscene.js가 창 안에 띄운다)
+// 방바닥에서 바퀴 두 마리가 마주 보고 한마디씩 주고받고, 다 말하면 그대로 끝난다.
+// 이 파일만 따로 열면(cutscene.html) 바로 한 번 틀고, 화면을 누르면 다시 튼다.
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { PetModel } from './bamung-roach.js';
+import { BubbleView } from './talk-bubble.js';
+
+// ───────── 대사: 왼쪽(새끼) → 오른쪽(어미) → … 번갈아 말한다. \n 은 말풍선 안 줄바꿈 ─────────
+const LINES=[
+  '엄마 저 사람들은 왜\n우리를 밟아죽이는 거죠',
+  '그건 우리가 저들보다\n더 많은 사랑을 품고\n있기 때문이란다',
+  '그렇담 죽어야죠 뭐',
+  '그래 죽자',
+];
+const FIRST=0.6;                                               // 창이 뜨고 첫마디까지
+const lineDur=t=>{ const n=t.replace(/[\s\n]/g,'').length; return Math.min(3.6,Math.max(1.6,0.9+0.095*n)); };   // 한마디가 혼자 떠 있는 시간
+const HOLD=1.8;                                                // 마지막 말 뒤에 그대로 두는 시간
+
+const EMBED=new URLSearchParams(location.search).has('embed');
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const rand=(a,b)=>a+Math.random()*(b-a);
+const TAU=Math.PI*2, PI=Math.PI;
+
+// ───────── 장면 ─────────
+const canvas=document.getElementById('gl');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=0.98; renderer.outputColorSpace=THREE.SRGBColorSpace;
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xefe6d2);
+const pmrem=new THREE.PMREMGenerator(renderer); scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture; scene.environmentIntensity=0.42;
+const camera=new THREE.PerspectiveCamera(30,1,0.01,10);
+
+function canvasTex(w,h,draw,repeat){ const c=document.createElement('canvas'); c.width=w; c.height=h; draw(c.getContext('2d'),w,h); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; if(repeat) t.repeat.set(repeat[0],repeat[1]); t.anisotropy=8; return t; }
+const rnd=(a,b)=>a+Math.random()*(b-a);
+// 바닥: 게임 방과 같은 노란 마루. 바퀴 눈높이에서 보므로 결을 촘촘히 그리고 살짝 도드라지게 한다 (널은 벽과 나란히)
+const floorTex=canvasTex(1024,1024,(g,W,H)=>{
+  const planks=4, pw=W/planks;
+  for(let p=0;p<planks;p++){
+    const x0=p*pw, hue=36+rnd(-2,2), sat=62+rnd(-4,4), lit=54+rnd(-2,2);
+    g.fillStyle=`hsl(${hue},${sat}%,${lit}%)`; g.fillRect(x0,0,pw,H);
+    // 굵은 결: 길게 물결치는 짙은 줄
+    for(let i=0;i<34;i++){ const x=x0+rnd(0,pw); g.strokeStyle=`hsla(${hue-6},${sat-8}%,${lit-18-rnd(0,12)}%,${rnd(0.08,0.2)})`; g.lineWidth=rnd(0.8,2.6); g.beginPath(); g.moveTo(x,0); let xx=x; for(let y=0;y<=H;y+=32){ xx+=rnd(-2.5,2.5); g.lineTo(Math.max(x0+1,Math.min(x0+pw-1,xx)),y); } g.stroke(); }
+    // 가는 결: 촘촘한 실선
+    for(let i=0;i<260;i++){ const x=x0+rnd(0,pw); g.strokeStyle=`hsla(${hue-4},${sat-10}%,${lit-10-rnd(0,16)}%,${rnd(0.05,0.15)})`; g.lineWidth=rnd(0.4,0.9); g.beginPath(); const y0=rnd(-100,H); g.moveTo(x,y0); let xx=x; for(let y=y0;y<=y0+rnd(100,450);y+=20){ xx+=rnd(-1,1); g.lineTo(xx,y); } g.stroke(); }
+    // 옹이 같은 짙은 얼룩 하나씩
+    if(Math.random()<0.7){ const cx=x0+rnd(pw*0.25,pw*0.75), cy=rnd(0,H); for(let k=0;k<9;k++){ g.strokeStyle=`hsla(${hue-8},${sat-6}%,${lit-22}%,${0.12})`; g.lineWidth=rnd(0.5,1.5); g.beginPath(); g.ellipse(cx,cy,3+k*3.5,15+k*9,0,0,TAU); g.stroke(); } }
+    // 이음매
+    g.fillStyle='rgba(90,50,15,0.55)'; g.fillRect(x0,0,2,H); g.fillStyle='rgba(255,236,190,0.3)'; g.fillRect(x0+2,0,2,H);
+  }
+  // 잔긁힘·먼지
+  for(let i=0;i<160;i++){ g.strokeStyle=`rgba(255,245,220,${rnd(0.05,0.14)})`; g.lineWidth=rnd(0.4,0.9); const x=rnd(0,W), y=rnd(0,H), a=rnd(0,TAU), l=rnd(5,30); g.beginPath(); g.moveTo(x,y); g.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l); g.stroke(); }
+  for(let i=0;i<500;i++){ g.fillStyle=Math.random()<0.6?`rgba(250,244,230,${rnd(0.15,0.45)})`:`rgba(70,45,20,${rnd(0.15,0.35)})`; g.beginPath(); g.arc(rnd(0,W),rnd(0,H),rnd(0.4,1.2),0,TAU); g.fill(); }
+  const id=g.getImageData(0,0,W,H), d=id.data; for(let i=0;i<d.length;i+=4){ const n=rnd(-9,9); d[i]+=n; d[i+1]+=n; d[i+2]+=n; } g.putImageData(id,0,0);
+},[3/1.2,3/1.2]);
+floorTex.center.set(0.5,0.5); floorTex.rotation=PI/2;
+const floorBump=floorTex.clone(); floorBump.colorSpace=THREE.NoColorSpace; floorBump.needsUpdate=true;
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(3,3),new THREE.MeshStandardMaterial({map:floorTex,bumpMap:floorBump,bumpScale:1.2,roughness:0.46,metalness:0.02}));
+floor.rotation.x=-PI/2; floor.position.z=1.2; floor.receiveShadow=true; scene.add(floor);
+// 벽: 게임 방과 같은 점무늬 벽지 + 바닥과 만나는 데 걸레받이
+const wallTex=canvasTex(256,256,(g)=>{
+  g.fillStyle='#F4EBD6'; g.fillRect(0,0,256,256);
+  g.fillStyle='rgba(200,170,120,0.35)'; for(let y=0;y<256;y+=32) for(let x=0;x<256;x+=32){ g.beginPath(); g.arc(x+16+((y/32)%2)*8,y+16,2,0,TAU); g.fill(); }
+  const id=g.getImageData(0,0,256,256), d=id.data; for(let i=0;i<d.length;i+=4){ const n=rnd(-6,6); d[i]+=n; d[i+1]+=n; d[i+2]+=n; } g.putImageData(id,0,0);
+},[6,2.5]);
+const wall=new THREE.Mesh(new THREE.PlaneGeometry(3,1.5),new THREE.MeshStandardMaterial({map:wallTex,roughness:0.95}));
+wall.position.set(0,0.75,-0.03); wall.receiveShadow=true; scene.add(wall);
+const skirt=new THREE.Mesh(new THREE.BoxGeometry(3,0.075,0.012),new THREE.MeshStandardMaterial({color:0xf3eee4,roughness:0.55}));
+skirt.position.set(0,0.0375,-0.024); skirt.castShadow=true; skirt.receiveShadow=true; scene.add(skirt);
+const skirtTop=new THREE.Mesh(new THREE.BoxGeometry(3,0.004,0.016),new THREE.MeshStandardMaterial({color:0xe7dfd1,roughness:0.6}));
+skirtTop.position.set(0,0.0765,-0.024); scene.add(skirtTop);
+
+// 빛: 방 천장 불빛처럼 위에서 따뜻하게, 옆에서 살짝 받쳐 준다
+scene.add(new THREE.HemisphereLight(0xfff6e8,0xd9a441,0.62));
+const key=new THREE.DirectionalLight(0xfff5ea,2.4); key.position.set(0.3,1.6,0.42); key.target.position.set(0,0,0.05);
+key.castShadow=true; key.shadow.mapSize.set(1024,1024); key.shadow.bias=-0.0004; key.shadow.normalBias=0.003;
+Object.assign(key.shadow.camera,{left:-0.42,right:0.42,top:0.42,bottom:-0.42,near:0.2,far:4}); key.shadow.camera.updateProjectionMatrix(); scene.add(key,key.target);
+const fill=new THREE.DirectionalLight(0xe4ecff,0.34); fill.position.set(-1.2,0.5,0.9); scene.add(fill);
+const rim=new THREE.DirectionalLight(0xffe2b8,0.9); rim.position.set(-0.2,0.6,-1.2); scene.add(rim);   // 벽에서 되비치는 빛: 등껍질 윤곽이 살게
+
+// 바퀴 밑 그늘 (바닥에 붙어 보이게)
+const blobTex=canvasTex(128,128,(g,w,h)=>{ const gr=g.createRadialGradient(w/2,h/2,0,w/2,h/2,w/2); gr.addColorStop(0,'rgba(36,20,8,0.7)'); gr.addColorStop(0.5,'rgba(36,20,8,0.34)'); gr.addColorStop(1,'rgba(36,20,8,0)'); g.fillStyle=gr; g.fillRect(0,0,w,h); });
+blobTex.wrapS=blobTex.wrapT=THREE.ClampToEdgeWrapping;
+function blob(){ const m=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:blobTex,transparent:true,depthWrite:false,opacity:0.85})); m.rotation.x=-PI/2; m.renderOrder=1; scene.add(m); return m; }
+
+// 두 마리: 왼쪽이 새끼(조금 작다), 오른쪽이 어미. 서로 보되 살짝 이쪽으로 틀어 옆얼굴이 보이게
+const R=[
+  {m:new PetModel({size:0.82}),x:-0.132,z:0.06,h:PI/2-0.2,T:{}},
+  {m:new PetModel({size:1}),x:0.138,z:0.06,h:-PI/2+0.2,T:{}},
+];
+R[1].m.setAge(0.18);
+for(const r of R){ r.m.g.position.set(r.x,0,r.z); r.m.g.rotation.y=r.h; scene.add(r.m.g); r.blob=blob(); r.blob.position.set(r.x,0.0007,r.z); const L=0.2*r.m.size; r.blob.scale.set(L*0.62,L*1.05,1); r.blob.rotation.z=r.h; }
+
+function frameCam(){
+  const w=Math.max(1,innerWidth), h=Math.max(1,innerHeight), a=w/h;
+  renderer.setSize(w,h,false); camera.aspect=a;
+  const f0=30*PI/180; camera.fov=(a<1?2*Math.atan(Math.tan(f0/2)/a):f0)*180/PI;
+  camera.position.set(0,0.52,0.9); camera.lookAt(0,0.08,0.03); camera.updateProjectionMatrix();
+  const d=Math.min(devicePixelRatio||1,2); ui.width=Math.round(w*d); ui.height=Math.round(h*d); ug.setTransform(d,0,0,d,0,0);
+}
+const ui=document.getElementById('ui'), ug=ui.getContext('2d');
+addEventListener('resize',()=>{ frameCam(); if(!raf) render(0); });
+
+// ───────── 몸짓 ─────────
+const _v=new THREE.Vector3(), _w=new THREE.Vector3(), _q=new THREE.Quaternion();
+const HEAD=new THREE.Vector3(0,0.12,0.44);          // 몸 좌표: 머리 위
+function headWorld(r,out){ return r.m.g.localToWorld(out.copy(HEAD)); }
+function animate(dt){
+  for(let i=0;i<2;i++){
+    const r=R[i], o=R[1-i], T=r.T; for(const k in T) T[k]=0;
+    T.crouch=0.35; T.aim=1;
+    // 더듬이는 상대 얼굴 쪽으로
+    headWorld(o,_w); headWorld(r,_v); _w.sub(_v); _w.y+=0.012; _q.copy(r.m.g.quaternion).invert(); r.m.aimDir.copy(_w).applyQuaternion(_q).normalize();
+    // 말 꺼낼 때: 고개를 살짝 들고 더듬이를 까딱인다
+    const me=shown>0&&((shown-1)%2===i), u=me?clamp((clock-saidAt)/0.9,0,1):1;
+    if(me&&u<1){ T.pitch=-0.075*Math.sin(PI*u); r.m.aimDir.y+=0.24*Math.sin(u*PI*3); r.m.aimDir.normalize(); }
+    r.m.animate(dt,T);
+  }
+}
+
+// ───────── 대사 진행 ─────────
+const view=new BubbleView();
+let playing=false, clock=0, shown=0, nextAt=0, saidAt=0, endAt=0, finished=false, raf=0, last=0, stopAt=0;
+function bubbleOpts(){
+  const w=innerWidth, h=innerHeight, s=Math.min(w,h);
+  return {key:'cut',px:clamp(s*0.039,12,22),maxW:s*0.62,lift:s*0.055,bounds:{l:s*0.025,t:s*0.03,r:w-s*0.025,b:h-s*0.03}};
+}
+function anchorsNow(){
+  const out={}; R.forEach((r,i)=>{ headWorld(r,_v).project(camera); out[i?'R':'L']={x:(_v.x+1)/2*innerWidth,y:(1-_v.y)/2*innerHeight}; }); return out;
+}
+function say(i){ shown=i+1; saidAt=clock; nextAt=clock+lineDur(LINES[i]); if(EMBED) post({type:'cut-line',i}); }
+function post(m){ try{ parent.postMessage(m,location.origin); }catch(e){} }
+function update(dt,tdt=dt){
+  clock+=tdt;
+  if(playing){
+    if(shown<LINES.length&&clock>=nextAt) say(shown);
+    else if(shown>=LINES.length&&!finished&&clock>=nextAt){ finished=true; endAt=clock+HOLD; }
+    if(finished&&clock>=endAt){ playing=false; stopAt=clock+0.6; if(EMBED) post({type:'cut-done'}); }
+  }
+  animate(dt);
+  const items=shown?LINES.slice(0,shown).map((text,i)=>({text,side:i%2?'R':'L'})):null;
+  view.update(dt,ug,items,anchorsNow(),bubbleOpts());
+}
+function render(dt,tdt=dt){
+  update(dt,tdt);
+  renderer.render(scene,camera);
+  ug.clearRect(0,0,innerWidth,innerHeight); view.draw(ug);
+}
+function loop(ts){
+  raf=requestAnimationFrame(loop);
+  // 대사 시계는 실제 시간대로(느린 기기에서도 길이가 같게), 몸짓은 한 번에 조금씩만
+  const t=ts/1000, real=last?Math.min(0.25,Math.max(0,t-last)):1/60; last=t;
+  render(Math.min(0.05,real),real);
+  if(!playing&&stopAt&&clock>=stopAt&&EMBED){ cancelAnimationFrame(raf); raf=0; }
+}
+let frozen=false;   // 확인용: 시계를 손으로 돌릴 때
+function start(){ if(frozen) return; if(!raf){ last=0; raf=requestAnimationFrame(loop); } }
+
+/** 처음부터 튼다 */
+function play(){
+  clock=0; shown=0; nextAt=FIRST; finished=false; playing=true; stopAt=0; saidAt=0; view.clear();
+  for(const r of R) r.m.flickT=rand(0.6,2.5);
+  canvas.classList.add('on'); start(); return true;
+}
+/** 누르면: 다음 말을 바로 띄우고, 다 나왔으면 끝낸다 */
+function advance(){
+  if(!playing||clock<1.2||clock-saidAt<0.6) return;   // 뜨자마자 누른 건 잡던 손, 말마다 잠깐은 읽게
+  if(shown<LINES.length){ nextAt=clock; return; }
+  if(!finished){ finished=true; }
+  endAt=clock;
+}
+function stop(){ playing=false; if(raf){ cancelAnimationFrame(raf); raf=0; } shown=0; view.clear(); ug.clearRect(0,0,innerWidth,innerHeight); }
+window.Cut={play,advance,stop,get playing(){ return playing; },_debug:{R,camera,get shown(){ return shown; },freeze(){ frozen=true; if(raf){ cancelAnimationFrame(raf); raf=0; } },step(sec,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++) update(dt); renderer.render(scene,camera); ug.clearRect(0,0,innerWidth,innerHeight); view.draw(ug); return shown; }}};
+
+addEventListener('pointerdown',e=>{ e.preventDefault(); if(playing) advance(); else if(!EMBED) play(); });
+
+// ───────── 시작 ─────────
+frameCam();
+for(const r of R) r.m.animate(0.016,{crouch:1});
+try{ renderer.compile(scene,camera); }catch(e){}
+render(0.016);
+const ready=()=>{ canvas.classList.add('on'); render(0.016); if(EMBED) post({type:'cut-ready'}); else play(); };
+// 한글 글꼴은 글자 묶음별로 나눠 받으므로 대사에 나오는 글자를 다 받아 둔다 (안 그러면 첫 말풍선 몇 글자만 다른 글꼴로 나온다)
+(document.fonts?.load?document.fonts.load('700 20px Gaegu',LINES.join('')).catch(()=>{}):Promise.resolve()).then(ready);
+</script>
+</body>
+</html>

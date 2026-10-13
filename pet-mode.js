@@ -1,10 +1,10 @@
-// pet-mode.js — 1라운드 「컵」 아이템과 바멍(어항) 화면 연결 (index.html에서 불러 쓴다)
-// 컵으로 살아 있는 바퀴 한 마리를 덮어 데려와 이름을 지어 주고, 어항(bamung.html)에 넣는다.
-// 몇 번이든 한 마리씩 데려올 수 있고(최대 30마리), 컵을 고르면 옆에 뜨는 「어항 보기」로 언제든 구경하러 간다.
+// pet-mode.js — 1라운드 「컵」 아이템과 바멍(테라리움) 화면 연결 (index.html에서 불러 쓴다)
+// 컵으로 살아 있는 바퀴 한 마리를 덮어 데려와 이름을 지어 주고, 테라리움(bamung.html)에 넣는다.
+// 몇 번이든 한 마리씩 데려올 수 있고(최대 30마리), 컵을 고르면 옆에 뜨는 「테라리움 보기」로 언제든 구경하러 간다.
 // 족집게·슬라임과 같은 방식: 게임 창의 three.js로 컵을 만들어 게임 장면에 넣고, 입력은 게임 Input 앞에서 가로챈다.
 
-const KEY='roach_pets_v1';       // 어항 기록 (bamung.html과 같은 자리)
-const CAP=30;                    // 어항에 둘 수 있는 마릿수 (살아 있는 놈 + 아직 안 묻은 놈)
+const KEY='roach_pets_v1';       // 테라리움 기록 (bamung.html과 같은 자리)
+const CAP=30;                    // 테라리움에 둘 수 있는 마릿수 (살아 있는 놈 + 아직 안 묻은 놈)
 const NAME_MAX=8;
 const CUP_R=0.15;                // 컵 입구 반지름 (바퀴 길이 0.13의 두 배 남짓)
 const CUP_H=0.2;
@@ -37,7 +37,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
   let info=readStore(), hintShown=false, letterDue=true, lastPointer=null, press=null;
   const TMP={};
 
-  // ───────── 겉면: 어항 레이어 · 돌아가기 · 이름 카드 ─────────
+  // ───────── 겉면: 테라리움 레이어 · 돌아가기 · 이름 카드 ─────────
   const style=document.createElement('style');
   style.textContent=`
 #petLayer{position:fixed;inset:0;z-index:20;background:#e8dbc4;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .22s ease-out,visibility 0s linear .22s}
@@ -71,7 +71,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
   document.body.appendChild(layer);
   const frame=layer.querySelector('#petFrame'), back=layer.querySelector('#petBack');
   const nameEl=document.createElement('div'); nameEl.id='petName'; nameEl.setAttribute('aria-hidden','true');
-  nameEl.innerHTML=`<div class="card" role="dialog" aria-label="이름 짓기">${CUP_SVG.replace('<svg ','<svg class="pic" ')}<div class="ttl">이름을 지어 주세요</div><div class="sub" id="petNameSub"></div><input id="petNameIn" type="text" maxlength="16" autocomplete="off" enterkeyhint="done" aria-label="이름"><button id="petGo" type="button">어항에 넣기</button></div>`;
+  nameEl.innerHTML=`<div class="card" role="dialog" aria-label="이름 짓기">${CUP_SVG.replace('<svg ','<svg class="pic" ')}<div class="ttl">이름을 지어 주세요</div><div class="sub" id="petNameSub"></div><input id="petNameIn" type="text" maxlength="16" autocomplete="off" enterkeyhint="done" aria-label="이름"><button id="petGo" type="button">테라리움에 넣기</button></div>`;
   document.body.appendChild(nameEl);
   const nameIn=nameEl.querySelector('#petNameIn'), goBtn=nameEl.querySelector('#petGo');
   back.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); closeTank(); });
@@ -143,7 +143,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     openTank({name});
   }
 
-  // ───────── 게임 쪽 칸 · 「어항 보기」 ─────────
+  // ───────── 게임 쪽 칸 · 「테라리움 보기」 ─────────
   let tankBtn=null;
   function addSlot(){
     const {G,gameWindow}=env, doc=gameWindow.document;
@@ -161,7 +161,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     const col=doc.getElementById('wcol'), after=doc.getElementById('slime-slot')||doc.getElementById('tweezer-slot')||G.ui.slotEls.hand;
     col.insertBefore(slot,after?.nextSibling||col.firstChild);
     G.ui.slotEls.cup=slot;
-    tankBtn=doc.createElement('div'); tankBtn.id='pet-tank'; tankBtn.innerHTML='어항 보기 <i></i>';
+    tankBtn=doc.createElement('div'); tankBtn.id='pet-tank'; tankBtn.innerHTML='테라리움 보기 <i></i>';
     tankBtn.addEventListener('pointerdown',e=>{ e.stopPropagation(); e.preventDefault(); env.GSFX?.ensure?.(); sfx.go(); openTank(null); });
     (col.parentElement||doc.body).appendChild(tankBtn);
     updateSlot();
@@ -183,7 +183,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     const {G}=env; if(!G||G.state!=='r1'||tankOpen||naming) return;
     G.r1.cancel?.(); G.r1.selectItem('cup');
     ensureCup(); preloadTank(); info=readStore(); updateSlot();
-    if(info.total>=CAP) G.ui.hint?.(`어항이 꽉 찼어요. ${CAP}마리까지 키울 수 있어요.`,2.4,0,true);
+    if(info.total>=CAP) G.ui.hint?.(`테라리움이 꽉 찼어요. ${CAP}마리까지 키울 수 있어요.`,2.4,0,true);
     else if(!hintShown){ hintShown=true; G.ui.hint?.('살아 있는 바퀴벌레를 누르면 컵으로 덮어 데려옵니다.',2.4,0,true); }
     placeTankBtn();
     if(lastPointer?.type==='mouse') hoverCup(lastPointer.x,lastPointer.y);
@@ -231,7 +231,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     if(cap||naming||tankOpen||!env) return;
     const {G}=env;
     info=readStore(); updateSlot();
-    if(info.total>=CAP){ G.ui.hint?.(`어항이 꽉 찼어요. ${CAP}마리까지 키울 수 있어요.`,2.2,0,true); return; }
+    if(info.total>=CAP){ G.ui.hint?.(`테라리움이 꽉 찼어요. ${CAP}마리까지 키울 수 있어요.`,2.2,0,true); return; }
     const r=candidateAt(sx,sy,type), p=G.r1.floorPoint(sx,sy); if(!p&&!r) return;
     ensureCup();
     const x=r?r.x:p.x, z=r?r.z:p.z;

@@ -1,9 +1,11 @@
-// bamung-life.js — 어항 속 바퀴들의 행동
-// World: 어항 벽·소품 자리·바람·불빛을 알고, 바퀴가 쓸 자리를 골라 준다.
+// bamung-life.js — 테라리움 속 바퀴들의 행동
+// World: 테라리움 벽·소품 자리·바람·불빛을 알고, 바퀴가 쓸 자리를 골라 준다.
 // Pet  : 한 마리. 쉬기·돌아다니기·더듬이 손질·먹고 마시기·숨기·놀이기구 타기·유리 벽 타기·늙어 죽기.
+// 대화 : 둘이 마주치면 가끔 마주 보고 서서 한마디씩 주고받는다 (대사는 bamung-talk.js).
 // 실제 습성: 대부분 쉬고, 좁은 틈을 좋아하고(벽·틈에 몸을 붙임), 빛과 바람을 피하고, 죽은 동료 근처는 피해 간다.
 import * as THREE from 'three';
 import { PetModel, applyDeco, ROACH_L } from './bamung-roach.js';
+import { TALKS } from './bamung-talk.js';
 
 const TAU=Math.PI*2, PI=Math.PI;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -18,6 +20,7 @@ export const TANK={hw:0.46,hd:0.78,h:0.72,band:0.58};   // 안쪽 반폭·반깊
 const PR=0.036;          // 바퀴 몸 반지름 (부딪힘 판정)
 const WALL=0.05;         // 유리 벽에서 몸 가운데까지: 다리가 유리를 뚫고 나가 보이지 않게
 const DAY=86400000;
+const talkLineDur=t=>{ const n=String(t).replace(/\s/g,'').length; return clamp(1.25+0.1*n,2.1,4.8); };   // 한마디가 떠 있다가 다음 말이 나올 때까지
 
 const _q=new THREE.Quaternion(), _m=new THREE.Matrix4(), _v=new THREE.Vector3(), _v2=new THREE.Vector3(), _v3=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0);
 function frameQuat(up,fwd,out){
@@ -50,13 +53,14 @@ export class Path{
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 어항
+// 테라리움
 // ══════════════════════════════════════════════════════════════════
 export class World{
   constructor({sfx,events}={}){
     this.props=[]; this.pets=[]; this.sfx=sfx||{}; this.events=events||{}; this.time=0;
+    this.talk=null; this.talkSeq=0; this.talkCD=rand(8,14); this.talkOn=true; this.talkBag=[];
   }
-  // 소품 자기 좌표 → 어항 좌표
+  // 소품 자기 좌표 → 테라리움 좌표
   lp(prop,x,y,z,out=new THREE.Vector3()){ const c=Math.cos(prop.rot), s=Math.sin(prop.rot); return out.set(prop.x+x*c+z*s,y,prop.z-x*s+z*c); }
   ln(prop,x,y,z,out=new THREE.Vector3()){ const c=Math.cos(prop.rot), s=Math.sin(prop.rot); return out.set(x*c+z*s,y,-x*s+z*c); }
   lh(prop,h){ return h+prop.rot; }
@@ -69,7 +73,7 @@ export class World{
       else { const ex=lx-f.x, ez=lz-f.z, ax=f.hw+inf-Math.abs(ex), az=f.hd+inf-Math.abs(ez); if(ax>0&&az>0){ const o=ax<az?{nx:Math.sign(ex)||1,nz:0,pen:ax}:{nx:0,nz:Math.sign(ez)||1,pen:az}; if(!best||o.pen<best.pen) best=o; } }
     }
     if(!best) return null;
-    // 법선을 어항 좌표로
+    // 법선을 테라리움 좌표로
     const nx=best.nx*c+best.nz*s, nz=-best.nx*s+best.nz*c; return {nx,nz,pen:best.pen};
   }
   /** 바닥에서 (x,z)에 몸을 둘 수 있게 밀어낸 자리 */
@@ -112,7 +116,7 @@ export class World{
     if(s.type==='cup'||s.type==='wheel'){ const a=this.lp(p,s.approach.x,0,s.approach.z); return {x:a.x,z:a.z,h:this.lh(p,s.approach.h)}; }
     const a=this.lp(p,s.x,0,s.z); return {x:a.x,z:a.z,h:this.lh(p,s.h)};
   }
-  /** 소품의 꺾은선 길을 어항 좌표 Path로 */
+  /** 소품의 꺾은선 길을 테라리움 좌표 Path로 */
   slotPath(s,which='pts'){
     const p=s.prop; const key='_path'+which;
     if(s[key]&&s[key].rot===p.rot&&s[key].x===p.x&&s[key].z===p.z) return s[key].path;
@@ -121,6 +125,58 @@ export class World{
     const path=new Path(pts,nrm); s[key]={path,rot:p.rot,x:p.x,z:p.z}; return path;
   }
   corpses(){ return this.pets.filter(p=>p.dead&&!p.buried); }
+
+  // ───────── 대화: 둘이 마주 보고 서서 한마디씩 주고받는다 (한 번에 한 쌍만) ─────────
+  /** 말을 걸거나 받을 수 있는 놈: 바닥에서 쉬거나 걷는 중이고, 막 들어온 놈은 아니다 */
+  canTalk(p){
+    if(p.dead||p.away||p.mode!=='floor'||p.hidden) return false;
+    const a=p.act, t=a?.type;
+    if(!(t==='rest'||t==='groom'||t==='investigate'||t==='meet'||(t==='walk'&&!a.slot))) return false;
+    if(p.rec.arrived&&Date.now()-p.rec.arrived<45000) return false;
+    return true;
+  }
+  /** 대화 하나 고르기: 다 한 번씩 나오기 전엔 같은 게 다시 안 나온다 */
+  pickTalk(){ if(!this.talkBag.length) this.talkBag=TALKS.map((_,i)=>i).sort(()=>Math.random()-0.5); const L=TALKS[this.talkBag.pop()]; return Array.isArray(L)?L.filter(x=>typeof x==='string'&&x.trim()):[]; }
+  /** 나중에 들어온 놈이 먼저 묻는다. walk면 묻는 놈이 상대 앞까지 걸어간다 */
+  startTalk(p,q,walk=false){
+    if(this.talk) this.endTalk();
+    const lines=this.pickTalk(); if(!lines.length) return false;
+    const [a,b]=(p.rec.born||0)>=(q.rec.born||0)?[p,q]:[q,p];
+    const T={id:++this.talkSeq,a,b,lines,i:-1,lineT:0,next:walk?0:0.6,phase:walk?'approach':'talk',fade:0,t:0,over:false};
+    this.talk=T; this.talkCD=rand(28,55); a.stuck=0; b.stuck=0;
+    a.setAct({type:'talk',talk:T,other:b,role:'a',walk});
+    b.setAct({type:'talk',talk:T,other:a,role:'b',walk:false});
+    return true;
+  }
+  /** 걷다가 마주친 둘: 지난 대화에서 한참 지났으면 가끔 그대로 말을 건다 */
+  meetTalk(p,q){ if(this.talk||!this.talkOn||this.talkCD>14||Math.random()<0.4) return false; if(!this.canTalk(p)||!this.canTalk(q)) return false; return this.startTalk(p,q,false); }
+  endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; for(const p of [T.a,T.b]) if(p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
+  /** 매 프레임. on=false(꾸미는 중·소품 옮기는 중)면 하던 대화를 끊고 새로 걸지 않는다 */
+  updateTalk(dt,on=true){
+    this.talkOn=on;
+    const T=this.talk;
+    if(!T){
+      if(!on) return;
+      this.talkCD-=dt; if(this.talkCD>0) return;
+      this.talkCD=rand(2.5,5);  // 짝이 없으면 조금 있다 다시 본다
+      const L=this.pets.filter(p=>this.canTalk(p)); if(L.length<2) return;
+      const p=pick(L); let q=null, d=1e9;
+      for(const o of L){ if(o===p) continue; const e=Math.hypot(o.x-p.x,o.z-p.z); if(e<d){ d=e; q=o; } }
+      if(!q||d>0.75) return;
+      this.startTalk(p,q,d>0.15);
+      return;
+    }
+    const live=x=>x.act?.type==='talk'&&x.act.talk===T&&!x.dead&&!x.away;
+    if(!on||!live(T.a)||!live(T.b)){ this.endTalk(); return; }
+    T.t+=dt;
+    if(T.phase==='approach'){ if(T.a.act.arrived){ T.phase='talk'; T.next=0.45; } else if(T.t>8/Math.max(0.45,T.a.slowK)) this.endTalk(); return; }   // 늙어 느린 놈은 더 기다린다
+    T.lineT+=dt; T.next-=dt;
+    if(T.phase==='talk'){ if(T.next<=0){
+      if(T.i<T.lines.length-1){ T.i++; T.lineT=0; T.next=talkLineDur(T.lines[T.i]); this.events.talkLine?.(T); }
+      else { T.phase='hold'; T.next=2.6; } } }
+    else if(T.phase==='hold'){ if(T.next<=0){ T.phase='fade'; T.fade=0; } }
+    else if(T.phase==='fade'){ T.fade=Math.min(1,T.fade+dt/0.45); if(T.fade>=1) this.endTalk(); }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -268,7 +324,7 @@ export class Pet{
     else { this.floorPose(); this.setAct({type:'flee',h:rand(TAU),dur:rand(0.9,1.6)}); }
   }
   usesProp(p){ const a=this.act; if(!a) return false; if(a.slot?.prop===p) return true; if(a.type==='swim'&&a.pool===p) return true; return false; }
-  canBeStartled(){ const t=this.act?.type; return !this.dead&&(t==='rest'||t==='walk'||t==='groom'||t==='feed'||t==='investigate'||t==='meet'); }
+  canBeStartled(){ const t=this.act?.type; return !this.dead&&(t==='rest'||t==='walk'||t==='groom'||t==='feed'||t==='investigate'||t==='meet'||t==='talk'); }
   startFlee(ax,az,dur){ const h=Math.atan2(this.x-ax,this.z-az)+rand(-0.5,0.5); this.setAct({type:'flee',h,dur}); }
   // 바닥 자세
   floorPose(){ this.tPos.set(this.x,0,this.z); this.tQuat.setFromAxisAngle(_up,this.h); this.mode='floor'; }
@@ -317,11 +373,28 @@ export class Pet{
   }
   checkMeet(a){
     if(a.slot||this.meetCD>0){ this.meetCD-=1/60; return; }
-    for(const o of this.world.pets){ if(o===this||o.dead||o.mode!=='floor'||o.act?.type!=='walk'||o.act.slot) continue; const d=Math.hypot(o.x-this.x,o.z-this.z); if(d<0.13&&d>0.04){ const face=Math.cos(wrap(Math.atan2(o.x-this.x,o.z-this.z)-this.h)); if(face>0.6&&Math.random()<0.5){ this.meetCD=rand(6,14); o.meetCD=rand(6,14); this.setAct({type:'meet',other:o,dur:rand(1.2,2.6)}); o.setAct({type:'meet',other:this,dur:rand(1.2,2.6)}); return; } } }
+    for(const o of this.world.pets){ if(o===this||o.dead||o.mode!=='floor'||o.act?.type!=='walk'||o.act.slot) continue; const d=Math.hypot(o.x-this.x,o.z-this.z); if(d<0.13&&d>0.04){ const face=Math.cos(wrap(Math.atan2(o.x-this.x,o.z-this.z)-this.h)); if(face>0.6&&Math.random()<0.5){ if(this.world.meetTalk(this,o)) return; this.meetCD=rand(6,14); o.meetCD=rand(6,14); this.setAct({type:'meet',other:o,dur:rand(1.2,2.6)}); o.setAct({type:'meet',other:this,dur:rand(1.2,2.6)}); return; } } }
   }
   act_meet(dt,a,T){ const o=a.other; this.speed=0; const want=Math.atan2(o.x-this.x,o.z-this.z); this.h+=clamp(wrap(want-this.h),-5*dt,5*dt); this.floorPose();
     T.aim=1; const inv=_q.copy(this.quat).invert(); this.m.aimDir.set(o.x-this.x,0.02,o.z-this.z).normalize().applyQuaternion(inv);
     if(a.t>a.dur) this.goWander(); }
+  /** 대화: 묻는 놈은 상대 앞까지 걸어가고, 둘이 마주 보고 선다. 말하는 쪽은 말 꺼낼 때 고개를 살짝 들고 더듬이를 까딱인다 */
+  act_talk(dt,a,T){
+    const Tk=a.talk, o=a.other;
+    if(!Tk||Tk.over||!o){ this.chooseNext(); return; }
+    if(a.walk&&!a.arrived){
+      const dx=this.x-o.x, dz=this.z-o.z, d=Math.hypot(dx,dz)||1;
+      const left=this.stepFloor(dt,o.x+dx/d*0.1,o.z+dz/d*0.1,0.13,T);
+      if(left<0.014||d<0.115||this.stuck>1.2){ a.arrived=true; this.stuck=0; }
+      return;
+    }
+    this.speed=damp(this.speed,0,10,dt);
+    const want=Math.atan2(o.x-this.x,o.z-this.z); this.h+=clamp(wrap(want-this.h),-4*dt,4*dt); this.floorPose();
+    T.crouch=0.3; T.aim=1;
+    const inv=_q.copy(this.quat).invert(); this.m.aimDir.set(o.x-this.x,0.03,o.z-this.z).normalize().applyQuaternion(inv);
+    const mine=Tk.phase==='talk'&&Tk.i>=0&&((Tk.i%2===0)===(a.role==='a'));
+    if(mine&&Tk.lineT<1){ const u=Tk.lineT; T.pitch=-0.07*Math.sin(PI*u); this.m.aimDir.y+=0.22*Math.sin(u*PI*3); this.m.aimDir.normalize(); }
+  }
   act_flee(dt,a,T){ const tx=this.x+Math.sin(a.h)*0.3, tz=this.z+Math.cos(a.h)*0.3; this.stepFloor(dt,tx,tz,0.75,T); a.h+=rand(-1,1)*dt; if(this.stuck>0.3){ a.h+=PI*0.6; this.stuck=0; } if(a.t>a.dur) this.goRest(); }
   act_investigate(dt,a,T){
     if(!a.arrived){ const d=this.stepFloor(dt,a.tx,a.tz,0.16,T); if(d<0.015||this.stuck>1){ a.arrived=true; a.t=0; } return; }
