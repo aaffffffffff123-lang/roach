@@ -26,7 +26,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#efe6d2;tou
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PetModel } from './bamung-roach.js';
-import { BubbleView } from './talk-bubble.js';
+import { BubbleView, typeTime } from './talk-bubble.js';
+import { speak } from './roach-voice.js';
 
 // ───────── 대사: 왼쪽(새끼) → 오른쪽(어미) → … 번갈아 말한다. \n 은 말풍선 안 줄바꿈 ─────────
 const LINES=[
@@ -36,7 +37,11 @@ const LINES=[
   '그래 죽자',
 ];
 const FIRST=0.6;                                               // 창이 뜨고 첫마디까지
-const lineDur=t=>{ const n=t.replace(/[\s\n]/g,'').length; return Math.min(3.6,Math.max(1.6,0.9+0.095*n)); };   // 한마디가 혼자 떠 있는 시간
+// 목소리: 동물의 숲처럼 글자마다 「미미미」. 새끼는 높고 가늘게, 어미는 낮고 조금 느리게
+const VOICES=[{pitch:620,formant:1.42,speed:1.0},{pitch:430,formant:1.22,speed:0.9}];
+const VOICE_GAIN=0.22;
+// 한마디가 떠 있는 시간: 글자가 다 찍히는 동안 + 읽을 틈
+const lineDur=i=>{ const t=LINES[i], n=t.replace(/\s/g,'').length; return Math.max(1.6,typeTime(t,VOICES[i%2].speed)+0.95+0.035*n); };
 const HOLD=1.8;                                                // 마지막 말 뒤에 그대로 두는 시간
 
 const EMBED=new URLSearchParams(location.search).has('embed');
@@ -135,9 +140,9 @@ function animate(dt){
     T.crouch=0.35; T.aim=1;
     // 더듬이는 상대 얼굴 쪽으로
     headWorld(o,_w); headWorld(r,_v); _w.sub(_v); _w.y+=0.012; _q.copy(r.m.g.quaternion).invert(); r.m.aimDir.copy(_w).applyQuaternion(_q).normalize();
-    // 말 꺼낼 때: 고개를 살짝 들고 더듬이를 까딱인다
-    const me=shown>0&&((shown-1)%2===i), u=me?clamp((clock-saidAt)/0.9,0,1):1;
-    if(me&&u<1){ T.pitch=-0.075*Math.sin(PI*u); r.m.aimDir.y+=0.24*Math.sin(u*PI*3); r.m.aimDir.normalize(); }
+    // 말하는 동안: 고개를 살짝 들고 글자 박자에 맞춰 더듬이를 까딱인다
+    const me=shown>0&&((shown-1)%2===i), talkT=me?Math.max(0.9,typeTime(LINES[shown-1],VOICES[i].speed)):0, e=clock-saidAt;
+    if(me&&e<talkT){ const u=e/talkT; T.pitch=-0.06*Math.sin(PI*Math.min(1,u*1.6))-0.012*Math.sin(e*TAU*6.5); r.m.aimDir.y+=0.2*Math.sin(e*TAU*6.5); r.m.aimDir.normalize(); }
     r.m.animate(dt,T);
   }
 }
@@ -152,7 +157,8 @@ function bubbleOpts(){
 function anchorsNow(){
   const out={}; R.forEach((r,i)=>{ headWorld(r,_v).project(camera); out[i?'R':'L']={x:(_v.x+1)/2*innerWidth,y:(1-_v.y)/2*innerHeight}; }); return out;
 }
-function say(i){ shown=i+1; saidAt=clock; nextAt=clock+lineDur(LINES[i]); if(EMBED) post({type:'cut-line',i}); }
+let audio=null, voice=null, ownAudio=null;
+function say(i){ shown=i+1; saidAt=clock; nextAt=clock+lineDur(i); voice?.stop(); voice=audio?speak(audio.ctx,audio.dest,LINES[i],VOICES[i%2],{gain:VOICE_GAIN}):null; if(EMBED) post({type:'cut-line',i}); }
 function post(m){ try{ parent.postMessage(m,location.origin); }catch(e){} }
 function update(dt,tdt=dt){
   clock+=tdt;
@@ -162,7 +168,7 @@ function update(dt,tdt=dt){
     if(finished&&clock>=endAt){ playing=false; stopAt=clock+0.6; if(EMBED) post({type:'cut-done'}); }
   }
   animate(dt);
-  const items=shown?LINES.slice(0,shown).map((text,i)=>({text,side:i%2?'R':'L'})):null;
+  const items=shown?LINES.slice(0,shown).map((text,i)=>({text,side:i%2?'R':'L',speed:VOICES[i%2].speed,elapsed:i<shown-1?Infinity:clock-saidAt})):null;
   view.update(dt,ug,items,anchorsNow(),bubbleOpts());
 }
 function render(dt,tdt=dt){
@@ -180,23 +186,30 @@ function loop(ts){
 let frozen=false;   // 확인용: 시계를 손으로 돌릴 때
 function start(){ if(frozen) return; if(!raf){ last=0; raf=requestAnimationFrame(loop); } }
 
-/** 처음부터 튼다 */
-function play(){
+/** 처음부터 튼다. o.sfx: 게임 소리 장치(그 AudioContext로 목소리를 낸다 — 폰에서도 이미 소리가 풀려 있다) */
+function play(o={}){
+  voice?.stop(); voice=null;
+  const S=o.sfx; audio=S?.ctx?{ctx:S.ctx,dest:S.master||S.ctx.destination}:ownAudio;
   clock=0; shown=0; nextAt=FIRST; finished=false; playing=true; stopAt=0; saidAt=0; view.clear();
   for(const r of R) r.m.flickT=rand(0.6,2.5);
   canvas.classList.add('on'); start(); return true;
 }
-/** 누르면: 다음 말을 바로 띄우고, 다 나왔으면 끝낸다 */
+/** 누르면: 글자가 찍히는 중이면 한 번에 다 띄우고, 다 찍혔으면 다음 말로. 다 나왔으면 끝낸다 */
 function advance(){
-  if(!playing||clock<1.2||clock-saidAt<0.6) return;   // 뜨자마자 누른 건 잡던 손, 말마다 잠깐은 읽게
+  if(!playing||clock<1.2) return;   // 뜨자마자 누른 건 잡던 손
+  if(shown>0){ const k=shown-1, tt=typeTime(LINES[k],VOICES[k%2].speed);
+    if(clock-saidAt<tt){ saidAt=clock-tt; nextAt=Math.max(nextAt,clock+0.6); voice?.stop(); voice=null; return; }
+    if(clock-saidAt-tt<0.45) return; }   // 다 찍힌 뒤 잠깐은 읽게
   if(shown<LINES.length){ nextAt=clock; return; }
   if(!finished){ finished=true; }
   endAt=clock;
 }
-function stop(){ playing=false; if(raf){ cancelAnimationFrame(raf); raf=0; } shown=0; view.clear(); ug.clearRect(0,0,innerWidth,innerHeight); }
-window.Cut={play,advance,stop,get playing(){ return playing; },_debug:{R,camera,get shown(){ return shown; },freeze(){ frozen=true; if(raf){ cancelAnimationFrame(raf); raf=0; } },step(sec,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++) update(dt); renderer.render(scene,camera); ug.clearRect(0,0,innerWidth,innerHeight); view.draw(ug); return shown; }}};
+function stop(){ playing=false; voice?.stop(); voice=null; if(raf){ cancelAnimationFrame(raf); raf=0; } shown=0; view.clear(); ug.clearRect(0,0,innerWidth,innerHeight); }
+window.Cut={play,advance,stop,get playing(){ return playing; },_debug:{R,camera,get shown(){ return shown; },get clock(){ return clock; },get raf(){ return raf; },freeze(){ frozen=true; if(raf){ cancelAnimationFrame(raf); raf=0; } },step(sec,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++) update(dt); renderer.render(scene,camera); ug.clearRect(0,0,innerWidth,innerHeight); view.draw(ug); return shown; }}};
 
-addEventListener('pointerdown',e=>{ e.preventDefault(); if(playing) advance(); else if(!EMBED) play(); });
+// 따로 열었을 때(확인용): 누르면 소리를 켜고 다시 튼다
+function ensureOwnAudio(){ if(ownAudio||EMBED) return; try{ const C=window.AudioContext||window.webkitAudioContext; const ctx=new C(); const m=ctx.createGain(); m.gain.value=0.85; const c=ctx.createDynamicsCompressor(); c.threshold.value=-14; c.ratio.value=5; m.connect(c); c.connect(ctx.destination); ownAudio={ctx,dest:m}; if(!audio) audio=ownAudio; }catch(e){} }
+addEventListener('pointerdown',e=>{ e.preventDefault(); ensureOwnAudio(); if(playing) advance(); else if(!EMBED) play(); });
 
 // ───────── 시작 ─────────
 frameCam();

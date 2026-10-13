@@ -1,12 +1,34 @@
 // talk-bubble.js — 바퀴 두 마리가 주고받는 말풍선 (죽일 때 뜨는 대화 창 · 테라리움 · 테라리움 사진이 같이 쓴다)
 // 하얀 타원에 가는 테두리, 말한 놈 쪽으로 짧은 꼬리. 왼쪽 놈 말은 왼쪽 줄에, 오른쪽 놈 말은 오른쪽 줄에 쌓인다.
 // 새 말은 머리 바로 위에 붙고, 먼저 한 말은 위로 밀려 올라간다. 다 말하고 나면 맨 위가 첫마디다.
+// 글자는 동물의 숲처럼 한 자씩 찍히고, 목소리(roach-voice.js)도 같은 박자로 난다.
 
 const TAU=Math.PI*2;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 export const BUBBLE_FAMILY='Gaegu, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 const N=2.5;                 // 타원을 살짝 각지게(초타원) — 글자 귀퉁이가 테두리에 안 닿게
 const fontOf=px=>`700 ${px}px ${BUBBLE_FAMILY}`;
+
+// ───────── 글자 찍히는 박자 (목소리와 같이 쓴다) ─────────
+export const TYPE={syl:0.072, space:0.05, punct:0.17};   // 글자 하나 · 띄어쓰기 · 문장부호마다 걸리는 시간(초). speed가 크면 빨라진다
+const isSpace=ch=>/\s/.test(ch), isPunct=ch=>/[.,!?…~]/.test(ch);
+/** 글자마다 찍히는 시각: {steps:[{t,ch,kind}], total} */
+export function typeSteps(text,speed=1){
+  const steps=[]; let t=0;
+  for(const ch of Array.from(String(text))){
+    const kind=isSpace(ch)?'space':isPunct(ch)?'punct':'syl';
+    steps.push({t,ch,kind});
+    t+=(kind==='space'?TYPE.space:kind==='punct'?TYPE.punct:TYPE.syl)/speed;
+  }
+  return {steps,total:t};
+}
+export const typeTime=(text,speed=1)=>typeSteps(text,speed).total;
+/** t초 지났을 때 보이는 글자 수 (띄어쓰기는 안 센다). t가 없거나 Infinity면 다 보인다 */
+export function revealAt(text,t,speed=1){
+  if(t==null||t===Infinity) return Infinity;
+  let n=0; for(const s of typeSteps(text,speed).steps){ if(s.t>t) break; if(s.kind!=='space') n++; }
+  return n;
+}
 
 /** 띄어쓰기 단위로 maxW 안에서 줄을 나눈다. '\n'은 그대로 줄바꿈 */
 export function wrapLines(g,text,maxW){
@@ -38,7 +60,7 @@ export function measureBubble(g,text,px,maxW){
 }
 
 /**
- * items  : [{text, side:'L'|'R'}] 말한 순서대로 (지금까지 나온 말만)
+ * items  : [{text, side:'L'|'R', elapsed?, speed?}] 말한 순서대로 (지금까지 나온 말만). elapsed = 그 말을 시작한 지 몇 초(없으면 다 찍힌 것)
  * anchors: {L:{x,y}, R:{x,y}} 각자 머리 바로 위 화면 좌표
  * o      : {px 글자 크기, maxW 한 줄 최대 폭, lift 머리에서 띄울 높이, bounds:{l,t,r,b}}
  * 돌려주는 값: [{text,side,cx,cy,rx,ry,lines,ws,lh,px,tx,ty}] (tx,ty = 꼬리가 가리킬 머리)
@@ -47,7 +69,7 @@ export function layoutBubbles(g,items,anchors,o){
   const px=o.px, maxW=o.maxW, B=o.bounds||{l:0,t:0,r:1e9,b:1e9};
   const gapY=px*1.05, stagger=px*0.95, lift=o.lift??px*1.1, sideGap=px*0.3;
   const AL=anchors.L, AR=anchors.R, mid=(AL.x+AR.x)/2;
-  const M=items.map(it=>({text:it.text,side:it.side,...measureBubble(g,it.text,px,maxW)}));
+  const M=items.map(it=>({text:it.text,side:it.side,reveal:revealAt(it.text,it.elapsed,it.speed||1),...measureBubble(g,it.text,px,maxW)}));
   // 아래(가장 최근 말)부터 위로 쌓는다: 같은 줄 말은 겹치지 않게, 바로 뒤 말보다 아랫변도 윗변도 조금씩 위로
   // (그래야 위에서부터 읽으면 말한 순서가 된다)
   const base=Math.min(AL.y,AR.y)-lift;
@@ -97,10 +119,16 @@ export function drawBubble(g,b,alpha=1){
   g.fillStyle='#ffffff'; g.fill();
   g.shadowColor='transparent'; g.shadowBlur=0; g.shadowOffsetY=0;
   g.strokeStyle='rgba(38,33,29,.92)'; g.lineWidth=Math.max(1,px*0.085); g.stroke();
-  // 글
-  g.fillStyle='#29231f'; g.font=fontOf(px); g.textAlign='center'; g.textBaseline='middle';
+  // 글: 한 자씩 찍힌다. 다 찍혔을 때 자리(가운데 맞춤)에서 왼쪽부터 채워 가서 글이 옆으로 밀리지 않는다
+  g.fillStyle='#29231f'; g.font=fontOf(px); g.textAlign='left'; g.textBaseline='middle';
   const th=b.lines.length*b.lh;
-  b.lines.forEach((l,i)=>g.fillText(l,cx,cy-th/2+(i+0.5)*b.lh+px*0.04));
+  let left=b.reveal??Infinity;
+  b.lines.forEach((l,i)=>{
+    if(left<=0) return;
+    let str=l;
+    if(left!==Infinity){ const ch=Array.from(l); let k=0, n=0; for(;k<ch.length;k++){ if(!isSpace(ch[k])){ if(n>=left) break; n++; } } str=ch.slice(0,k).join(''); left-=n; }
+    g.fillText(str,cx-b.ws[i]/2,cy-th/2+(i+0.5)*b.lh+px*0.04);
+  });
   g.restore();
 }
 export function drawBubbles(g,boxes,alpha=1){ for(const b of boxes) drawBubble(g,b,alpha); }

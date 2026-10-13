@@ -1,6 +1,7 @@
 // cutscene.js — 1라운드에서 죽이다 보면 가끔 뜨는 바퀴 두 마리의 대화 창 (index.html에서 불러 쓴다)
 // 편지가 뜰 차례에 편지 대신 뜬다. 게임을 멈추고 가운데에 창을 띄워 cutscene.html을 튼 뒤,
 // 대화가 끝나면 그대로 창을 닫고 게임을 이어 간다. 창 안 장면은 처음 한 번만 불러 두고 계속 쓴다.
+// 목소리는 게임 소리 장치(GSFX)의 AudioContext로 낸다 — 폰에서도 게임하며 이미 소리가 풀려 있어서.
 
 export function createCutscene({getG=()=>null,getSfx=()=>null,onClose=null}={}){
   const style=document.createElement('style');
@@ -27,7 +28,7 @@ export function createCutscene({getG=()=>null,getSfx=()=>null,onClose=null}={}){
     if(e.source!==frame.contentWindow) return;
     const d=e.data||{};
     if(d.type==='cut-ready') state='ready';
-    if(d.type==='cut-line'){ tick(); if(open) arm(); }
+    if(d.type==='cut-line'){ if(open) arm(); }
     if(d.type==='cut-done') close();
   });
   // 창 바깥을 눌러도 다음 말로 (창 안은 장면이 직접 받는다). 뜨자마자 누른 건 잡던 손이니 무시한다
@@ -46,7 +47,7 @@ export function createCutscene({getG=()=>null,getSfx=()=>null,onClose=null}={}){
     // 게임은 멈추고 그리기도 쉰다 (창 뒤로 마지막 장면이 그대로 보인다)
     if(G&&G.state==='r1'){ pausedGame=!G.paused; sleptGame=!G.sleep; G.r1.cancel?.(); G.input.reset?.(); G.paused=true; G.sleep=true; }
     layer.classList.add('show'); layer.setAttribute('aria-hidden','false');
-    try{ C.play(); }catch(err){ console.error(err); close(); return false; }
+    try{ C.play({sfx:getSfx()}); }catch(err){ console.error(err); close(); return false; }
     arm();
     return true;
   }
@@ -60,11 +61,6 @@ export function createCutscene({getG=()=>null,getSfx=()=>null,onClose=null}={}){
     if(pausedGame&&G){ G.paused=false; G.r1.touch?.(); }
     pausedGame=false; sleptGame=false;
     onClose?.();
-  }
-  // 말풍선이 뜰 때 작게 톡 (게임 소리로 낸다 — 폰에서도 이미 풀려 있다)
-  function tick(){
-    const S=getSfx(); if(!S||!S.ctx) return;
-    try{ S.noise({dur:0.016,gain:0.05,freq:2300,q:1.8,att:0.002}); S.tone({dur:0.045,gain:0.02,freq:1050,freqEnd:760,att:0.003}); }catch(e){}
   }
   return {preload,play,isOpen:()=>open,reset(){ if(open) close(); },_debug:{get state(){ return state; },frame}};
 }

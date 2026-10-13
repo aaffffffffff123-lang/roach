@@ -6,6 +6,8 @@
 import * as THREE from 'three';
 import { PetModel, applyDeco, ROACH_L } from './bamung-roach.js';
 import { TALKS } from './bamung-talk.js';
+import { typeTime } from './talk-bubble.js';
+import { voiceOf } from './roach-voice.js';
 
 const TAU=Math.PI*2, PI=Math.PI;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -20,7 +22,8 @@ export const TANK={hw:0.46,hd:0.78,h:0.72,band:0.58};   // 안쪽 반폭·반깊
 const PR=0.036;          // 바퀴 몸 반지름 (부딪힘 판정)
 const WALL=0.05;         // 유리 벽에서 몸 가운데까지: 다리가 유리를 뚫고 나가 보이지 않게
 const DAY=86400000;
-const talkLineDur=t=>{ const n=String(t).replace(/\s/g,'').length; return clamp(1.25+0.1*n,2.1,4.8); };   // 한마디가 떠 있다가 다음 말이 나올 때까지
+// 한마디가 떠 있다가 다음 말이 나올 때까지: 글자가 다 찍히는(목소리가 나는) 동안 + 읽을 틈
+const talkLineDur=(t,speed=1)=>{ const n=String(t).replace(/\s/g,'').length; return clamp(typeTime(t,speed)+1.25+0.05*n,2.1,6.5); };
 
 const _q=new THREE.Quaternion(), _m=new THREE.Matrix4(), _v=new THREE.Vector3(), _v2=new THREE.Vector3(), _v3=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0);
 function frameQuat(up,fwd,out){
@@ -150,7 +153,7 @@ export class World{
   }
   /** 걷다가 마주친 둘: 지난 대화에서 한참 지났으면 가끔 그대로 말을 건다 */
   meetTalk(p,q){ if(this.talk||!this.talkOn||this.talkCD>14||Math.random()<0.4) return false; if(!this.canTalk(p)||!this.canTalk(q)) return false; return this.startTalk(p,q,false); }
-  endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; for(const p of [T.a,T.b]) if(p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
+  endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; this.events.talkStop?.(T); for(const p of [T.a,T.b]) if(p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
   /** 매 프레임. on=false(꾸미는 중·소품 옮기는 중)면 하던 대화를 끊고 새로 걸지 않는다 */
   updateTalk(dt,on=true){
     this.talkOn=on;
@@ -172,7 +175,7 @@ export class World{
     if(T.phase==='approach'){ if(T.a.act.arrived){ T.phase='talk'; T.next=0.45; } else if(T.t>8/Math.max(0.45,T.a.slowK)) this.endTalk(); return; }   // 늙어 느린 놈은 더 기다린다
     T.lineT+=dt; T.next-=dt;
     if(T.phase==='talk'){ if(T.next<=0){
-      if(T.i<T.lines.length-1){ T.i++; T.lineT=0; T.next=talkLineDur(T.lines[T.i]); this.events.talkLine?.(T); }
+      if(T.i<T.lines.length-1){ T.i++; T.lineT=0; const who=T.i%2===0?T.a:T.b; T.next=talkLineDur(T.lines[T.i],who.voice?.speed||1); this.events.talkLine?.(T,who); }
       else { T.phase='hold'; T.next=2.6; } } }
     else if(T.phase==='hold'){ if(T.next<=0){ T.phase='fade'; T.fade=0; } }
     else if(T.phase==='fade'){ T.fade=Math.min(1,T.fade+dt/0.45); if(T.fade>=1) this.endTalk(); }
@@ -186,6 +189,7 @@ export class Pet{
   constructor(rec,world){
     this.rec=rec; this.world=world; this.id=rec.id;
     this.m=new PetModel({size:rec.size||1});
+    this.voice=voiceOf(rec.id,rec.size||1);   // 대화할 때 목소리 (바퀴마다 늘 같다)
     applyDeco(this.m,rec.deco);
     const p=world.randomFree(40,Math.random()<0.6); this.x=rec.x??p.x; this.z=rec.z??p.z; this.h=rec.h??rand(TAU);
     this.mode='floor'; this.ignore=null;
@@ -392,8 +396,10 @@ export class Pet{
     const want=Math.atan2(o.x-this.x,o.z-this.z); this.h+=clamp(wrap(want-this.h),-4*dt,4*dt); this.floorPose();
     T.crouch=0.3; T.aim=1;
     const inv=_q.copy(this.quat).invert(); this.m.aimDir.set(o.x-this.x,0.03,o.z-this.z).normalize().applyQuaternion(inv);
+    // 말하는 동안: 고개를 살짝 들고 글자 박자에 맞춰 더듬이를 까딱인다
     const mine=Tk.phase==='talk'&&Tk.i>=0&&((Tk.i%2===0)===(a.role==='a'));
-    if(mine&&Tk.lineT<1){ const u=Tk.lineT; T.pitch=-0.07*Math.sin(PI*u); this.m.aimDir.y+=0.22*Math.sin(u*PI*3); this.m.aimDir.normalize(); }
+    const tt=mine?Math.max(0.9,typeTime(Tk.lines[Tk.i],this.voice?.speed||1)):0, e=Tk.lineT;
+    if(mine&&e<tt){ const u=e/tt; T.pitch=-0.06*Math.sin(PI*Math.min(1,u*1.6))-0.012*Math.sin(e*TAU*6.5); this.m.aimDir.y+=0.2*Math.sin(e*TAU*6.5); this.m.aimDir.normalize(); }
   }
   act_flee(dt,a,T){ const tx=this.x+Math.sin(a.h)*0.3, tz=this.z+Math.cos(a.h)*0.3; this.stepFloor(dt,tx,tz,0.75,T); a.h+=rand(-1,1)*dt; if(this.stuck>0.3){ a.h+=PI*0.6; this.stuck=0; } if(a.t>a.dur) this.goRest(); }
   act_investigate(dt,a,T){

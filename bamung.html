@@ -196,6 +196,7 @@ import { PROPS, PROP_CATS, makePoke, animatePoke } from './bamung-props.js';
 import { World, Pet, TANK } from './bamung-life.js';
 import { BubbleView, layoutBubbles, drawBubbles } from './talk-bubble.js';
 import { TALKS } from './bamung-talk.js';
+import { speak } from './roach-voice.js';
 
 // ══════════════════════════════════════════════════════════════════
 // 바멍 — 1라운드에서 「컵」으로 데려온 바퀴들이 사는 테라리움
@@ -530,8 +531,10 @@ function updateFx(dt){
     if(f.t>=f.life){ fxRoot.remove(f.m); if(f.type==='ring') f.m.material.dispose(); fx.splice(i,1); } }
 }
 EV.splash=(p,at)=>splash(at);
-// 대화: 말풍선이 뜰 때 작게 톡
-EV.talkLine=(T)=>{ const p=T.i%2===0?T.a:T.b; const k=near(p.pos); SFX.noise({dur:0.014,gain:0.034*k,freq:2400,q:1.8,att:0.002}); SFX.tone({dur:0.04,gain:0.016*k,freq:1000,freqEnd:740,att:0.003}); };
+// 대화: 동물의 숲처럼 글자마다 「미미미」 하는 목소리 (바퀴마다 높낮이·빠르기가 다르다). 멀리 있으면 작게
+let talkVoice=null;
+EV.talkLine=(T,p)=>{ talkVoice?.stop(); talkVoice=null; if(!SFX.ok()) return; talkVoice=speak(SFX.ctx,SFX.out,T.lines[T.i],p.voice,{gain:0.13*near(p.pos)}); };
+EV.talkStop=()=>{ talkVoice?.stop(); talkVoice=null; };
 EV.ripple=(pos)=>{ ripple(pos.x,pos.y+0.004,pos.z,0.03,1.0); };
 
 // ───────── 숨은 놈 더듬이 (틈으로 삐져나온다) ─────────
@@ -943,7 +946,8 @@ function talkAnchors(T,proj){
   const aLeft=Ax<=B.x; const a={x:Ax,y:Ay};
   return {aLeft,anchors:{L:aLeft?a:B,R:aLeft?B:a}};
 }
-function talkItems(T,aLeft){ return T.lines.slice(0,T.i+1).map((text,k)=>({text,side:(k%2===0)===aLeft?'L':'R'})); }
+/** 지금까지 나온 말들. 마지막 말은 글자가 찍히는 중이다 (목소리와 같은 박자) */
+function talkItems(T,aLeft){ return T.lines.slice(0,T.i+1).map((text,k)=>({text,side:(k%2===0)===aLeft?'L':'R',speed:(k%2===0?T.a:T.b).voice?.speed||1,elapsed:k<T.i?Infinity:T.lineT})); }
 const talkPx=(w,h)=>clamp(Math.min(w,h)*0.037,12.5,17);
 function drawTalk(dt){
   const T=world.talk; let items=null, an=null;
