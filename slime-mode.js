@@ -258,7 +258,7 @@ export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     G.r1.used?.add('slime'); G.r1.touch?.();
   }
   function moveHand(x,y,id){ if(!hand||hand.pid!==id)return; const p=env.G.r1.floorPoint(x,y); if(!p)return; hand.fx=p.x; hand.fz=p.z; env.G.r1.touch?.(); }
-  function releaseHand(id){ if(!hand||(id!=null&&hand.pid!=null&&id!==hand.pid))return; startLift(); }
+  function releaseHand(id){ if(!hand||(id!=null&&hand.pid!=null&&id!==hand.pid))return; if(hand.phase==='drop'){ hand.upOnLand=true; return; } startLift(); }   // 짧게 톡 쳐도 바닥에 닿은 다음에 들어 올린다 (예전엔 닿기 전에 올라가 아무것도 안 붙었다)
   function startLift(){
     if(!hand||hand.phase==='lift')return;
     const k=hand.phase==='down'?1:0.4;
@@ -391,7 +391,7 @@ export function createSlimeMode({gameFrame,onEnter=null,isBlocked=()=>false}){
       hand.t+=dt;
       if(hand.phase==='drop'){
         const k=Math.min(1,hand.t/0.15); hand.h=1-ease(k); placeBall();
-        if(k>=1){ hand.phase='down'; hand.t=0; hand.h=0; ball.kick(1.3); ball.press('hand',TMP.d.set(0,1,0),{depth:0.55,width:0.55}); sfx.land(); placeBall(); }
+        if(k>=1){ hand.phase='down'; hand.t=0; hand.h=0; ball.kick(1.3); ball.press('hand',TMP.d.set(0,1,0),{depth:0.55,width:0.55}); sfx.land(); placeBall(); if(hand.upOnLand){ updateDown(0); startLift(); } }
       }else if(hand.phase==='down'){ updateDown(dt); placeBall(); }
       else if(hand.phase==='lift'){
         const k=clamp(hand.t/0.42); hand.h=ease(k); hand.x=hand.liftX; hand.z=hand.liftZ; placeBall();
