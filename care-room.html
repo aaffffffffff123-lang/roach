@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>간병</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gaegu:wght@700&display=swap">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#efe6d6;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+#say{position:fixed;inset:0;width:100%;height:100%;display:block;pointer-events:none;z-index:2}
+#toolbar{position:fixed;z-index:4;left:50%;bottom:calc(11px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:7px;padding:5px;pointer-events:auto}
+.tool{position:relative;flex:0 0 auto;min-width:64px;height:49px;padding:0 10px;border:0;border-radius:14px;background:rgba(248,240,220,.96);color:#302017;font:900 13px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 2px 0 #b99464,0 7px 18px rgba(0,0,0,.22);display:grid;place-items:center;transition:transform .08s,background .08s,color .08s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.tool:active{transform:translateY(2px)}
+.tool.sel{background:#302017;color:#f8f0dc;transform:translateY(-2px);box-shadow:0 2px 0 #080504,0 7px 20px rgba(0,0,0,.34)}
+.tool .key{position:absolute;right:6px;top:5px;font-size:8px;opacity:.45;font-weight:800}
+#viewHome{position:fixed;z-index:4;right:calc(12px + env(safe-area-inset-right));bottom:calc(78px + env(safe-area-inset-bottom));height:44px;padding:0 15px;border:0;border-radius:999px;background:rgba(248,240,220,.94);color:#302017;font:900 13px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 2px 0 rgba(114,76,43,.7),0 7px 20px rgba(0,0,0,.3);opacity:0;visibility:hidden;transition:opacity .2s,visibility 0s linear .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#viewHome.show{opacity:1;visibility:visible;transition:opacity .2s}
+#viewHome:active{transform:translateY(2px)}
+#hint{position:fixed;z-index:4;left:50%;top:calc(54px + env(safe-area-inset-top));transform:translateX(-50%);width:max-content;max-width:min(560px,82vw);padding:9px 14px;border-radius:999px;background:rgba(25,17,13,.8);color:#f8f0dc;font:800 12px/1.35 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center;word-break:keep-all;opacity:0;transition:opacity .25s;pointer-events:none}
+#hint.show{opacity:1}
+#ordinal{position:fixed;z-index:3;left:50%;top:calc(17px + env(safe-area-inset-top));transform:translateX(-50%);padding:8px 13px;border-radius:999px;background:rgba(248,240,220,.88);color:#302017;font:900 12px/1 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;box-shadow:0 1px 0 rgba(114,76,43,.55);opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+#ordinal.show{opacity:1}
+#err{position:fixed;z-index:6;inset:auto 16px calc(18px + env(safe-area-inset-bottom));display:none;padding:12px 15px;border-radius:14px;background:rgba(83,25,18,.94);color:#f8f0dc;font:700 13px/1.5 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center}
+#err.show{display:block}
+@media(max-width:400px){.tool{min-width:58px;height:46px;font-size:12px}}
+@media(max-height:560px){.tool{height:42px}#toolbar{bottom:calc(6px + env(safe-area-inset-bottom))}#viewHome{bottom:calc(62px + env(safe-area-inset-bottom))}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="say"></canvas>
+<div id="toolbar">
+  <button class="tool" type="button" data-tool="swab">면봉<span class="key">1</span></button>
+  <button class="tool" type="button" data-tool="ointment">연고<span class="key">2</span></button>
+  <button class="tool" type="button" data-tool="brush">브러시<span class="key">3</span></button>
+  <button class="tool" type="button" data-tool="tweezer">핀셋<span class="key">4</span></button>
+</div>
+<button id="viewHome" type="button">시점 원위치</button>
+<div id="hint"></div>
+<div id="ordinal"></div>
+<div id="err" role="alert"></div>
+<script type="module">
+// care-room.html — 간병: 구급상자로 집어 온 바퀴벌레 시체를 휴지 위에 눕혀 놓고 면봉·연고·브러시·핀셋으로 돌본다.
+// 시체는 이미 죽어 있어서 스스로는 아무 반응도 없다(도구에 밀려 흔들리거나 쓸리는 것만 있다). 모양은 바닥에 깔려 있던 그대로다.
+// 도구를 쓸 때마다(누를 때마다) 맥락 없이 위로의 한마디를 목소리와 말풍선으로 내뱉는다. 들어올 때도 한마디.
+import * as THREE from 'three';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+import {Tally} from './tally.js';
+import {measureBubble,drawBubble,revealAt,typeTime} from './talk-bubble.js';
+
+const $=s=>document.querySelector(s);
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const sstep=(a,b,x)=>{ const t=clamp((x-a)/(b-a)); return t*t*(3-2*t); };
+const rand=(a=1,b)=>b===undefined?Math.random()*a:a+Math.random()*(b-a);
+const damp=(a,b,r,dt)=>lerp(a,b,1-Math.exp(-r*dt));
+const TAU=Math.PI*2;
+const EMBEDDED=new URLSearchParams(location.search).get('embed')==='1';
+const COARSE=matchMedia('(pointer:coarse)').matches;
+const SMALL=COARSE||Math.min(innerWidth,innerHeight)<760;
+const canvas=$('#gl'), sayCv=$('#say'), sayG=sayCv.getContext('2d'), errEl=$('#err');
+const showErr=t=>{ errEl.textContent=t; errEl.classList.add('show'); };
+
+// ───────── 위로의 한마디 ─────────
+// care-voice.mp3 한 파일 안에 줄마다 이어 붙여 둔 자리: [글, 시작(초), 길이(초)]. 목소리는 Supertonic 3(M2)로 조금 느리게 말하게 한 것
+// 마지막 줄 「바퀴벌레… A~ S~ M~ R~」만 네 번째 칸에 [초, 귀 자리]가 있다 — 글자마다 왼쪽·오른쪽 귀를 옮겨 다닌다
+const VOICE_URL='care-voice.mp3';
+const LINES=[["괜찮아",0.12,0.71],["잘하고 있어",1.18,0.83],["많이 속상했겠다",2.36,1.08],["그동안 혼자 얼마나 답답했어",3.79,1.78],["무슨 일 있었는지 얘기해 줄래?",5.92,1.65],["지금 제일 힘든 게 뭐야?",7.92,1.53],["그동안 진짜 애썼다",9.8,1.3],["여기까지 버틴 것만 해도 대단한 거야",11.45,2.22],["네 잘못 아니야",14.02,0.97],["말 안 해도 돼, 그냥 같이 있자",15.34,1.93],["울어도 돼",17.62,0.71],["오늘은 아무것도 안 해도 돼",18.68,1.52],["네가 있어서 다행이야",20.55,1.36],["다음엔 될 거야",22.26,0.97],["망해도 같이 망하자",23.58,1.2],["이것도 지나갈 거야",25.13,1.2],["시간이 약이야",26.68,1.02],["좋은 날 올 거야",28.05,1.05],["오늘은 버틴 걸로 됐다",29.45,1.36],["일단 자고 내일 생각하자",31.16,1.61],["다 괜찮아",33.12,0.82],["괜찮아질 거야",34.29,0.92],["걱정하지 마",35.56,0.83],["다 잘될 거야",36.74,0.94],["있는 그대로 괜찮아",38.03,1.2],["완벽하지 않아도 괜찮아",39.58,1.49],["수고했어",41.42,0.84],["오늘도 고생 많았어",42.61,1.25],["충분히 잘했어",44.21,1.01],["지금도 충분해",45.57,1.07],["푹 쉬어",46.99,0.76],["이제 쉬어도 돼",48.1,1.05],["천천히 해도 돼",49.5,0.98],["무리하지 마",50.83,0.79],["참지 않아도 돼",51.97,1.0],["내가 옆에 있을게",53.32,1.11],["혼자가 아니야",54.78,0.84],["난 네 편이야",55.97,0.97],["나 여기 있어",57.29,0.89],["토닥토닥",58.53,0.78],["쓰담쓰담",59.66,0.88],["바퀴벌레… A~ S~ M~ R~",60.89,4.22,[[0.0,0.0],[1.17,-0.85],[1.82,0.85],[2.91,-0.85],[3.69,0.85]]]];
+
+// ───────── 크기 (바퀴 몸길이 = 1) ─────────
+const TISSUE=2.4, TW=TISSUE/2, TISSUE_Y=0.004;        // 네 번 접었다 편 휴지 한 장 (바퀴 몸길이의 2.4배)
+const GN=SMALL?168:200, GW=3.3, GC=GW/(GN-1);          // 연고가 쌓이는 높이맵 (휴지보다 조금 넓게)
+const WORK=TW+0.12;                                    // 이 안을 누르면 도구, 바깥을 끌면 시점
+
+// ───────── 잡음 ─────────
+const hash2=(x,y)=>{ const s=Math.sin(x*127.1+y*311.7)*43758.5453; return s-Math.floor(s); };
+function vnoise(x,y){ const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);
+  return lerp(lerp(hash2(xi,yi),hash2(xi+1,yi),u),lerp(hash2(xi,yi+1),hash2(xi+1,yi+1),u),v); }
+function fbm(x,y,o=4){ let a=.5,s=0,f=1; for(let i=0;i<o;i++){ s+=a*vnoise(x*f,y*f); f*=2.03; a*=.5; } return s; }
+
+// ───────── 렌더러 ─────────
+let renderer=null;
+try{ renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'}); }
+catch(err){ showErr('이 기기에서는 3D 화면을 열 수 없습니다.'); throw err; }
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.08;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const MAX_ANISO=renderer.capabilities.getMaxAnisotropy?.()||4;
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xe7d8bf);
+const camera=new THREE.PerspectiveCamera(40,1,.05,60);
+{ const pm=new THREE.PMREMGenerator(renderer); scene.environment=pm.fromScene(new RoomEnvironment(),.04).texture; scene.environmentIntensity=.42; pm.dispose(); }
+// 창에서 들어오는 낮빛 하나 + 방 안 반사광
+const hemi=new THREE.HemisphereLight(0xfff5e6,0x7d6446,.38); scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xffefd6,2.85); sun.position.set(2.5,5.6,2.4); sun.castShadow=true;
+sun.shadow.mapSize.set(SMALL?1024:2048,SMALL?1024:2048);
+{ const c=sun.shadow.camera; c.left=-2.3; c.right=2.3; c.top=2.3; c.bottom=-2.3; c.near=1; c.far=14; }
+sun.shadow.bias=-.00035; sun.shadow.normalBias=.012; scene.add(sun); scene.add(sun.target);
+const fill=new THREE.DirectionalLight(0xdfe8ff,.32); fill.position.set(-3,2.6,-2.2); scene.add(fill);
+
+// ───────── 책상 ─────────
+function woodTexture(){
+  const S=1024, c=document.createElement('canvas'); c.width=c.height=S; const g=c.getContext('2d');
+  const grd=g.createLinearGradient(0,0,0,S); grd.addColorStop(0,'#dcae74'); grd.addColorStop(.5,'#d5a46a'); grd.addColorStop(1,'#ddb07a');
+  g.fillStyle=grd; g.fillRect(0,0,S,S);
+  // 넓은 결 띠
+  for(let i=0;i<14;i++){ const y=Math.random()*S, h=30+Math.random()*90; g.fillStyle=`rgba(${170+Math.random()*30|0},${110+Math.random()*25|0},${60+Math.random()*20|0},${.06+Math.random()*.09})`; g.beginPath(); for(let x=0;x<=S;x+=32){ const yy=y+Math.sin(x/260+i)*18; x?g.lineTo(x,yy):g.moveTo(x,yy); } for(let x=S;x>=0;x-=32){ const yy=y+h+Math.sin(x/230+i*1.7)*16; g.lineTo(x,yy); } g.closePath(); g.fill(); }
+  // 가는 결
+  for(let i=0;i<320;i++){ const y=Math.random()*S, amp=3+Math.random()*9, ph=Math.random()*TAU, a=.05+Math.random()*.14;
+    g.strokeStyle=`rgba(${120+Math.random()*40|0},${80+Math.random()*30|0},${45+Math.random()*20|0},${a.toFixed(3)})`; g.lineWidth=.5+Math.random()*1.6; g.beginPath();
+    for(let x=-8;x<=S+8;x+=14){ const yy=y+Math.sin(x/170+ph)*amp+Math.sin(x/47+ph*2)*amp*.22; x<0?g.moveTo(x,yy):g.lineTo(x,yy); } g.stroke(); }
+  // 숨구멍
+  for(let i=0;i<2600;i++){ g.fillStyle=`rgba(110,72,40,${(.04+Math.random()*.08).toFixed(3)})`; g.fillRect(Math.random()*S,Math.random()*S,1+Math.random()*3,1); }
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(2.4,2.4); t.anisotropy=MAX_ANISO; return t;
+}
+const desk=new THREE.Mesh(new THREE.PlaneGeometry(18,18),new THREE.MeshPhysicalMaterial({map:woodTexture(),roughness:.46,clearcoat:.35,clearcoatRoughness:.32}));
+desk.rotation.x=-Math.PI/2; desk.receiveShadow=true; scene.add(desk);
+
+// ───────── 휴지 ─────────
+// 네 번 접었다 편 자국(가운데 세로로 솟은 산, 가로 접힌 골 양옆이 살짝 뜬 모양), 잔주름, 살짝 들린 귀퉁이.
+// 종이는 책상 위에 놓여 있으니 책상보다 아래로는 절대 안 내려간다. 시체가 놓인 가운데는 평평하다
+function tissueH(x,z){
+  const ax=Math.abs(x)/TW, az=Math.abs(z)/TW; if(ax>1||az>1) return 0;
+  const flat=sstep(.6,1.1,Math.hypot(x*.95,z));
+  const ridge=.012*Math.exp(-(x*x)/.0016);
+  const valley=.008*(Math.exp(-(z*z)/.03)-.55*Math.exp(-(z*z)/.0018));
+  const wr=Math.pow(fbm(x*1.6+3.1,z*1.6-1.7,3),1.6)*.03+vnoise(x*7+11,z*7)*.003;
+  const e=Math.max(ax,az), curl=.032*Math.pow(sstep(.8,1,e),2)*(.6+.4*vnoise(x*3,z*3+5));
+  const corner=.03*Math.pow(sstep(.74,1,ax)*sstep(.74,1,az),1.2);
+  return TISSUE_Y+(ridge+valley+wr)*flat+curl+corner;
+}
+const TCW=SMALL?1024:2048;
+const tCv=document.createElement('canvas'); tCv.width=tCv.height=TCW; const tg=tCv.getContext('2d');
+const tTex=new THREE.CanvasTexture(tCv); tTex.colorSpace=THREE.SRGBColorSpace; tTex.anisotropy=MAX_ANISO;
+let tDirty=false, tFlushT=0;
+function paintTissue(){
+  tg.globalCompositeOperation='source-over';
+  tg.fillStyle='#fcfbf7'; tg.fillRect(0,0,TCW,TCW);
+  const s=TCW/1024;
+  // 넓게 흐린 밝기 차 + 짧은 섬유
+  for(let i=0;i<60;i++){ const x=Math.random()*TCW, y=Math.random()*TCW, r=(60+Math.random()*160)*s; const gr=tg.createRadialGradient(x,y,0,x,y,r); const c=Math.random()<.5?'238,234,224':'255,255,252'; gr.addColorStop(0,`rgba(${c},.35)`); gr.addColorStop(1,`rgba(${c},0)`); tg.fillStyle=gr; tg.fillRect(x-r,y-r,r*2,r*2); }
+  tg.lineCap='round';
+  for(let i=0;i<5200;i++){ const x=Math.random()*TCW, y=Math.random()*TCW, a=Math.random()*TAU, l=(2+Math.random()*7)*s; tg.strokeStyle=`rgba(${215+Math.random()*25|0},${210+Math.random()*25|0},${200+Math.random()*25|0},${(.12+Math.random()*.2).toFixed(2)})`; tg.lineWidth=(.5+Math.random()*.8)*s; tg.beginPath(); tg.moveTo(x,y); tg.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l); tg.stroke(); }
+  // 접힌 자국에 얇은 그늘
+  const lx=TCW/2; const gx=tg.createLinearGradient(lx-6*s,0,lx+6*s,0); gx.addColorStop(0,'rgba(200,195,184,0)'); gx.addColorStop(.5,'rgba(200,195,184,.22)'); gx.addColorStop(1,'rgba(200,195,184,0)'); tg.fillStyle=gx; tg.fillRect(lx-6*s,0,12*s,TCW);
+  const ly=TCW/2; const gy=tg.createLinearGradient(0,ly-5*s,0,ly+5*s); gy.addColorStop(0,'rgba(200,195,184,0)'); gy.addColorStop(.5,'rgba(200,195,184,.16)'); gy.addColorStop(1,'rgba(200,195,184,0)'); tg.fillStyle=gy; tg.fillRect(0,ly-5*s,TCW,10*s);
+  tDirty=true;
+}
+const toTex=(x,z)=>[(x+TW)/TISSUE*TCW,(z+TW)/TISSUE*TCW];
+/** 휴지에 배는 얼룩 (월드 좌표) */
+function stain(x,z,r,rgb,a){
+  if(Math.abs(x)>TW+r||Math.abs(z)>TW+r) return;
+  const [px,py]=toTex(x,z), pr=Math.max(2,r/TISSUE*TCW);
+  const gr=tg.createRadialGradient(px,py,0,px,py,pr);
+  gr.addColorStop(0,`rgba(${rgb},${a.toFixed(3)})`); gr.addColorStop(.62,`rgba(${rgb},${(a*.75).toFixed(3)})`); gr.addColorStop(.86,`rgba(${rgb},${(a*.9).toFixed(3)})`); gr.addColorStop(1,`rgba(${rgb},0)`);
+  tg.fillStyle=gr; tg.beginPath(); tg.ellipse(px,py,pr,pr*(.8+Math.random()*.4),Math.random()*Math.PI,0,TAU); tg.fill();
+  tDirty=true;
+}
+function embossTexture(){
+  // 다이아몬드 누빔 + 칸마다 작은 점 (흔한 각티슈 엠보싱). 높이를 그린 뒤 법선으로 바꾼다
+  const S=256, H=new Float32Array(S*S);
+  for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+    const u=x/S, v=y/S, a=(u+v)*5, b=(u-v)*5;
+    const da=Math.abs(a-Math.round(a)), db=Math.abs(b-Math.round(b));
+    const line=Math.max(0,1-Math.min(da,db)/.075);
+    const ca=a+.5, cb=b+.5, dc=Math.hypot(ca-Math.round(ca),cb-Math.round(cb)), dot=Math.max(0,1-dc/.17);
+    H[y*S+x]=line*.75+dot*dot+(hash2(x*1.3,y*.7)-.5)*.12;
+  }
+  const c=document.createElement('canvas'); c.width=c.height=S; const g=c.getContext('2d'), img=g.createImageData(S,S);
+  const at=(x,y)=>H[((y+S)%S)*S+((x+S)%S)];
+  for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+    let nx=(at(x-1,y)-at(x+1,y))*1.6, ny=(at(x,y-1)-at(x,y+1))*1.6, nz=1; const l=Math.hypot(nx,ny,nz); nx/=l; ny/=l; nz/=l;
+    const k=(y*S+x)*4; img.data[k]=(nx*.5+.5)*255; img.data[k+1]=(ny*.5+.5)*255; img.data[k+2]=(nz*.5+.5)*255; img.data[k+3]=255;
+  }
+  g.putImageData(img,0,0);
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(3,3); t.anisotropy=MAX_ANISO; return t;
+}
+const tissueGeo=new THREE.PlaneGeometry(TISSUE,TISSUE,SMALL?110:150,SMALL?110:150); tissueGeo.rotateX(-Math.PI/2);
+{ const P=tissueGeo.attributes.position; for(let i=0;i<P.count;i++) P.setY(i,tissueH(P.getX(i),P.getZ(i))); tissueGeo.computeVertexNormals(); }
+const tissue=new THREE.Mesh(tissueGeo,new THREE.MeshPhysicalMaterial({map:tTex,normalMap:embossTexture(),normalScale:new THREE.Vector2(1.25,1.25),roughness:.93,sheen:.6,sheenRoughness:.9,sheenColor:new THREE.Color(0xffffff)}));
+tissue.receiveShadow=true; tissue.castShadow=true; scene.add(tissue);
+paintTissue();
+
+// ───────── 시체 ─────────
+// 게임이 넘겨준 정점 배열로 모양을 그대로 다시 만든다. 재질도 게임 시체와 같다
+const MAT={
+  shell:new THREE.MeshPhysicalMaterial({color:0xb9ad9f,vertexColors:true,roughness:.52,clearcoat:.35,clearcoatRoughness:.3}),
+  char:new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.86}),
+  limb:new THREE.MeshStandardMaterial({color:0xcfc4b8,vertexColors:true,roughness:.58}),
+  charLimb:new THREE.MeshStandardMaterial({color:0x4a3f3a,vertexColors:true,roughness:.85}),
+  goo:new THREE.MeshPhysicalMaterial({color:0xf1e7d2,vertexColors:true,roughness:.16,clearcoat:1,clearcoatRoughness:.08}),
+};
+const copyF=a=>a?Float32Array.from(a):null;
+function toGeo(a){
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(copyF(a.position),3));
+  if(a.normal) g.setAttribute('normal',new THREE.BufferAttribute(copyF(a.normal),3));
+  if(a.color) g.setAttribute('color',new THREE.BufferAttribute(copyF(a.color),3));
+  if(a.index){ const I=a.index.BYTES_PER_ELEMENT===4||a.index.length>65535?Uint32Array.from(a.index):Uint16Array.from(a.index); g.setIndex(new THREE.BufferAttribute(I,1)); }
+  if(!a.normal) g.computeVertexNormals();
+  g.computeBoundingSphere(); g.computeBoundingBox(); return g;
+}
+let corpse=null;
+function clearCorpse(){
+  if(!corpse) return;
+  scene.remove(corpse.group);
+  corpse.group.traverse(o=>{ if(o.isMesh) o.geometry.dispose(); });
+  corpse=null;
+}
+function areaCenter(mesh){
+  const P=mesh.geometry.attributes.position, I=mesh.geometry.index, M=mesh.matrixWorld, n=I?I.count:P.count;
+  const a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3(), e1=new THREE.Vector3(), e2=new THREE.Vector3();
+  let sx=0, sz=0, sw=0;
+  for(let t=0;t+2<n;t+=3){ const i0=I?I.getX(t):t, i1=I?I.getX(t+1):t+1, i2=I?I.getX(t+2):t+2;
+    a.fromBufferAttribute(P,i0).applyMatrix4(M); b.fromBufferAttribute(P,i1).applyMatrix4(M); c.fromBufferAttribute(P,i2).applyMatrix4(M);
+    const w=e1.subVectors(b,a).cross(e2.subVectors(c,a)).length(); sx+=(a.x+b.x+c.x)*w; sz+=(a.z+b.z+c.z)*w; sw+=w; }
+  return sw>1e-9?{x:sx/(3*sw),z:sz/(3*sw)}:null;
+}
+function buildCorpse(p){
+  clearCorpse();
+  const S=clamp((p.sc||.13)/.13,.88,1.12);
+  const g=new THREE.Group();
+  const shell=new THREE.Mesh(toGeo(p.shell),p.charred?MAT.char:MAT.shell); shell.castShadow=true; shell.receiveShadow=true; g.add(shell);
+  let goo=null; if(p.goo){ goo=new THREE.Mesh(toGeo(p.goo),MAT.goo); goo.castShadow=true; goo.receiveShadow=true; g.add(goo); }
+  const geos={}; for(const k in p.legGeos) geos[k]=toGeo(p.legGeos[k]);
+  const legs=p.legs.map(L=>{
+    const lg=new THREE.Group(); lg.position.set(L.x,L.y,L.z); lg.rotation.set(L.rx,L.ry,L.rz,'YXZ');
+    const m=new THREE.Mesh(geos[L.key],L.style==='fold'?MAT.charLimb:MAT.limb); m.castShadow=true; m.receiveShadow=true; lg.add(m); g.add(lg);
+    // 짜부된 시체에서 떨어져 나간 다리는 바닥 높이가 .012, 붙은 다리는 .014
+    const detached=p.mode==='crushed'&&Math.abs(L.y-.012)<.0006;
+    return {grp:lg,mesh:m,L0:{...L},detached,ry:L.ry,rz:L.rz,rx:L.rx,nudge:0,fall:null,samples:null};
+  });
+  // 머리가 화면 위쪽을 보게 눕히고 조금 비튼다
+  g.rotation.y=Math.PI+rand(-.45,.45);
+  g.scale.setScalar(S);
+  g.position.set(0,TISSUE_Y,0);
+  scene.add(g); g.updateMatrixWorld(true);
+  // 몸통이 가운데 오게: 껍질 면의 넓이 중심 (가는 더듬이나 흩어진 조각에 끌려가지 않는다)
+  const ctr=areaCenter(shell);
+  if(ctr){ g.position.x-=ctr.x; g.position.z-=ctr.z; }
+  else{ const box=new THREE.Box3().setFromObject(g); g.position.x-=(box.min.x+box.max.x)/2; g.position.z-=(box.min.z+box.max.z)/2; }
+  g.updateMatrixWorld(true);
+  corpse={group:g,shell,goo,legs,S,mode:p.mode,baseY:TISSUE_Y,gooS:null};
+  // 다리마다 집기 판정용 점 몇 개 (다리 자기 좌표)
+  for(const l of legs){ const P=l.mesh.geometry.attributes.position, step=Math.max(1,Math.floor(P.count/14)), pts=[]; for(let i=0;i<P.count;i+=step) pts.push(new THREE.Vector3().fromBufferAttribute(P,i)); l.samples=pts; }
+  if(goo) prepGoo();
+}
+// 진물: 면봉으로 찍어 내면 납작해지다 휴지 밑으로 빠진다(휴지에 배어 얼룩만 남는다)
+function prepGoo(){
+  const goo=corpse.goo, geo=goo.geometry, P=geo.attributes.position, n=P.count;
+  P.setUsage(THREE.DynamicDrawUsage); geo.attributes.color.setUsage(THREE.DynamicDrawUsage);
+  const v=new THREE.Vector3(), wx=new Float32Array(n), wy=new Float32Array(n), wz=new Float32Array(n), cells=new Map(), CS=.08;
+  goo.updateMatrixWorld(true);
+  for(let i=0;i<n;i++){ v.fromBufferAttribute(P,i).applyMatrix4(goo.matrixWorld); wx[i]=v.x; wy[i]=v.y; wz[i]=v.z;
+    const key=Math.floor(v.x/CS)*4096+Math.floor(v.z/CS); let a=cells.get(key); if(!a){ a=[]; cells.set(key,a); } a.push(i); }
+  corpse.gooS={p0:Float32Array.from(P.array),c0:Float32Array.from(geo.attributes.color.array),w:new Float32Array(n),wx,wy,wz,cells,CS,left:n};
+}
+/** (x,z) 반지름 r 안의 진물을 rate만큼 빨아낸다. 빨아낸 양을 돌려준다 */
+function absorbGoo(x,z,topY,r,rate){
+  const S=corpse?.gooS; if(!S) return 0;
+  const P=corpse.goo.geometry.attributes.position, C=corpse.goo.geometry.attributes.color;
+  const i0=Math.floor((x-r)/S.CS), i1=Math.floor((x+r)/S.CS), j0=Math.floor((z-r)/S.CS), j1=Math.floor((z+r)/S.CS);
+  const sink=-.006/corpse.S;
+  let got=0;
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){ const a=S.cells.get(i*4096+j); if(!a) continue;
+    for(const k of a){ if(S.w[k]>=1) continue; const d=Math.hypot(S.wx[k]-x,S.wz[k]-z); if(d>r||S.wy[k]>topY+.06) continue;
+      const f=1-d/r, w0=S.w[k], w=Math.min(1,w0+rate*f*(1.2-S.w[k]*.4)); S.w[k]=w; got+=w-w0;
+      const e=sstep(0,1,w);
+      P.array[k*3+1]=lerp(S.p0[k*3+1],sink,e);
+      for(let q=0;q<3;q++) C.array[k*3+q]=S.c0[k*3+q]*(1-.22*e);
+    } }
+  if(got>0){ P.needsUpdate=true; C.needsUpdate=true; }
+  return got;
+}
+
+// ───────── 높이맵: 휴지·책상 + 시체 + 연고 ─────────
+// 바닥(base)은 휴지 주름과 시체 윗면 높이. 연고(th)는 그 위에 쌓인 두께. 도구가 닿는 높이 = base + th
+const base=new Float32Array(GN*GN), th=new Float32Array(GN*GN);
+const gix=x=>(x+GW/2)/GC;
+function surfY(x,z){
+  const fx=gix(x), fz=gix(z);
+  if(fx<0||fz<0||fx>GN-1.001||fz>GN-1.001) return 0;
+  const i=fx|0, j=fz|0, u=fx-i, v=fz-j, k=j*GN+i;
+  const s00=base[k]+th[k], s10=base[k+1]+th[k+1], s01=base[k+GN]+th[k+GN], s11=base[k+GN+1]+th[k+GN+1];
+  return lerp(lerp(s00,s10,u),lerp(s01,s11,u),v);
+}
+function rasterBase(){
+  for(let j=0;j<GN;j++) for(let i=0;i<GN;i++){ const x=-GW/2+i*GC, z=-GW/2+j*GC; base[j*GN+i]=(Math.abs(x)<=TW&&Math.abs(z)<=TW)?tissueH(x,z):0; }
+  if(!corpse) return;
+  const top=new Float32Array(GN*GN).fill(-1), v=new THREE.Vector3();
+  corpse.group.updateMatrixWorld(true);
+  const meshes=[corpse.shell,corpse.goo,...corpse.legs.map(l=>l.mesh)];
+  for(const m of meshes){ if(!m) continue; const P=m.geometry.attributes.position, M=m.matrixWorld;
+    for(let i=0;i<P.count;i++){ v.fromBufferAttribute(P,i).applyMatrix4(M); if(v.y<TISSUE_Y) continue; const ix=Math.round(gix(v.x)), iz=Math.round(gix(v.z)); if(ix<0||iz<0||ix>=GN||iz>=GN) continue; const k=iz*GN+ix; if(v.y>top[k]) top[k]=v.y; } }
+  // 정점 사이 빈칸을 메운다 (3×3 최댓값), 위로 덮이는 연고가 각지지 않게 살짝 뭉갠다
+  for(let j=1;j<GN-1;j++) for(let i=1;i<GN-1;i++){ const k=j*GN+i; let m=-1, s=0, c=0;
+    for(let b=-1;b<=1;b++) for(let a=-1;a<=1;a++){ const t=top[k+b*GN+a]; if(t>m) m=t; if(t>0){ s+=t; c++; } }
+    if(m>0){ const h=c>=5?Math.max(m*.55+s/c*.45,top[k]):m*.8; if(h>base[k]) base[k]=h; } }
+}
+
+// ───────── 연고 ─────────
+const oPos=new Float32Array(GN*GN*3), oNor=new Float32Array(GN*GN*3), oTh=new Float32Array(GN*GN);
+const ointGeo=new THREE.BufferGeometry();
+{ for(let j=0;j<GN;j++) for(let i=0;i<GN;i++){ const k=j*GN+i; oPos[k*3]=-GW/2+i*GC; oPos[k*3+2]=-GW/2+j*GC; oNor[k*3+1]=1; }
+  const I=new Uint32Array((GN-1)*(GN-1)*6); let q=0;
+  for(let j=0;j<GN-1;j++) for(let i=0;i<GN-1;i++){ const a=j*GN+i, b=a+1, c=a+GN, d=c+1; I[q++]=a; I[q++]=c; I[q++]=b; I[q++]=b; I[q++]=c; I[q++]=d; }
+  ointGeo.setIndex(new THREE.BufferAttribute(I,1));
+  ointGeo.setAttribute('position',new THREE.BufferAttribute(oPos,3).setUsage(THREE.DynamicDrawUsage));
+  ointGeo.setAttribute('normal',new THREE.BufferAttribute(oNor,3).setUsage(THREE.DynamicDrawUsage));
+  ointGeo.setAttribute('th',new THREE.BufferAttribute(oTh,1).setUsage(THREE.DynamicDrawUsage));
+  ointGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(),GW);
+}
+// 얇게 묻은 곳은 비치고, 두껍게 쌓인 곳은 하얗게 막힌다. 두께가 없는 칸은 그리지 않는다(그림자에서도 뺀다)
+const THICK_GLSL=['#include <common>\nattribute float th;\nvarying float vTh;','#include <begin_vertex>\nvTh=th;'];
+function ointShader(sh,colorPart){
+  sh.vertexShader=sh.vertexShader.replace('#include <common>',THICK_GLSL[0]).replace('#include <begin_vertex>',THICK_GLSL[1]);
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vTh;')
+    .replace('#include <alphatest_fragment>','if(vTh<0.0009) discard;\n'+(colorPart?'diffuseColor.a*=mix(0.5,1.0,smoothstep(0.002,0.032,vTh));\ndiffuseColor.rgb*=mix(0.93,1.0,smoothstep(0.004,0.05,vTh));\n':'')+'#include <alphatest_fragment>');
+}
+const ointMat=new THREE.MeshPhysicalMaterial({color:0xf2eadb,roughness:.2,metalness:0,clearcoat:.85,clearcoatRoughness:.1,sheen:.25,sheenColor:new THREE.Color(0xfffbf0),envMapIntensity:1.3,transparent:true});
+ointMat.onBeforeCompile=sh=>ointShader(sh,true);
+const ointDepth=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); ointDepth.onBeforeCompile=sh=>ointShader(sh,false);
+const oint=new THREE.Mesh(ointGeo,ointMat); oint.customDepthMaterial=ointDepth; oint.castShadow=true; oint.receiveShadow=true; oint.frustumCulled=false; oint.renderOrder=2; scene.add(oint);
+let dirty=null;                    // 연고·바닥이 바뀐 칸 범위 [i0,i1,j0,j1]
+function markDirty(i0,i1,j0,j1){ i0=Math.max(1,i0); j0=Math.max(1,j0); i1=Math.min(GN-2,i1); j1=Math.min(GN-2,j1); if(!dirty) dirty=[i0,i1,j0,j1]; else{ dirty[0]=Math.min(dirty[0],i0); dirty[1]=Math.max(dirty[1],i1); dirty[2]=Math.min(dirty[2],j0); dirty[3]=Math.max(dirty[3],j1); } }
+function flushOint(){
+  if(!dirty) return; const [i0,i1,j0,j1]=dirty; dirty=null;
+  const PA=ointGeo.attributes.position, NA=ointGeo.attributes.normal, TA=ointGeo.attributes.th;
+  for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){ const k=j*GN+i, t=th[k]; oPos[k*3+1]=base[k]+(t>1e-4?t+.0005:-.0025); oTh[k]=t; }
+  const a0=Math.max(1,i0-2), a1=Math.min(GN-2,i1+2), b0=Math.max(1,j0-2), b1=Math.min(GN-2,j1+2);
+  // 법선은 두 칸 너비로 잡아 겉이 크림처럼 매끈하게 비친다
+  const S2=(k)=>base[k]+th[k];
+  for(let j=b0;j<=b1;j++) for(let i=a0;i<=a1;i++){ const k=j*GN+i;
+    const i2=Math.min(GN-1,i+2)-i, i1=i-Math.max(0,i-2), j2=Math.min(GN-1,j+2)-j, j1=j-Math.max(0,j-2);
+    const sx=(S2(k+i2)-S2(k-i1))/((i2+i1)*GC), sz=(S2(k+j2*GN)-S2(k-j1*GN))/((j2+j1)*GC);
+    let nx=-sx, nz=-sz, ny=1; const l=Math.hypot(nx,ny,nz); oNor[k*3]=nx/l; oNor[k*3+1]=ny/l; oNor[k*3+2]=nz/l; }
+  const w=a1-a0+1;
+  for(let j=b0;j<=b1;j++){ const s=j*GN+a0; PA.addUpdateRange(s*3,w*3); NA.addUpdateRange(s*3,w*3); TA.addUpdateRange(s,w); }
+  PA.needsUpdate=NA.needsUpdate=TA.needsUpdate=true;
+}
+function rebuildOintAll(){ dirty=[1,GN-2,1,GN-2]; flushOint(); }
+/** 선분 a→b를 따라 부피 vol만큼 연고를 얹는다 (단면은 둥근 밧줄) */
+function deposit(ax,az,bx,bz,vol,rb){
+  const minx=Math.min(ax,bx)-rb, maxx=Math.max(ax,bx)+rb, minz=Math.min(az,bz)-rb, maxz=Math.max(az,bz)+rb;
+  const i0=Math.max(1,Math.floor(gix(minx))), i1=Math.min(GN-2,Math.ceil(gix(maxx))), j0=Math.max(1,Math.floor(gix(minz))), j1=Math.min(GN-2,Math.ceil(gix(maxz)));
+  if(i1<i0||j1<j0) return;
+  const dx=bx-ax, dz=bz-az, L2=dx*dx+dz*dz;
+  let sum=0; const ks=[], ws=[];
+  for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){ const x=-GW/2+i*GC, z=-GW/2+j*GC;
+    let t=L2>0?((x-ax)*dx+(z-az)*dz)/L2:0; t=clamp(t); const d=Math.hypot(x-(ax+dx*t),z-(az+dz*t)); if(d>=rb) continue;
+    const w=Math.pow(1-(d/rb)**2,1.5); ks.push(j*GN+i); ws.push(w); sum+=w; }
+  if(sum<=0) return;
+  const amp=vol/(sum*GC*GC);
+  for(let n=0;n<ks.length;n++) th[ks[n]]+=ws[n]*amp;
+  markDirty(i0,i1,j0,j1);
+}
+// 연고는 된 크림이라 비탈이 이 정도보다 가파르면 아래로 흘러내려 퍼진다
+const SLOPE=1.7;
+function slump(i0,i1,j0,j1,iters){
+  i0=Math.max(1,i0); j0=Math.max(1,j0); i1=Math.min(GN-2,i1); j1=Math.min(GN-2,j1);
+  const step=GC*SLOPE, N=[1,-1,GN,-GN]; let moved=false;
+  for(let it=0;it<iters;it++) for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){ const k=j*GN+i, t=th[k]; if(t<=1e-5) continue; const s=base[k]+t;
+    for(const o of N){ const n=k+o, ds=s-(base[n]+th[n]); if(ds<=0) continue;
+      // 가파르면 흘러내리고, 완만해도 조금씩 펴져서 겉이 매끈해진다
+      const m=Math.min(th[k]*.22,Math.max(0,ds-step)*.24+ds*.035); if(m>1e-7){ th[k]-=m; th[n]+=m; moved=true; } } }
+  if(moved) markDirty(i0-1,i1+1,j0-1,j1+1);
+}
+
+// ───────── 소리 ─────────
+// ASMR처럼 마이크에 바짝 대고 녹음한 듯한 잔소리로 만든다. 솜 올이 스치는 소리, 털 끝이 튀는 소리, 휴지가 바스락대는 소리,
+// 크림 속 방울이 터지는 소리, 쇠 끝이 맞닿는 소리 같은 아주 짧은 조각을 미리 계산해 두고, 도구가 움직이는 만큼 흘리거나 깔아 둔 결의 크기를 움직인다.
+// 도구가 화면 왼쪽에 있으면 왼쪽 귀, 오른쪽이면 오른쪽 귀에서 들린다(먼 귀는 작고 먹먹하게). 목소리는 줄마다 귀를 번갈아 가며 들린다.
+// 게임 소리 장치의 AudioContext를 빌려 쓴다 (폰에서도 게임하며 이미 소리가 풀려 있어서). 따로 열면 첫 터치에 푼다
+const VOICE_GAIN=1.0, SFX_GAIN=1.0;
+// 소리 조각·결 계산: 스스로 완결된 함수라 따로 일꾼(Worker)에서 돌린다 — 계산하는 동안 게임 화면이 멈칫하지 않게
+function sfxBuilder(){
+  const AFS=48000, TAU=Math.PI*2, rand=(a,b)=>a+Math.random()*(b-a);     // 48kHz로 계산해 두면 재생할 때 장치 표본율로 바뀐다
+  const DSP={
+    filt(x,type,f0,Q=.707){
+      const w=2*Math.PI*Math.min(f0,AFS*.45)/AFS, cw=Math.cos(w), al=Math.sin(w)/(2*Q);
+      let b0,b1,b2; if(type==='lp'){ b0=(1-cw)/2; b1=1-cw; b2=b0; } else if(type==='hp'){ b0=(1+cw)/2; b1=-(1+cw); b2=b0; } else { b0=al; b1=0; b2=-al; }
+      const a0=1+al, a1=-2*cw/a0, a2=(1-al)/a0; b0/=a0; b1/=a0; b2/=a0;
+      let x1=0,x2=0,y1=0,y2=0;
+      for(let i=0;i<x.length;i++){ const xi=x[i], y=b0*xi+b1*x1+b2*x2-a1*y1-a2*y2; x2=x1; x1=xi; y2=y1; y1=y; x[i]=y; }
+      return x;
+    },
+    peak(x,p=1){ let m=0; for(let i=0;i<x.length;i++){ const a=Math.abs(x[i]); if(a>m) m=a; } if(m>0){ const k=p/m; for(let i=0;i<x.length;i++) x[i]*=k; } return x; },
+    rms(x){ let s=0; for(let i=0;i<x.length;i++) s+=x[i]*x[i]; return Math.sqrt(s/Math.max(1,x.length)); },
+    noise(n){ const x=new Float32Array(n); for(let i=0;i<n;i++) x[i]=Math.random()*2-1; return x; },
+  };
+  const nOf=msec=>Math.max(8,Math.round(AFS*msec/1000));
+  // 소리 조각 (한 번 울리는 아주 짧은 소리)
+  const GRAIN={
+    // 솜 올이 종이·껍질에 걸렸다 풀리는 소리: 부드럽고 가는 사각
+    fiber(){ const n=nOf(rand(2.5,7)), x=DSP.noise(n), tau=n/3.2, at=AFS*.0003; for(let i=0;i<n;i++) x[i]*=Math.min(1,i/at)*Math.exp(-i/tau); DSP.filt(x,'bp',rand(1700,6000),rand(.8,2)); return DSP.peak(x); },
+    // 털 끝이 튀는 소리: 아주 짧고 높은 톡
+    bristle(){ const n=nOf(rand(1,3.5)), x=DSP.noise(n), tau=n/4; for(let i=0;i<n;i++) x[i]*=Math.exp(-i/tau); DSP.filt(x,'bp',rand(3500,9800),rand(1.4,5)); if(Math.random()<.4) DSP.filt(x,'hp',2400); return DSP.peak(x); },
+    // 휴지가 바스락: 짧은 딸깍이 하나 둘
+    paper(){ const n=nOf(rand(3,11)), x=DSP.noise(n), tau=AFS*rand(.0006,.0024), s2=Math.random()<.35?nOf(rand(1,4)):-1;
+      for(let i=0;i<n;i++){ let e=Math.exp(-i/tau); if(s2>0&&i>=s2) e+=.6*Math.exp(-(i-s2)/tau); x[i]*=e; }
+      DSP.filt(x,'bp',rand(1200,5200),rand(.7,1.8)); DSP.filt(x,'lp',8000); return DSP.peak(x); },
+    // 크림·진물 속 방울이 터지는 뽁: 짧게 올라가는 울림
+    bubble(){ const d=rand(.008,.03), n=nOf(d*1000), x=new Float32Array(n), f0=rand(520,2200)*Math.pow(.025/(d+.005),.35), xi=rand(.15,.6), tau=n/4, at=AFS*.0006; let ph=0;
+      for(let i=0;i<n;i++){ ph+=2*Math.PI*f0*(1+xi*(i/AFS)/d)/AFS; x[i]=Math.sin(ph)*Math.min(1,i/at)*Math.exp(-i/tau); }
+      const c=Math.round(AFS*.0008); for(let i=0;i<c&&i<n;i++) x[i]+=(Math.random()*2-1)*.35*(1-i/c);
+      return DSP.peak(x); },
+    // 찐득한 것이 붙었다 떨어지는 찹
+    squelch(){ const n=nOf(rand(6,26)), x=DSP.noise(n), at=AFS*rand(.0008,.003), tau=n/3.5; for(let i=0;i<n;i++) x[i]*=Math.min(1,i/at)*Math.exp(-i/tau);
+      DSP.filt(x,'lp',rand(450,1500),rand(2,4.5)); DSP.filt(x,'hp',90); return DSP.peak(x); },
+    // 핀셋 끝이 맞닿는 틱: 높은 쇠 울림 몇 개
+    metal(){ const n=nOf(rand(70,120)), x=new Float32Array(n), f1=rand(2700,3500);
+      for(const [f,a,tau] of [[f1,.6,rand(.025,.045)],[f1*rand(1.75,1.95),.38,rand(.015,.025)],[f1*rand(2.6,2.9),.25,rand(.01,.018)],[f1*rand(3.6,4.1),.15,rand(.006,.01)]]){
+        const p0=Math.random()*TAU, w=2*Math.PI*f/AFS, k=1/(tau*AFS); for(let i=0;i<n;i++) x[i]+=a*Math.sin(p0+w*i)*Math.exp(-i*k); }
+      const c=Math.round(AFS*.001); for(let i=0;i<c;i++) x[i]+=(Math.random()*2-1)*.7*(1-i/c);
+      return DSP.peak(x); },
+    // 알루미늄 튜브가 구겨지는 바스락: 울림이 있는 딸깍
+    crinkle(){ const n=nOf(rand(4,16)), x=DSP.noise(n), tau=AFS*rand(.0015,.005); for(let i=0;i<n;i++) x[i]*=Math.exp(-i/tau);
+      const y=Float32Array.from(x); DSP.filt(x,'bp',rand(2500,8500),rand(4,12)); DSP.filt(y,'bp',rand(1500,5000),rand(2,6)); for(let i=0;i<n;i++) x[i]+=.6*y[i]; return DSP.peak(x); },
+    // 책상에 나무 손잡이가 닿는 톡
+    wood(){ const n=nOf(rand(35,60)), x=new Float32Array(n), f=rand(650,1100), t1=AFS*rand(.008,.012), t2=AFS*.005;
+      for(let i=0;i<n;i++) x[i]=.7*Math.sin(2*Math.PI*f*i/AFS)*Math.exp(-i/t1)+.3*Math.sin(2*Math.PI*f*2.3*i/AFS)*Math.exp(-i/t2);
+      const c=Math.round(AFS*.0015); for(let i=0;i<c;i++) x[i]+=(Math.random()*2-1)*.6*(1-i/c);
+      DSP.filt(x,'lp',4500); return DSP.peak(x); },
+    // 휴지 위에 가볍게 닿는 툭
+    thump(){ const n=nOf(rand(40,70)), x=DSP.noise(n), tau=AFS*rand(.008,.016), f=rand(105,140); for(let i=0;i<n;i++) x[i]*=Math.exp(-i/tau);
+      DSP.filt(x,'lp',rand(320,520),1.1); DSP.peak(x); for(let i=0;i<n;i++) x[i]+=.6*Math.sin(2*Math.PI*f*i/AFS)*Math.exp(-i/(AFS*.012)); return DSP.peak(x); },
+  };
+  // 결: 조각을 촘촘히 흩뿌리고 바탕 숨소리를 깐 2초 남짓한 고리. 크기는 도구 움직임에 따라 조절한다
+  const TEX={
+    swab:   {sec:2.4, layers:[{g:'fiber',rate:360,amp:1,spread:.85},{bed:[['bp',3200,.6],['lp',7000]],amp:.22,mod:.6}]},
+    swabWet:{sec:2.2, layers:[{g:'squelch',rate:70,amp:1,spread:.6},{g:'bubble',rate:45,amp:.6,spread:.8},{g:'fiber',rate:180,amp:.4,spread:.6}]},
+    paper:  {sec:2.6, layers:[{g:'paper',rate:220,amp:1,spread:.9},{bed:[['bp',2600,.8]],amp:.2,mod:.5}]},
+    brush:  {sec:2.4, layers:[{g:'bristle',rate:1000,amp:.8,spread:.85},{bed:[['hp',1800],['bp',6000,.5]],amp:.45,mod:.45}]},
+    shell:  {sec:2.2, layers:[{g:'paper',rate:160,amp:1,spread:.8},{g:'bristle',rate:260,amp:.9,spread:.9}]},
+    smear:  {sec:2.4, layers:[{g:'squelch',rate:110,amp:1,spread:.6},{g:'bubble',rate:55,amp:.55,spread:.8},{bed:[['lp',900,1.5]],amp:.45,mod:.5}]},
+    ooze:   {sec:2.6, layers:[{g:'squelch',rate:62,amp:1,spread:.5},{g:'bubble',rate:26,amp:.7,spread:.7},{bed:[['lp',520,2.5],['hp',90]],amp:.35,mod:.7}]},
+  };
+  function buildTexture(spec,banks){
+    const n=Math.round(AFS*spec.sec), out=new Float32Array(n);
+    for(const ly of spec.layers){
+      if(ly.bed){
+        const m=Math.round(AFS*.05), b=DSP.noise(n+m);
+        for(const f of ly.bed) DSP.filt(b,f[0],f[1],f[2]);
+        for(let i=0;i<m;i++){ const w=i/m; b[i]=b[i]*w+b[n+i]*(1-w); }              // 끝을 앞에 겹쳐 고리 이음매가 안 들리게
+        // 손이 움직이는 듯 천천히 출렁이는 크기 (고리 길이에 딱 맞는 주기만 써서 이음매가 없다)
+        const mods=[]; for(let k=0;k<5;k++) mods.push([Math.max(1,Math.round(rand(3,13)*spec.sec))/spec.sec,Math.random()*TAU,rand(.3,1)]);
+        const r=DSP.rms(b.subarray(0,n))||1;
+        for(let i=0;i<n;i++){ const t=i/AFS; let am=0; for(const [f,p,a] of mods) am+=a*Math.sin(TAU*f*t+p); out[i]+=b[i]/r*ly.amp*.25*Math.max(.12,1+ly.mod*am/2.4); }
+        continue;
+      }
+      const bank=banks[ly.g], cnt=Math.round(ly.rate*spec.sec);
+      for(let k=0;k<cnt;k++){ const g=bank[(Math.random()*bank.length)|0], at=(Math.random()*n)|0, a=ly.amp*.3*Math.exp(rand(-1,1)*ly.spread);
+        for(let i=0;i<g.length;i++) out[(at+i)%n]+=g[i]*a; }
+    }
+    // 결마다 같은 크기(RMS)로 맞추고, 드물게 튀는 봉우리만 부드럽게 눌러 둔다
+    const k=.2/(DSP.rms(out)||1); for(let i=0;i<n;i++){ const v=out[i]*k; out[i]=Math.abs(v)<.7?v:Math.sign(v)*(.7+.25*Math.tanh((Math.abs(v)-.7)/.25)); }
+    return out;
+  }
+  const banks={}; for(const k in GRAIN){ banks[k]=[]; for(let i=0;i<(k==='metal'||k==='wood'||k==='thump'?10:40);i++) banks[k].push(GRAIN[k]()); }
+  const tex={}; for(const k in TEX) tex[k]=buildTexture(TEX[k],banks);
+  return {fs:AFS,banks,tex};
+}
+let SFXDATA=null, sfxReady=null;
+function sfxLoad(){
+  if(sfxReady) return sfxReady;
+  return sfxReady=new Promise(res=>{
+    const done=d=>{ SFXDATA=d; res(d); };
+    try{
+      const src='const d=('+sfxBuilder.toString()+')(); const tr=[]; for(const k in d.banks) for(const a of d.banks[k]) tr.push(a.buffer); for(const k in d.tex) tr.push(d.tex[k].buffer); postMessage(d,tr);';
+      const url=URL.createObjectURL(new Blob([src],{type:'text/javascript'})), w=new Worker(url);
+      w.onmessage=e=>{ w.terminate(); URL.revokeObjectURL(url); done(e.data); };
+      w.onerror=e=>{ e.preventDefault?.(); try{ w.terminate(); }catch(err){} URL.revokeObjectURL(url); done(sfxBuilder()); };
+    }catch(err){ done(sfxBuilder()); }                                     // 일꾼을 못 쓰는 곳이면 여기서 바로
+  });
+}
+sfxLoad();                                                               // 화면을 불러오자마자 맡겨 둔다
+
+class CareAudio{
+  constructor(){ this.ctx=null; this.voiceOut=null; this.sfxIn=null; this.sfxEar=null; this.bufs=null; this.tex=null; this.loops={}; this.cur=null; this.pos=0; }
+  use(sfx){ const c=sfx?.ctx; if(c&&c!==this.ctx) this.attach(c); }
+  ensure(){ if(!this.ctx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){} try{ this.attach(new C()); }catch(e){ return null; } }
+    if(this.ctx.state==='suspended') this.ctx.resume().catch(()=>{}); return this.ctx; }
+  attach(c){
+    this.stopVoice(); for(const k in this.loops){ try{ this.loops[k].src.stop(); }catch(e){} } this.loops={};
+    this.ctx=c;
+    // 도구 소리: 크기 조절 → 귀 자리 → 튀는 봉우리만 막는 얕은 리미터
+    const lim=c.createDynamicsCompressor(); lim.threshold.value=-3; lim.knee.value=3; lim.ratio.value=20; lim.attack.value=.002; lim.release.value=.12; lim.connect(c.destination);
+    this.sfxEar=this.ear(lim); this.sfxIn=c.createGain(); this.sfxIn.gain.value=SFX_GAIN; this.sfxIn.connect(this.sfxEar.inp); this.sfxEar.set(0,c.currentTime,.01); this.pos=0;
+    this.voiceOut=c.createGain(); this.voiceOut.gain.value=VOICE_GAIN; this.voiceOut.connect(c.destination);
+    this.bufs=null; this.tex=null;
+    const make=D=>{ if(this.ctx!==c) return; const toBuf=a=>{ const b=c.createBuffer(1,a.length,D.fs); b.getChannelData(0).set(a); return b; };
+      this.bufs={}; for(const k in D.banks) this.bufs[k]=D.banks[k].map(toBuf);
+      this.tex={}; for(const k in D.tex) this.tex[k]=toBuf(D.tex[k]); };
+    if(SFXDATA) make(SFXDATA); else sfxLoad().then(make);
+  }
+  /** 귀 자리: p = -1(왼쪽 귀) ~ 1(오른쪽 귀). 먼 귀는 작고 높은 소리가 깎인다 (지연 없이 — 폰 스피커로 합쳐 들어도 소리가 안 패인다) */
+  ear(dest){
+    const c=this.ctx, inp=c.createGain(), mg=c.createChannelMerger(2), side=[];
+    for(let ch=0;ch<2;ch++){ const f=c.createBiquadFilter(); f.type='lowpass'; f.frequency.value=18000; f.Q.value=.5; const g=c.createGain(); inp.connect(f); f.connect(g); g.connect(mg,0,ch); side.push({f,g}); }
+    mg.connect(dest);
+    const set=(p,when=c.currentTime,tc=.05)=>{ p=clamp(p,-1,1); const a=Math.abs(p), far=lerp(1,.28,a), cut=lerp(18000,1900,Math.pow(a,.7));
+      const gl=p>0?far:1, gr=p<0?far:1, k=Math.min(1.07,Math.pow(2/(gl*gl+gr*gr),.25));       // 가까운 귀를 조금만 키운다 (목소리 봉우리가 1을 넘지 않게)
+      side[0].g.gain.setTargetAtTime(gl*k,when,tc); side[1].g.gain.setTargetAtTime(gr*k,when,tc);
+      side[0].f.frequency.setTargetAtTime(p>0?cut:18000,when,tc); side[1].f.frequency.setTargetAtTime(p<0?cut:18000,when,tc); };
+    return {inp,set};
+  }
+  /** 도구 소리가 들리는 귀 자리 (화면 가로 위치) */
+  place(p){ if(!this.ctx||Math.abs(p-this.pos)<.02) return; this.pos=p; this.sfxEar.set(p,this.ctx.currentTime,.06); }
+  /** 소리 조각 하나 */
+  grain(name,{t=0,gain=.3,rate=1}={}){
+    const c=this.ctx, B=this.bufs?.[name]; if(!c||!B) return;
+    const s=c.createBufferSource(); s.buffer=B[(Math.random()*B.length)|0]; s.playbackRate.value=rate*rand(.93,1.07);
+    const g=c.createGain(); g.gain.value=gain; s.connect(g); g.connect(this.sfxIn); s.start(c.currentTime+.004+t);
+  }
+  /** 조각 여러 개를 spread초 안에 흩뿌린다 */
+  burst(name,count,spread,{t=0,gain=.3,rate=1}={}){ for(let i=0;i<count;i++) this.grain(name,{t:t+Math.random()*spread,gain:gain*Math.exp(rand(-.6,.6)),rate}); }
+  /** 깔아 둔 결의 크기 (0이면 소리 없음) */
+  level(name,v,tc=.04){ if(!this.ctx) return; let L=this.loops[name];
+    if(!L){ if(v<=.001) return; const B=this.tex?.[name]; if(!B) return; const c=this.ctx, s=c.createBufferSource(); s.buffer=B; s.loop=true; const g=c.createGain(); g.gain.value=0; s.connect(g); g.connect(this.sfxIn); s.start(c.currentTime,Math.random()*B.duration); L=this.loops[name]={src:s,gain:g,v:0,r:1}; }
+    if(Math.abs(v-L.v)<.002) return; L.v=v; L.gain.gain.setTargetAtTime(v,this.ctx.currentTime,tc); }
+  /** 결을 빠르게/느리게 (빨리 문지르면 잔소리도 촘촘해진다) */
+  rate(name,r){ const L=this.loops[name]; if(!L||Math.abs(L.r-r)<.01) return; L.r=r; L.src.playbackRate.setTargetAtTime(r,this.ctx.currentTime,.08); }
+  silence(){ if(!this.ctx) return; for(const k in this.loops){ const L=this.loops[k]; L.v=0; L.gain.gain.setTargetAtTime(0,this.ctx.currentTime,.03); } }
+  /** 목소리: pos는 귀 자리(-1~1) 하나, 또는 [[초,자리],…]로 말하는 동안 옮겨 간다. 새 말이 오면 앞 말은 바로 끊는다 */
+  voice(buf,start,dur,pos=0){
+    const c=this.ctx; if(!c||!buf) return; this.stopVoice();
+    const s=c.createBufferSource();
+    try{ s.buffer=buf; }catch(e){ redecodeVoice(c); return; }          // 다른 창에서 푼 소리를 못 받는 기기면 이 장치로 다시 푼다
+    const ear=this.ear(this.voiceOut), t0=c.currentTime+.012;
+    if(Array.isArray(pos)){ ear.set(pos[0][1],t0,.004); for(const [tt,p] of pos) ear.set(p,t0+tt,.05); } else ear.set(pos,t0,.004);
+    const g=c.createGain(); g.gain.value=1; s.connect(g); g.connect(ear.inp); s.start(t0,Math.max(0,start-.01),dur+.06);
+    this.cur={s,g}; s.onended=()=>{ if(this.cur&&this.cur.s===s) this.cur=null; try{ g.disconnect(); }catch(e){} };
+  }
+  stopVoice(){ const v=this.cur; if(!v||!this.ctx) return; this.cur=null; const t=this.ctx.currentTime; try{ v.g.gain.cancelScheduledValues(t); v.g.gain.setValueAtTime(v.g.gain.value,t); v.g.gain.linearRampToValueAtTime(0,t+.05); v.s.stop(t+.06); }catch(e){} }
+}
+const AU=new CareAudio();
+// 도구 소리 (한 번 나는 것)
+const SND={
+  // 도구를 집어 들 때: 도구마다 다른 소리
+  pick(kind){
+    if(kind==='swab'){ AU.grain('wood',{gain:.1,rate:2.4}); AU.burst('paper',2,.03,{gain:.16}); }
+    else if(kind==='ointment'){ AU.burst('crinkle',7,.14,{gain:.22}); AU.grain('thump',{gain:.16,rate:1.7}); }
+    else if(kind==='brush'){ AU.grain('wood',{gain:.32}); AU.burst('bristle',5,.04,{gain:.14}); }
+    else if(kind==='tweezer'){ AU.grain('metal',{gain:.19}); }
+  },
+  // 휴지 위에 내려놓을 때: 몸이 종이에 톡 닿고, 종이가 바스락
+  place(){ AU.grain('thump',{gain:.3}); AU.burst('paper',12,.2,{gain:.21,t:.008}); },
+  // 핀셋 끝이 맞닿는 틱 / 벌어지는 틱
+  grip(){ AU.grain('metal',{gain:.22}); AU.burst('paper',2,.02,{gain:.08,t:.01}); },
+  release(){ AU.grain('metal',{gain:.13,rate:1.12}); },
+  // 종이에 다리가 톡
+  tap(k=1){ AU.grain('paper',{gain:.3*k}); AU.grain('thump',{gain:.14*k,rate:1.9}); },
+  // 면봉이 찍힐 때: 솜이 눌리며 퐁, 종이가 살짝
+  dab(){ AU.grain('thump',{gain:.13,rate:1.5}); AU.burst('fiber',9,.05,{gain:.15}); AU.burst('paper',2,.03,{gain:.09}); },
+  // 진물이 솜에 빨려 들 때 쪽
+  sip(k){ AU.burst('bubble',1+Math.round(k*3),.06,{gain:.07+.09*k}); AU.burst('squelch',1+Math.round(k*2),.05,{gain:.09+.1*k}); },
+  // 연고 튜브를 쥘 때: 알루미늄이 구겨지는 바스락 + 크림이 뿌직
+  squeeze(){ AU.burst('crinkle',13,.2,{gain:.17}); AU.burst('squelch',3,.12,{gain:.21,t:.07}); AU.burst('bubble',2,.1,{gain:.11,t:.1}); },
+  // 걸쭉한 크림 속 공기 방울이 뽁
+  pop(){ AU.grain('bubble',{gain:rand(.08,.2),rate:rand(.7,1.25)}); if(Math.random()<.4) AU.grain('squelch',{gain:rand(.08,.16),t:.01}); },
+  // 손을 떼면 연고 줄이 끊기며 쪽
+  unsqueeze(){ AU.grain('bubble',{gain:.2,rate:.7}); AU.grain('squelch',{gain:.26,t:.01}); },
+  // 털이 처음 닿을 때 스
+  brushIn(){ AU.burst('bristle',14,.07,{gain:.14}); },
+  // 브러시를 들 때 털이 튀는 타닥
+  flick(k){ AU.burst('bristle',4+Math.round(k*8),.05,{gain:.08+.16*k}); },
+  // 마른 껍질 위를 털이 지날 때 바삭
+  crackle(k){ AU.grain(Math.random()<.5?'paper':'bristle',{gain:(.06+.18*Math.random())*k}); },
+};
+
+// ───────── 위로의 한마디: 목소리 + 말풍선 ─────────
+const VO={buf:null,loading:null,raw:null};
+const decodeWith=(dc,ab)=>new Promise((res,rej)=>{ const pr=dc.decodeAudioData(ab,res,rej); if(pr&&pr.then) pr.then(res,rej); });
+function loadVoice(){
+  if(VO.loading) return VO.loading;
+  VO.loading=fetch(VOICE_URL).then(r=>{ if(!r.ok) throw new Error('voice '+r.status); return r.arrayBuffer(); }).then(ab=>{
+    VO.raw=ab.slice(0);                                  // 푸는 동안 원본이 비워지므로 사본을 둔다
+    const OC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+    return decodeWith(OC?new OC(1,2,44100):AU.ensure(),ab);
+  }).then(b=>{ VO.buf=b; return b; }).catch(err=>{ console.warn(err); VO.buf=null; VO.loading=null; });
+  return VO.loading;
+}
+function redecodeVoice(ctx){ if(!VO.raw||VO.redo) return; VO.redo=true; VO.buf=null; decodeWith(ctx,VO.raw.slice(0)).then(b=>{ VO.buf=b; }).catch(err=>console.warn(err)); }
+// 위로의 말은 섞은 순서대로 돌리고, 「바퀴벌레… A~ S~ M~ R~」는 간병마다 4~9번째 말 사이에 한 번 끼어든다 (오래 하면 한참 뒤에 또)
+const GAG=LINES.find(r=>r.length>3)||null, PLAIN=LINES.filter(r=>r.length<=3);
+let bag=[], lastLine=-1, sayN=0, gagAt=6, voiceSide=Math.random()<.5?-1:1;
+function nextLine(){
+  if(!bag.length){ bag=PLAIN.map((_,i)=>i); for(let i=bag.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [bag[i],bag[j]]=[bag[j],bag[i]]; } if(bag[bag.length-1]===lastLine) bag.unshift(bag.pop()); }
+  const i=bag.pop(); lastLine=i; return PLAIN[i];
+}
+function newSessionLines(){ sayN=0; gagAt=4+Math.floor(Math.random()*6); }
+const bubble={text:'',t:0,dur:0,speed:1,alpha:0,a:0,box:null,key:0,side:0,sched:null};
+function say(){
+  sayN++;
+  let row;
+  if(GAG&&sayN>=gagAt){ row=GAG; gagAt=sayN+24+Math.floor(Math.random()*16); } else row=nextLine();
+  const [text,start,dur,pans]=row;
+  // 귀: 보통 말은 왼쪽·오른쪽 귀를 번갈아 가며, 개그 줄은 글자마다 옮겨 다니며
+  let pos; if(pans){ pos=pans; bubble.side=0; } else { voiceSide=-voiceSide; pos=voiceSide*rand(.6,.88); bubble.side=voiceSide; }
+  if(VO.buf) AU.voice(VO.buf,start,dur,pos); else loadVoice();
+  bubble.text=text; bubble.t=0; bubble.dur=dur; bubble.speed=typeTime(text)/Math.max(.3,dur*.8); bubble.alpha=1; bubble.a=0; bubble.box=null; bubble.key++;
+  bubble.sched=pans?[[0,1],[.12,2],[.24,3],[.36,4],[.62,5],[pans[1][0],7],[pans[2][0],9],[pans[3][0],11],[pans[4][0],13]]:null;   // 글자가 소리에 맞춰 찍힌다
+}
+const schedReveal=(sc,t)=>{ let n=0; for(const [tt,c] of sc){ if(tt>t) break; n=c; } return n; };
+let sayW=0,sayH=0,sayDpr=1,sayDrawn=false;
+function sizeSay(){ sayDpr=Math.min(devicePixelRatio||1,2); sayW=innerWidth; sayH=innerHeight; sayCv.width=Math.round(sayW*sayDpr); sayCv.height=Math.round(sayH*sayDpr); sayDrawn=true; }
+function tickSay(dt){
+  if(!bubble.text) return;
+  bubble.t+=dt; bubble.a=Math.min(1,bubble.a+dt/.14);
+  if(bubble.t>bubble.dur+1.5){ bubble.alpha-=dt/.35; if(bubble.alpha<=0){ bubble.text=''; bubble.box=null; } }
+}
+function drawSay(){
+  const g=sayG;
+  if(!bubble.text){ if(sayDrawn){ g.setTransform(1,0,0,1,0,0); g.clearRect(0,0,sayCv.width,sayCv.height); sayDrawn=false; } return; }
+  g.setTransform(sayDpr,0,0,sayDpr,0,0); g.clearRect(0,0,sayW,sayH); sayDrawn=true;
+  const px=clamp(Math.round(Math.min(sayW,sayH)*.05),17,25), maxW=Math.min(sayW*.8,520);
+  if(!bubble.box||bubble.box.px!==px||bubble.box.W!==sayW){ const m=measureBubble(g,bubble.text,px,maxW); bubble.box={...m,W:sayW}; }
+  const b=bubble.box, tb=$('#toolbar').getBoundingClientRect();
+  // 말이 들리는 쪽 귀로 살짝 비켜 서고, 꼬리도 그쪽 아래를 향한다
+  b.cx=clamp(sayW/2+bubble.side*Math.min(sayW*.12,90),b.rx+8,sayW-b.rx-8); b.cy=Math.min(sayH*.86,tb.top)-px*2.1-b.ry; b.tx=sayW/2+bubble.side*sayW*.36; b.ty=sayH+40;
+  b.a=bubble.a; b.reveal=bubble.sched?schedReveal(bubble.sched,bubble.t):revealAt(bubble.text,bubble.t,bubble.speed);
+  drawBubble(g,b,clamp(bubble.alpha));
+}
+
+// ───────── 도구 모형 ─────────
+const Y_AXIS=new THREE.Vector3(0,1,0);
+const _q=new THREE.Quaternion(), _v=new THREE.Vector3(), _v2=new THREE.Vector3(), _m=new THREE.Matrix4();
+/** 오른손으로 쥔 것처럼: 닿는 끝에서 손잡이가 화면 오른쪽 아래(나와 오른편)로 tilt만큼 기울어 올라온다 */
+function leanQuat(out,tilt,side=1.0){
+  const cx=camera.position.x-LOOK.x, cz=camera.position.z-LOOK.z; let fx=cx, fz=cz; const l=Math.hypot(fx,fz)||1; fx/=l; fz/=l;   // 카메라 쪽
+  const rx=fz, rz=-fx;                                                                                                      // 화면 오른쪽
+  const dx=fx*Math.cos(side)+rx*Math.sin(side), dz=fz*Math.cos(side)+rz*Math.sin(side);
+  _v.set(dx*Math.sin(tilt),Math.cos(tilt),dz*Math.sin(tilt)).normalize();
+  return out.setFromUnitVectors(Y_AXIS,_v);
+}
+// 면봉: 하얀 막대 양끝에 솜. 아래 솜이 닿는 끝이다 (원점 = 솜 끝)
+function makeSwab(){
+  const root=new THREE.Group();
+  const SL=1.7;
+  const stick=new THREE.Mesh(new THREE.CylinderGeometry(.021,.021,SL,14),new THREE.MeshPhysicalMaterial({color:0xf4f2ee,roughness:.38,clearcoat:.4,clearcoatRoughness:.3}));
+  stick.position.y=.2+SL/2; stick.castShadow=true; root.add(stick);
+  const head=(seed)=>{ const g=new THREE.SphereGeometry(1,30,22), P=g.attributes.position, col=new Float32Array(P.count*3);
+    for(let i=0;i<P.count;i++){ _v.fromBufferAttribute(P,i); const n=1+(vnoise(_v.x*5+seed,_v.y*5+_v.z*3)-.5)*.16+(hash2(i*.37,seed)-.5)*.03; _v.multiplyScalar(n); _v.x*=.08; _v.z*=.08; _v.y*=.2; P.setXYZ(i,_v.x,_v.y,_v.z); col[i*3]=col[i*3+1]=col[i*3+2]=1; }
+    g.setAttribute('color',new THREE.BufferAttribute(col,3)); g.computeVertexNormals(); return g; };
+  const cotton=new THREE.MeshPhysicalMaterial({vertexColors:true,roughness:1,sheen:1,sheenRoughness:.5,sheenColor:new THREE.Color(0xffffff)});
+  const tip=new THREE.Mesh(head(1),cotton); tip.position.y=.19; tip.castShadow=true; root.add(tip);
+  const top=new THREE.Mesh(head(7),cotton.clone()); top.position.y=.2+SL+.02; root.add(top);
+  root.visible=false; scene.add(root);
+  return {root,tip,soak:0,cream:0,lowered:0};
+}
+// 연고 튜브: 흰 알루미늄 튜브, 청록 띠. 뒤끝은 납작하게 눌려 이음매가 된다. 원점 = 노즐 끝
+function makeTube(){
+  const root=new THREE.Group();
+  const lab=document.createElement('canvas'); lab.width=256; lab.height=512; { const g=lab.getContext('2d'); g.fillStyle='#f7f6f2'; g.fillRect(0,0,256,512);
+    g.fillStyle='#1f8f8a'; g.fillRect(0,190,256,96); g.fillStyle='#e9f5f2'; g.fillRect(0,203,256,8); g.fillRect(0,266,256,6);
+    g.fillStyle='rgba(31,143,138,.85)'; g.fillRect(0,330,256,10); g.fillStyle='rgba(180,176,166,.35)'; for(let i=0;i<46;i++) g.fillRect(0,i*11+3,256,1); }
+  const labTex=new THREE.CanvasTexture(lab); labTex.colorSpace=THREE.SRGBColorSpace; labTex.anisotropy=MAX_ANISO;
+  const L=1.42, R=.165, B0=.33;
+  const prof=[]; for(let i=0;i<=26;i++) prof.push(new THREE.Vector2(R,L*i/26));
+  const bodyGeo=new THREE.LatheGeometry(prof,44);
+  const BP=bodyGeo.attributes.position; BP.setUsage(THREE.DynamicDrawUsage); const rest=Float32Array.from(BP.array);
+  const body=new THREE.Mesh(bodyGeo,new THREE.MeshPhysicalMaterial({map:labTex,roughness:.3,metalness:.3,clearcoat:.55,clearcoatRoughness:.18,side:THREE.DoubleSide}));
+  body.position.y=B0; body.castShadow=true; root.add(body);
+  // 이음매: 납작해진 끝을 접어 누른 띠 (톱니 무늬)
+  const cr=document.createElement('canvas'); cr.width=128; cr.height=32; { const g=cr.getContext('2d'); g.fillStyle='#dfe1e3'; g.fillRect(0,0,128,32); g.fillStyle='#a9adb1'; for(let x=0;x<128;x+=6) g.fillRect(x,0,2,32); }
+  const crTex=new THREE.CanvasTexture(cr); crTex.colorSpace=THREE.SRGBColorSpace;
+  const crimp=new THREE.Mesh(new THREE.BoxGeometry(R*2*1.3,.12,.026),new THREE.MeshStandardMaterial({map:crTex,metalness:.75,roughness:.32}));
+  crimp.position.y=B0+L+.05; crimp.castShadow=true; root.add(crimp);
+  const shoulder=new THREE.Mesh(new THREE.CylinderGeometry(R,.068,.13,40),new THREE.MeshPhysicalMaterial({color:0xf3f2ee,roughness:.3,metalness:.3,clearcoat:.55}));
+  shoulder.position.y=B0-.065; shoulder.castShadow=true; root.add(shoulder);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(.06,.062,.1,24),new THREE.MeshStandardMaterial({color:0xece9e2,roughness:.45}));
+  neck.position.y=.15; root.add(neck);
+  const nozzle=new THREE.Mesh(new THREE.CylinderGeometry(.03,.048,.1,20),new THREE.MeshStandardMaterial({color:0xf1efe9,roughness:.4}));
+  nozzle.position.y=.05; root.add(nozzle);
+  root.visible=false; scene.add(root);
+  // 연고 줄 (노즐에서 바닥까지)
+  const rope=new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,16,6,true),new THREE.MeshPhysicalMaterial({color:0xf2eadb,roughness:.2,clearcoat:.85,clearcoatRoughness:.1,envMapIntensity:1.3}));
+  rope.visible=false; rope.castShadow=true; scene.add(rope);
+  const tube={root,body,rest,rope,squeeze:0,used:0,len:L,R,_k:-1};
+  shapeTube(tube); return tube;
+}
+/** 튜브 몸통 모양: 끝은 이음매로 납작, 쥔 자리는 눌리고, 많이 짤수록 뒤쪽부터 납작해진다 */
+function shapeTube(T){
+  const key=Math.round(T.squeeze*50)+Math.round(T.used*60)*100; if(key===T._k) return; T._k=key;
+  const BP=T.body.geometry.attributes.position, R=T.rest, L=T.len;
+  for(let i=0;i<BP.count;i++){ const y=R[i*3+1], s=clamp(y/L);
+    const cT=sstep(.8,1,s), pinch=T.squeeze*.22*Math.exp(-((s-.42)**2)/.03), flat=T.used*.6*sstep(.25,.85,s);
+    BP.setXYZ(i,R[i*3]*(1+.3*cT)*(1-pinch*.6)*(1+flat*.3),y,R[i*3+2]*(1-.94*cT)*(1-pinch)*(1-flat)); }
+  BP.needsUpdate=true; T.body.geometry.computeVertexNormals();
+}
+// 브러시: 나무 손잡이, 은색 쇠테, 끝이 밝은 두 빛깔 털. 털 덩어리는 정점을 직접 휘고 눌러 퍼지게 한다. 원점 = 털 끝
+function strandTexture(){
+  const W=256,H=512,c=document.createElement('canvas'); c.width=W; c.height=H; const g=c.getContext('2d');
+  const grd=g.createLinearGradient(0,0,0,H); grd.addColorStop(0,'#f2e8d8'); grd.addColorStop(.42,'#e6d6bb'); grd.addColorStop(.62,'#8a6a4c'); grd.addColorStop(1,'#4b3626');
+  g.fillStyle=grd; g.fillRect(0,0,W,H);
+  for(let i=0;i<900;i++){ const x=Math.random()*W, a=.05+Math.random()*.16, light=Math.random()<.5; g.strokeStyle=light?`rgba(255,250,240,${a})`:`rgba(60,40,24,${a})`; g.lineWidth=.6+Math.random()*1.2; g.beginPath(); g.moveTo(x,Math.random()*30); g.lineTo(x+(Math.random()-.5)*6,H); g.stroke(); }
+  // 털끝은 들쭉날쭉 (위쪽이 털끝)
+  const img=g.getImageData(0,0,W,H);
+  for(let x=0;x<W;x++){ const cut=Math.floor(4+Math.pow(Math.random(),2)*40); for(let y=0;y<cut;y++) img.data[(y*W+x)*4+3]=0; for(let y=cut;y<cut+6;y++) img.data[(y*W+x)*4+3]=Math.round(255*(y-cut)/6); }
+  g.putImageData(img,0,0);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=THREE.RepeatWrapping; t.repeat.set(3,1); t.anisotropy=MAX_ANISO; return t;
+}
+function makeBrush(){
+  const root=new THREE.Group();
+  const TL=.62, TR=.2;
+  const prof=[]; const NS=26;
+  for(let i=0;i<=NS;i++){ const s=i/NS; const r=s<.42?TR*Math.sin(Math.min(1,s/.42)*Math.PI/2)*(.35+.65*Math.sqrt(s/.42)):TR*(1-.24*sstep(.42,1,s)); prof.push(new THREE.Vector2(Math.max(.002,r),s*TL)); }
+  const geo=new THREE.LatheGeometry(prof,44);
+  // LatheGeometry의 v는 아래(털끝)→위. 털끝 그림이 위쪽이 되도록 뒤집는다
+  const UV=geo.attributes.uv; for(let i=0;i<UV.count;i++) UV.setY(i,1-UV.getY(i));
+  const P=geo.attributes.position, rest=Float32Array.from(P.array), sv=new Float32Array(P.count);
+  for(let i=0;i<P.count;i++) sv[i]=P.getY(i)/TL;
+  const col=new Float32Array(P.count*3).fill(1); geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  P.setUsage(THREE.DynamicDrawUsage); geo.attributes.color.setUsage(THREE.DynamicDrawUsage);
+  const tuft=new THREE.Mesh(geo,new THREE.MeshPhysicalMaterial({map:strandTexture(),vertexColors:true,alphaTest:.45,side:THREE.DoubleSide,roughness:.62,sheen:.8,sheenRoughness:.45,sheenColor:new THREE.Color(0xfff3e2)}));
+  tuft.castShadow=true; tuft.frustumCulled=false; root.add(tuft);
+  const ferrule=new THREE.Mesh(new THREE.CylinderGeometry(TR*.8,TR*.78,.24,32),new THREE.MeshStandardMaterial({color:0xcfd2d6,metalness:.95,roughness:.22}));
+  ferrule.position.y=TL+.1; ferrule.castShadow=true; root.add(ferrule);
+  const handle=new THREE.Mesh(new THREE.CylinderGeometry(.068,.11,1.75,24),new THREE.MeshPhysicalMaterial({color:0x8a5a38,roughness:.28,clearcoat:.8,clearcoatRoughness:.15}));
+  handle.position.y=TL+.22+.87; handle.castShadow=true; root.add(handle);
+  root.visible=false; scene.add(root);
+  return {root,tuft,rest,sv,TL,TR,bend:new THREE.Vector3(),bendV:new THREE.Vector3(),press:0,stain:0,cream:0};
+}
+// 핀셋: 끝이 가늘어지는 스테인리스 판 두 쪽이 마주 보고 서서 뒤에서 붙어 있다. 위에서 보면 끝이 모이는 V자. 원점 = 집게 끝, 뒤쪽이 +z
+function makeTweezer(){
+  const steel=new THREE.MeshStandardMaterial({color:0xd9dde0,metalness:1,roughness:.26,envMapIntensity:1.25});
+  const ribbed=new THREE.MeshStandardMaterial({color:0xb9bec2,metalness:1,roughness:.42,envMapIntensity:1.1});
+  const pivot=new THREE.Group(), LEN=2.55, arms=[];
+  // 판 가운데 자리: 끝은 벌어진 만큼, 가운데는 살짝 부풀고, 뒤는 붙는다
+  const armX=(side,u,open)=>side*(.0045+open*.075*Math.pow(1-u,1.1)+.026*Math.sin(Math.PI*Math.min(1,u*1.05))*(1-u*.4));
+  for(const side of [-1,1]){
+    const geo=new THREE.BoxGeometry(1,1,1,1,2,36), P=geo.attributes.position; P.setUsage(THREE.DynamicDrawUsage);
+    const rest=Float32Array.from(P.array);
+    const mesh=new THREE.Mesh(geo,steel); mesh.castShadow=true; pivot.add(mesh);
+    // 손 대는 자리의 미끄럼 방지 홈
+    const grip=new THREE.Mesh(new THREE.BoxGeometry(.004,.052,.42),ribbed); grip.castShadow=false; pivot.add(grip);
+    arms.push({side,geo,rest,grip});
+  }
+  pivot.visible=false; scene.add(pivot);
+  let lastOpen=-1;
+  const setGrip=v=>{
+    const open=1-clamp(v); if(Math.abs(open-lastOpen)<.003) return; lastOpen=open;
+    for(const A of arms){ const P=A.geo.attributes.position, R=A.rest;
+      for(let i=0;i<P.count;i++){ const x=R[i*3], y=R[i*3+1], u=R[i*3+2]+.5;          // u: 0 끝 → 1 뒤
+        const hgt=lerp(.014,.088,sstep(0,.42,u)), thk=lerp(.008,.015,u);              // 판 높이(세로) · 두께(벌어지는 쪽)
+        P.setXYZ(i,armX(A.side,u,open)+x*thk,y*hgt+(1-u)*(1-u)*-.004,u*LEN); }
+      P.needsUpdate=true; A.geo.computeVertexNormals(); A.geo.computeBoundingSphere();
+      const gu=.62; A.grip.position.set(armX(A.side,gu,open)+A.side*(lerp(.008,.015,gu)/2+.002),0,gu*LEN); }
+  };
+  setGrip(0);
+  return {root:pivot,setGrip,grip:0,gripT:0};
+}
+const TOOLS={swab:makeSwab(),ointment:makeTube(),brush:makeBrush(),tweezer:makeTweezer()};
+
+// ───────── 도구 상태 ─────────
+let tool='swab';
+const pen={active:false,id:null,x:0,y:0,p:new THREE.Vector3(),prev:new THREE.Vector3(),vel:new THREE.Vector3(),down:false,hover:false,shown:false,moved:0,last:0};
+const target=new THREE.Vector3(0,.05,.25), cur=new THREE.Vector3(0,.3,.4);   // 도구가 가려는 자리 / 지금 자리 (닿는 점)
+let held=null;                    // 핀셋에 집힌 다리
+let squeezeLine=null;             // 지금 짜고 있는 연고 줄 {x,z}
+let settle=0, settleRect=null;     // 손을 뗀 뒤 연고가 조금 더 가라앉는 시간
+const HINTS={
+  swab:'눌러서 진물을 찍어 내고, 문지르면 닦인다.',
+  ointment:'누르고 있는 동안 짜진다. 끌면 따라 나온다.',
+  brush:'누른 채 끌어서 쓰다듬는다.',
+  tweezer:'다리를 집어 옮긴다. 몸에 붙은 다리는 펴진다.',
+  view:'휴지 바깥을 끌면 시점이 돌아가고, 두 손가락이나 휠로 확대한다.',
+};
+const hintSeen={}; let hintTimer=0;
+const hintEl=$('#hint');
+function showHint(key,sec=3.6){ if(hintSeen[key]) return; hintSeen[key]=true; hintEl.textContent=HINTS[key]; hintEl.classList.add('show'); clearTimeout(hintTimer); hintTimer=setTimeout(()=>hintEl.classList.remove('show'),sec*1000); }
+function setTool(k,silent){
+  if(!TOOLS[k]) return;
+  if(held) dropHeld();
+  if(squeezeLine) endSqueeze();
+  tool=k;
+  for(const b of document.querySelectorAll('.tool')) b.classList.toggle('sel',b.dataset.tool===k);
+  for(const n in TOOLS) TOOLS[n].root.visible=false;
+  TOOLS.ointment.rope.visible=false;
+  pen.shown=false;
+  if(!silent){ SND.pick(k); if(started&&!entering) showHint(k); }
+}
+for(const b of document.querySelectorAll('.tool')) b.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); AU.ensure(); setTool(b.dataset.tool); });
+
+// ───────── 화면 좌표 → 바닥 ─────────
+const ray=new THREE.Raycaster(), ndc=new THREE.Vector2();
+function setRay(sx,sy){ const r=canvas.getBoundingClientRect(); ndc.set((sx-r.left)/Math.max(1,r.width)*2-1,-((sy-r.top)/Math.max(1,r.height))*2+1); ray.setFromCamera(ndc,camera); return ray.ray; }
+/** 화면 점이 닿는 표면(휴지·시체·연고 높이맵, 바깥은 책상) */
+function pickSurface(sx,sy,out=new THREE.Vector3()){
+  const R=setRay(sx,sy), o=R.origin, d=R.direction;
+  if(d.y>-1e-4) return null;
+  const top=.6; let t=Math.max(0,(o.y-top)/-d.y);
+  const tEnd=(o.y-0)/-d.y, step=GC*.6;
+  let prevT=t, found=false;
+  for(;t<=tEnd+step;t+=step){ const x=o.x+d.x*t, y=o.y+d.y*t, z=o.z+d.z*t; if(y<=surfY(x,z)){ found=true; break; } prevT=t; }
+  if(!found) t=tEnd;
+  else{ let a=prevT,b=t; for(let i=0;i<7;i++){ const m=(a+b)/2, x=o.x+d.x*m, y=o.y+d.y*m, z=o.z+d.z*m; if(y<=surfY(x,z)) b=m; else a=m; } t=b; }
+  return out.set(o.x+d.x*t,0,o.z+d.z*t).setY(surfY(o.x+d.x*t,o.z+d.z*t));
+}
+const inWork=p=>p&&Math.abs(p.x)<WORK&&Math.abs(p.z)<WORK;
+
+// ───────── 도구 동작 ─────────
+function toolDown(p){
+  pen.down=true; pen.moved=0; pen.prev.copy(p); pen.p.copy(p); target.copy(p);
+  if(!pen.shown){ cur.copy(p); cur.y+=.25; pen.shown=true; }
+  say();                                                  // 무엇을 하든 누를 때마다 한마디
+  if(tool==='swab'){ SND.dab(); }
+  else if(tool==='ointment'){ startSqueeze(p); }
+  else if(tool==='brush'){ SND.brushIn(); }
+  else if(tool==='tweezer'){ grabAt(pen.x,pen.y,p); }
+}
+function toolMove(p){ pen.moved+=p.distanceTo(pen.p); pen.p.copy(p); target.copy(p); }
+function toolUp(){
+  if(!pen.down) return; pen.down=false;
+  if(tool==='ointment') endSqueeze();
+  else if(tool==='brush'){ SND.flick(clamp(TOOLS.brush.bend.length()*6)); TOOLS.brush.bendV.addScaledVector(TOOLS.brush.bend,-14); }
+  else if(tool==='tweezer') dropHeld();
+}
+
+// 연고 짜기
+function startSqueeze(p){ SND.squeeze(); squeezeLine={x:p.x,z:p.z,t:0,flow:0,popT:.25}; }
+function endSqueeze(){ if(!squeezeLine) return; if(squeezeLine.t>.08) SND.unsqueeze(); settle=.8; squeezeLine=null; AU.level('ooze',0); }
+function updateSqueeze(dt){
+  const S=squeezeLine; if(!S) return; const T=TOOLS.ointment;
+  S.t+=dt; S.flow=Math.min(1,S.t/.32);
+  // 노즐 아래로 떨어지는 자리: 노즐을 따라가되 살짝 늦게
+  const nx=cur.x, nz=cur.z;
+  const k=1-Math.exp(-14*dt); const px=S.x, pz=S.z; S.x+=(nx-S.x)*k; S.z+=(nz-S.z)*k;
+  const vol=.0075*S.flow*dt;                // 지름 5mm 줄이 1초에 2cm쯤 나오는 양. 몸통이 다 덮이려면 15초 남짓
+  deposit(px,pz,S.x,S.z,vol,.062);
+  T.used=Math.min(1,T.used+vol/.16);
+  const r=Math.ceil(.3/GC), ci=Math.round(gix(S.x)), cj=Math.round(gix(S.z));
+  slump(ci-r,ci+r,cj-r,cj+r,2);
+  settleRect=[ci-r,ci+r,cj-r,cj+r];
+  AU.level('ooze',.18*S.flow*(.8+.2*Math.sin(S.t*9)));
+  S.popT-=dt; if(S.popT<=0){ S.popT=rand(.09,.4); SND.pop(); }
+}
+
+// 면봉
+function updateSwab(dt,speed){
+  const T=TOOLS.swab, p=cur;
+  let got=0;
+  if(pen.down){
+    got=absorbGoo(p.x,p.z,p.y,.085,dt*(2.4+speed*8));
+    // 연고가 묻어 있으면 솜에 묻어 나온다
+    const i0=Math.floor(gix(p.x-.09)),i1=Math.ceil(gix(p.x+.09)),j0=Math.floor(gix(p.z-.09)),j1=Math.ceil(gix(p.z+.09)); let took=0;
+    for(let j=Math.max(1,j0);j<=Math.min(GN-2,j1);j++) for(let i=Math.max(1,i0);i<=Math.min(GN-2,i1);i++){ const k=j*GN+i; if(th[k]<=0) continue; const x=-GW/2+i*GC, z=-GW/2+j*GC, d=Math.hypot(x-p.x,z-p.z); if(d>.09) continue; const m=th[k]*Math.min(1,dt*(1.5+speed*5))*(1-d/.09); th[k]-=m; took+=m; }
+    if(took>0){ markDirty(i0,i1,j0,j1); T.cream=Math.min(1,T.cream+took*40); }
+    if(got>0){ T.soak=Math.min(1,T.soak+got*.004); stain(p.x+rand(-.02,.02),p.z+rand(-.02,.02),.05+rand(.03),'206,186,138',Math.min(.16,.02+got*.003)); if(Math.random()<dt*14) SND.sip(clamp(got*.02)); }
+    else if(T.soak>.05&&speed>.15&&Math.random()<dt*20) stain(p.x,p.z,.035,'214,197,155',.025*T.soak);   // 묻은 솜으로 문지르면 옅게 번진다
+  }
+  // 소리: 솜 결은 문지르는 만큼. 휴지 위면 종이 바스락이 같이, 연고 위나 진물이 밴 솜이면 찐득한 결이 같이
+  const kind=surfKind(p.x,p.z), mv=pen.down?clamp(speed*1.2):0;
+  AU.level('swab',pen.down?(.01+.155*mv)*(kind==='cream'?.45:1):0); AU.rate('swab',.88+.3*mv);
+  AU.level('paper',pen.down&&kind==='paper'?.18*mv:0);
+  AU.level('swabWet',pen.down?(kind==='cream'?.04+.23*mv:T.soak>.25?.14*mv*T.soak:0):0);
+  // 솜 빛깔: 진물이 밸수록 크림색 → 누런빛, 연고는 하얗고 번들
+  const C=T.tip.geometry.attributes.color, P=T.tip.geometry.attributes.position;
+  if(T._s!==T.soak){ T._s=T.soak; for(let i=0;i<C.count;i++){ const yb=P.getY(i); const low=sstep(.05,-.17,yb)*T.soak; C.setXYZ(i,lerp(1,.86,low),lerp(1,.76,low),lerp(1,.55,low)); } C.needsUpdate=true; }
+}
+
+// 브러시: 털 휘기 · 눌러 퍼지기 · 다리 쓸기 · 연고 펴 바르기
+const _bw=new THREE.Vector3(), _inv=new THREE.Matrix4();
+function updateBrush(dt,speed){
+  const T=TOOLS.brush;
+  // 털이 움직이는 반대쪽으로 끌린다 (용수철)
+  const tx=-pen.vel.x*.07, tz=-pen.vel.z*.07, lim=.22;
+  _v.set(tx,0,tz); if(_v.length()>lim) _v.setLength(lim);
+  T.bendV.x+=((_v.x-T.bend.x)*95-T.bendV.x*11)*dt; T.bendV.z+=((_v.z-T.bend.z)*95-T.bendV.z*11)*dt;
+  T.bend.addScaledVector(T.bendV,dt);
+  T.press=damp(T.press,pen.down?1:0,pen.down?22:14,dt);
+  // 털 정점: 기울어진 브러시 좌표 → 월드에서 휘고 바닥에 눌리면 옆으로 퍼진다 → 다시 브러시 좌표
+  const root=T.root; root.updateMatrixWorld(true); _inv.copy(root.matrixWorld).invert();
+  const P=T.tuft.geometry.attributes.position, R=T.rest, M=root.matrixWorld;
+  const ax=cur.x, az=cur.z;
+  let contact=0;
+  for(let i=0;i<P.count;i++){
+    _bw.set(R[i*3],R[i*3+1],R[i*3+2]).applyMatrix4(M);
+    const f=Math.pow(1-T.sv[i],2);
+    _bw.x+=T.bend.x*f; _bw.z+=T.bend.z*f;
+    const floor=surfY(_bw.x,_bw.z)+.004;
+    if(_bw.y<floor){ const dy=floor-_bw.y; _bw.y=floor; let ox=_bw.x-ax, oz=_bw.z-az; const ol=Math.hypot(ox,oz)||1; _bw.x+=ox/ol*dy*.95; _bw.z+=oz/ol*dy*.95; contact=Math.max(contact,dy); }
+    _bw.applyMatrix4(_inv); P.setXYZ(i,_bw.x,_bw.y,_bw.z);
+  }
+  P.needsUpdate=true; T.tuft.geometry.computeVertexNormals();
+  // 닿아서 쓸고 있는 동안
+  const touching=pen.down&&contact>.01;
+  let overShell=0, overCream=0;
+  if(touching){
+    const r=T.TR*1.2;
+    // 연고: 쓸고 가는 방향으로 밀리며 펴진다
+    if(speed>.02){ const i0=Math.floor(gix(ax-r)),i1=Math.ceil(gix(ax+r)),j0=Math.floor(gix(az-r)),j1=Math.ceil(gix(az+r)); const sh=Math.min(.6,dt*6);
+      const vx=pen.vel.x*dt*.8, vz=pen.vel.z*dt*.8;
+      for(let j=Math.max(2,j0);j<=Math.min(GN-3,j1);j++) for(let i=Math.max(2,i0);i<=Math.min(GN-3,i1);i++){ const k=j*GN+i, x=-GW/2+i*GC, z=-GW/2+j*GC, d=Math.hypot(x-ax,z-az); if(d>r) continue;
+        const sx=gix(x-vx), sz=gix(z-vz), si=Math.round(sx), sj=Math.round(sz); const up=th[clamp(sj,1,GN-2)*GN+clamp(si,1,GN-2)];
+        const avg=(th[k-1]+th[k+1]+th[k-GN]+th[k+GN])*.25; const w=(1-d/r)*sh; const nt=lerp(th[k],lerp(avg,up,.6),w); overCream=Math.max(overCream,th[k]); th[k]=Math.max(0,nt); }
+      if(overCream>.002){ markDirty(i0,i1,j0,j1); T.cream=Math.min(1,T.cream+dt*speed*.6); } }
+    // 진물이 털에 묻는다
+    const g=absorbGoo(ax,az,cur.y,r*.6,dt*speed*.6); if(g>0) T.stain=Math.min(1,T.stain+g*.003);
+    // 다리: 산 것처럼 움직이지는 않고, 털에 밀려 조금씩 돌아가거나(붙은 다리) 쓸려 간다(떨어진 다리)
+    if(corpse&&speed>.03){ for(const l of corpse.legs){ if(l===held?.leg) continue; l.mesh.getWorldPosition(_v2); const tip=legTipWorld(l,_v); const d=Math.min(Math.hypot(_v2.x-ax,_v2.z-az),Math.hypot(tip.x-ax,tip.z-az)); if(d>r) continue;
+        const k=(1-d/r);
+        if(l.detached){ _v.set(pen.vel.x,0,pen.vel.z).multiplyScalar(dt*.55*k); moveLegWorld(l,_v); }
+        else{ const dirx=tip.x-_v2.x, dirz=tip.z-_v2.z; const cr=(dirx*pen.vel.z-dirz*pen.vel.x)/(Math.hypot(dirx,dirz)||1); l.nudge=clamp(l.nudge-cr*dt*.9*k,-.4,.4); applyLeg(l); }
+        overShell=Math.max(overShell,k); } }
+    // 껍질 위를 지날 때 바삭바삭 잔소리
+    if(corpse){ const hb=surfY(ax,az)-tissueH(ax,az); if(hb>.02&&speed>.05){ overShell=Math.max(overShell,clamp(hb*12)); } }
+  }
+  // 소리: 털 결은 쓸어 가는 만큼. 휴지 위면 종이가, 껍질 위면 바삭한 잔소리가, 연고 위면 찐득한 결이 같이
+  const kind=surfKind(ax,az), sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0;
+  AU.level('brush',sw*(kind==='cream'?.085:.17)); AU.rate('brush',.85+.3*clamp(speed));
+  AU.level('paper',touching&&kind==='paper'?sw*.14:0);
+  AU.level('shell',touching&&overShell>0?sw*.15*clamp(overShell):0);
+  AU.level('smear',touching&&overCream>.004?clamp(speed*.9)*.24:0);
+  if(overShell>0&&speed>.05&&Math.random()<dt*speed*40) SND.crackle(overShell);
+  // 털 빛깔: 진물·연고가 묻은 끝
+  const C=T.tuft.geometry.attributes.color;
+  const key=Math.round(T.stain*40)+Math.round(T.cream*40)*100;
+  if(T._k!==key){ T._k=key; for(let i=0;i<C.count;i++){ const f=sstep(.45,0,T.sv[i]); const st=f*T.stain, cr=f*T.cream*.6; C.setXYZ(i,lerp(lerp(1,.9,st),1.06,cr),lerp(lerp(1,.8,st),1.04,cr),lerp(lerp(1,.6,st),1.0,cr)); } C.needsUpdate=true; }
+}
+
+// ───────── 다리 ─────────
+const _lv=new THREE.Vector3();
+function legTipWorld(l,out){ const s=l.samples; let far=s[0], fx=-1; for(const q of s){ if(q.x>fx){ fx=q.x; far=q; } } return out.copy(far).applyMatrix4(l.mesh.matrixWorld); }
+function applyLeg(l){ l.grp.rotation.set(l.rx,l.ry+l.nudge,l.rz,'YXZ'); l.grp.updateMatrixWorld(true); }
+/** 떨어진 다리를 월드 기준으로 d만큼 옮긴다 */
+function moveLegWorld(l,d){ const S=corpse.S; _lv.copy(d); const q=corpse.group.quaternion.clone().invert(); _lv.applyQuaternion(q).multiplyScalar(1/S); l.grp.position.x+=_lv.x; l.grp.position.z+=_lv.z; l.grp.updateMatrixWorld(true); }
+/** 화면 점 근처의 다리를 고른다 */
+function legAt(sx,sy){
+  if(!corpse) return null;
+  const r=canvas.getBoundingClientRect(), lim=(COARSE?46:30)**2; let best=null, bd=lim;
+  for(const l of corpse.legs){ l.mesh.updateMatrixWorld(true);
+    for(const q of l.samples){ _v.copy(q).applyMatrix4(l.mesh.matrixWorld).project(camera); const x=(_v.x*.5+.5)*r.width, y=(-_v.y*.5+.5)*r.height; const d=(x-sx)**2+(y-sy)**2; if(d<bd){ bd=d; best=l; } } }
+  return best;
+}
+function grabAt(sx,sy,p){
+  const T=TOOLS.tweezer; const l=legAt(sx,sy);
+  if(!l){ T.gripT=1; SND.grip(); setTimeout(()=>{ if(!held) T.gripT=0; },150); return; }
+  T.gripT=1; SND.grip();
+  // 집은 다리를 조금 들어 올린다
+  l.mesh.getWorldPosition(_v2);
+  held={leg:l,lift:0,startRy:l.ry,pick:p.clone()};
+  if(l.detached){ held.off=new THREE.Vector3(_v2.x-p.x,0,_v2.z-p.z); }
+}
+function updateHeld(dt){
+  const h=held; if(!h) return; const l=h.leg, S=corpse.S;
+  h.lift=Math.min(1,h.lift+dt*7);
+  if(l.detached){
+    // 핀셋 끝을 따라간다
+    const wx=cur.x+h.off.x*.6, wz=cur.z+h.off.z*.6; h.off.multiplyScalar(Math.exp(-dt*3));
+    _v.set(wx,0,wz); corpse.group.worldToLocal(_v);
+    const floor=(surfY(wx,wz)-corpse.group.position.y)/S;
+    l.grp.position.x=damp(l.grp.position.x,_v.x,24,dt); l.grp.position.z=damp(l.grp.position.z,_v.z,24,dt);
+    l.grp.position.y=damp(l.grp.position.y,floor+l.L0.y+.07/S*h.lift,20,dt);
+    l.rx=damp(l.rx,0,4,dt);
+    applyLeg(l);
+  }else{
+    // 몸에 붙은 다리: 엉덩이를 축으로 핀셋 쪽을 향해 돌고, 들려 있던 다리가 바닥으로 펴진다
+    l.grp.getWorldPosition(_v2);
+    const dx=cur.x-_v2.x, dz=cur.z-_v2.z;
+    if(Math.hypot(dx,dz)>.04){
+      _v.set(dx,0,dz).applyQuaternion(corpse.group.quaternion.clone().invert());
+      let want=Math.atan2(-_v.z,_v.x), dlt=want-(l.ry+l.nudge); dlt=Math.atan2(Math.sin(dlt),Math.cos(dlt));
+      l.ry+=dlt*(1-Math.exp(-16*dt));
+    }
+    l.rz=damp(l.rz,.03,3.5,dt); l.rx=damp(l.rx,0,3,dt);
+    applyLeg(l);
+  }
+}
+function dropHeld(){
+  const h=held; if(!h) return; held=null;
+  const T=TOOLS.tweezer; T.gripT=0; SND.release();
+  if(h.leg.detached){ h.leg.fall={v:0}; }
+  else setTimeout(rasterAndKeep,30);
+}
+function updateFalling(dt){
+  if(!corpse) return;
+  for(const l of corpse.legs){ const f=l.fall; if(!f) continue; const S=corpse.S;
+    const floor=(surfFloorUnder(l)-corpse.group.position.y)/S+l.L0.y;
+    f.v-=9*dt; l.grp.position.y+=f.v*dt/S;
+    if(l.grp.position.y<=floor){ l.grp.position.y=floor; if(Math.abs(f.v)>.6){ f.v=-f.v*.25; SND.tap(.8); } else { l.fall=null; SND.tap(.4); rasterAndKeep(); } }
+    applyLeg(l); }
+}
+// 다리 밑 바닥 높이 (휴지·시체 몸·연고 가운데 가장 높은 곳)
+function surfFloorUnder(l){ l.grp.getWorldPosition(_v2); return surfY(_v2.x,_v2.z)-.002; }
+// 다리를 옮긴 뒤 바닥 높이맵을 다시 그린다 (연고는 그대로)
+function rasterAndKeep(){ rasterBase(); rebuildOintAll(); }
+// 도구가 닿은 자리: 연고 위 / 시체 몸 위 / 휴지 / 책상 (소리 결을 고를 때 쓴다)
+function surfKind(x,z){
+  const i=Math.round(gix(x)), j=Math.round(gix(z)); if(i<1||j<1||i>GN-2||j>GN-2) return 'desk';
+  const k=j*GN+i; if(th[k]>.004) return 'cream'; if(base[k]-tissueH(x,z)>.012) return 'body';
+  return Math.abs(x)<=TW&&Math.abs(z)<=TW?'paper':'desk';
+}
+
+// ───────── 도구 자리 잡기 (매 장면) ─────────
+const TILT={swab:.78,ointment:.5,brush:.72,tweezer:0};
+function placeTools(dt){
+  const T=TOOLS[tool];
+  if(entering&&tool==='tweezer') return;                 // 들어오는 동안은 핀셋이 시체를 내려놓는 중
+  if(!pen.shown){ T.root.visible=false; return; }
+  T.root.visible=true;
+  // 따라가기: 누르는 동안은 빠르게, 떠 있을 땐 부드럽게
+  const k=1-Math.exp(-(pen.down?38:22)*dt);
+  const px=cur.x, pz=cur.z;
+  cur.x+=(target.x-cur.x)*k; cur.z+=(target.z-cur.z)*k;
+  const ground=surfY(cur.x,cur.z);
+  let lift=pen.down?0:(pen.hover?.07:.16);
+  if(tool==='brush') lift=pen.down?-.13*TOOLS.brush.press:(pen.hover?.05:.12);
+  if(tool==='swab') lift=pen.down?-.012:(pen.hover?.05:.14);
+  if(tool==='ointment') lift=pen.down?.12:.2;
+  if(tool==='tweezer') lift=pen.down?(held?.05:.0):(pen.hover?.06:.15);
+  cur.y=damp(cur.y,ground+lift,pen.down?40:18,dt);
+  pen.vel.set((cur.x-px)/Math.max(dt,1e-3),0,(cur.z-pz)/Math.max(dt,1e-3));
+  T.root.position.copy(cur);
+  if(tool==='tweezer'){
+    const tw=T; tw.grip=damp(tw.grip,held?1:tw.gripT,30,dt); tw.setGrip(tw.grip);
+    // 화면 안쪽을 향해 비스듬히 내려다보며 집는다
+    const yaw=Math.atan2(camera.position.x-cur.x,camera.position.z-cur.z)+.75;
+    T.root.rotation.set(-.62,yaw,0,'YXZ');
+  }else{
+    leanQuat(_q,TILT[tool]); T.root.quaternion.slerp(_q,1-Math.exp(-10*dt));
+  }
+  if(tool==='ointment'){
+    const tube=TOOLS.ointment, sq=squeezeLine?1:0;
+    tube.squeeze=damp(tube.squeeze,sq,14,dt);
+    // 쥐어 짜는 동안 몸통이 눌리고, 많이 쓸수록 뒤쪽부터 납작해진다
+    shapeTube(tube);
+    const rope=tube.rope;
+    if(squeezeLine){ _v.set(0,0,0); tube.root.localToWorld(_v); const ex=squeezeLine.x, ez=squeezeLine.z, ey=surfY(ex,ez); _v2.set(ex,ey,ez);
+      const len=_v.distanceTo(_v2); rope.visible=len>.01; rope.position.copy(_v).add(_v2).multiplyScalar(.5); rope.scale.set(.046*squeezeLine.flow+.008,len,.046*squeezeLine.flow+.008);
+      rope.quaternion.setFromUnitVectors(Y_AXIS,_v2.sub(_v).normalize()); }
+    else rope.visible=false;
+  }
+}
+
+// ───────── 들어올 때: 핀셋이 시체를 휴지 위에 내려놓는다 ─────────
+let entering=null;
+function startEntry(){ entering={t:0,landed:false,opened:false,said:false}; const T=TOOLS.tweezer; T.root.visible=true; T.grip=1; T.setGrip(1); AU.place(0); }
+function updateEntry(dt){
+  const e=entering; if(!e) return; e.t+=dt; const T=TOOLS.tweezer, g=corpse?.group;
+  const DOWN=.5, OPEN=.62, AWAY=1.0;
+  const k=sstep(0,DOWN,e.t);
+  const hY=lerp(.85,0,k);
+  if(g){ g.position.y=corpse.baseY+hY; const sw=(1-k); g.rotation.x=Math.sin(e.t*8)*.08*sw; g.rotation.z=Math.sin(e.t*6.3+1)*.1*sw; g.updateMatrixWorld(true); }
+  if(!e.landed&&e.t>=DOWN){ e.landed=true; SND.place(); if(g){ g.rotation.x=g.rotation.z=0; g.position.y=corpse.baseY; } }
+  if(!e.opened&&e.t>=OPEN){ e.opened=true; SND.release(); }
+  const away=sstep(OPEN,AWAY,e.t);
+  T.grip=e.t<OPEN?1:Math.max(0,1-(e.t-OPEN)*8); T.setGrip(T.grip);
+  const yaw=Math.atan2(camera.position.x,camera.position.z)+.75;
+  T.root.visible=true;                                     // 내려놓는 동안 도구를 바꿔도 핀셋은 끝까지 보인다
+  T.root.position.set(away*.9,.035+hY+away*1.4,away*.4); T.root.rotation.set(-.62,yaw,0,'YXZ');
+  if(e.t>=AWAY){ T.root.visible=tool==='tweezer'&&pen.shown; entering=null; setTimeout(()=>{ if(started&&!paused){ say(); setTimeout(()=>showHint(tool),400); } },180); }
+}
+
+// ───────── 시점 ─────────
+// 휴지 바깥을 한 손가락(마우스 왼쪽)으로 끌면 시체 둘레로 시점이 돌고, 두 손가락을 벌리거나 오므리면(PC는 휠) 다가가고 물러난다.
+// 마우스 오른쪽 버튼으로 끌면 휴지 위에서도 돈다. 손을 떼면 바뿌볼 화면처럼 조금 미끄러지다 멈춘다.
+const LOOK=new THREE.Vector3(0,.03,0);
+const VIEW_EASE=5, VIEW_TURN=.9, PITCH_MIN=.42, PITCH_MAX=1.42, ZOOM_MAX=1.7;
+const view={yaw:0,pitch:1.06,zoom:1,vy:0,vp:0,vz:0,homeR:5,homePitch:1.06,minZoom:.42,away:false};
+const viewPtrs=new Map(); let pinchD=0, viewTouched=false;
+const homeBtn=$('#viewHome');
+function placeCamera(){
+  const r=view.homeR*view.zoom, cp=Math.cos(view.pitch);
+  camera.position.set(LOOK.x+Math.sin(view.yaw)*cp*r,LOOK.y+Math.sin(view.pitch)*r,LOOK.z+Math.cos(view.yaw)*cp*r);
+  camera.lookAt(LOOK);
+  const yw=Math.atan2(Math.sin(view.yaw),Math.cos(view.yaw));
+  const away=Math.abs(yw)>.04||Math.abs(view.pitch-view.homePitch)>.04||Math.abs(Math.log(view.zoom))>.04;
+  if(away!==view.away){ view.away=away; homeBtn.classList.toggle('show',away); }
+}
+function resetView(){ view.yaw=0; view.pitch=view.homePitch; view.zoom=1; view.vy=view.vp=view.vz=0; viewPtrs.clear(); pinchD=0; placeCamera(); }
+function viewToHome(){ view.yaw=Math.atan2(Math.sin(view.yaw),Math.cos(view.yaw)); view.vy=-view.yaw; view.vp=view.homePitch-view.pitch; view.vz=-Math.log(view.zoom); }
+function updateView(dt){
+  if(Math.abs(view.vy)+Math.abs(view.vp)+Math.abs(view.vz)<1e-5) return;
+  const k=1-Math.exp(-VIEW_EASE*dt);
+  view.yaw+=view.vy*k; view.vy-=view.vy*k; view.pitch+=view.vp*k; view.vp-=view.vp*k; view.zoom*=Math.exp(view.vz*k); view.vz-=view.vz*k;
+  if(view.pitch<PITCH_MIN||view.pitch>PITCH_MAX){ view.pitch=clamp(view.pitch,PITCH_MIN,PITCH_MAX); view.vp=0; }
+  if(view.zoom<view.minZoom||view.zoom>ZOOM_MAX){ view.zoom=clamp(view.zoom,view.minZoom,ZOOM_MAX); view.vz=0; }
+  placeCamera();
+}
+const ptrGap=()=>{ const [a,b]=[...viewPtrs.values()]; return Math.hypot(a.x-b.x,a.y-b.y); };
+function viewDown(e){ viewPtrs.set(e.pointerId,{x:e.clientX,y:e.clientY}); pinchD=viewPtrs.size===2?ptrGap():0; try{ canvas.setPointerCapture(e.pointerId); }catch(err){} viewTouched=true; hintEl.classList.remove('show'); }
+function viewMove(e){
+  const v=viewPtrs.get(e.pointerId); if(!v) return;
+  const dx=e.clientX-v.x, dy=e.clientY-v.y; v.x=e.clientX; v.y=e.clientY;
+  if(viewPtrs.size===1){ const H=Math.max(1,canvas.clientHeight); view.vy-=TAU*VIEW_TURN*dx/H; view.vp+=TAU*VIEW_TURN*dy/H; }
+  else if(viewPtrs.size===2){ const d=ptrGap(); if(pinchD>1&&d>1) view.vz+=Math.log(pinchD/d); pinchD=d; }
+}
+function viewUp(id){ if(!viewPtrs.delete(id)) return false; pinchD=viewPtrs.size===2?ptrGap():0; return true; }
+homeBtn.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); viewToHome(); });
+
+// ───────── 입력 ─────────
+function onDown(e){
+  if(!started||paused) return;
+  e.preventDefault(); AU.ensure();
+  viewUp(e.pointerId);
+  if(e.button===2||e.button===1){ viewDown(e); return; }
+  // 두 번째 손가락은 시점 (도구를 쥔 손가락과 같이 쓸 수 있다)
+  if(pen.active||entering){ viewDown(e); return; }
+  const p=pickSurface(e.clientX,e.clientY);
+  if(!inWork(p)){ viewDown(e); return; }
+  pen.active=true; pen.id=e.pointerId; pen.x=e.clientX; pen.y=e.clientY; pen.hover=false;
+  try{ canvas.setPointerCapture(e.pointerId); }catch(err){}
+  toolDown(p);
+}
+function onMove(e){
+  if(viewPtrs.has(e.pointerId)){ e.preventDefault(); viewMove(e); return; }
+  if(pen.active&&e.pointerId===pen.id){ e.preventDefault(); pen.x=e.clientX; pen.y=e.clientY; const p=pickSurface(e.clientX,e.clientY); if(p){ p.x=clamp(p.x,-GW/2+.1,GW/2-.1); p.z=clamp(p.z,-GW/2+.1,GW/2-.1); toolMove(p); } return; }
+  // 마우스는 누르지 않아도 도구가 따라다닌다
+  if(e.pointerType==='mouse'&&!pen.active&&started&&!paused&&!entering){ const p=pickSurface(e.clientX,e.clientY); if(inWork(p)){ if(!pen.shown){ cur.copy(p); cur.y+=.2; } pen.shown=true; pen.hover=true; target.copy(p); } }
+}
+function onUp(e){
+  if(viewUp(e.pointerId)){ try{ if(canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId); }catch(err){} return; }
+  if(pen.active&&e.pointerId===pen.id){ pen.active=false; pen.id=null; toolUp(); try{ if(canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId); }catch(err){} }
+}
+function onWheel(e){ if(!started||paused) return; e.preventDefault(); const d=e.deltaY*(e.deltaMode===1?33:e.deltaMode===2?400:1); view.vz+=clamp(d*.0012,-.35,.35); }
+function cancelAll(){ if(pen.active){ pen.active=false; pen.id=null; toolUp(); } viewPtrs.clear(); pinchD=0; AU.silence(); }
+canvas.addEventListener('pointerdown',onDown,{passive:false});
+canvas.addEventListener('pointermove',onMove,{passive:false});
+window.addEventListener('pointerup',onUp); window.addEventListener('pointercancel',onUp);
+canvas.addEventListener('lostpointercapture',onUp);
+canvas.addEventListener('wheel',onWheel,{passive:false});
+canvas.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'&&!pen.active){ pen.hover=false; } });
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('blur',cancelAll);
+window.addEventListener('keydown',e=>{
+  if(e.code==='Escape'){ e.preventDefault(); if(EMBEDDED) parent.postMessage({type:'care-room-close'},location.origin); return; }
+  const map={Digit1:'swab',Digit2:'ointment',Digit3:'brush',Digit4:'tweezer'}; if(map[e.code]){ e.preventDefault(); setTool(map[e.code]); }
+});
+
+// ───────── 번째 ─────────
+const ordEl=$('#ordinal');
+function showOrdinal(n){ ordEl.textContent=n>0?`${n}번째 간병`:''; ordEl.classList.toggle('show',n>0); }
+
+// ───────── 프레임 ─────────
+let started=false, paused=true, pageHidden=document.hidden, rafId=0, last=performance.now()/1000, viewHintT=0;
+function frame(){
+  rafId=requestAnimationFrame(frame);
+  const t=performance.now()/1000, dt=Math.min(.05,Math.max(.001,t-last)); last=t;
+  if(pageHidden||paused) return;
+  step(dt);
+  renderer.render(scene,camera);
+  drawSay();
+}
+function step(dt){
+  updateView(dt);
+  tickSay(dt);
+  if(entering) updateEntry(dt);
+  placeTools(dt);
+  const speed=pen.vel.length();
+  if(tool==='swab') updateSwab(dt,speed); else { AU.level('swab',0); AU.level('swabWet',0); }
+  if(tool==='brush'&&pen.shown) updateBrush(dt,speed); else { AU.level('brush',0); AU.level('shell',0); AU.level('smear',0); }
+  if(tool!=='swab'&&!(tool==='brush'&&pen.shown)) AU.level('paper',0);
+  if(pen.shown&&!entering){ _v.copy(cur).project(camera); AU.place(clamp(_v.x*.95,-.92,.92)); }      // 도구 소리는 도구가 있는 쪽 귀에서
+  if(tool==='ointment') updateSqueeze(dt);
+  if(tool==='tweezer') updateHeld(dt);
+  updateFalling(dt);
+  if(settle>0&&!squeezeLine&&settleRect){ settle-=dt; slump(...settleRect,1); }
+  flushOint();
+  tFlushT-=dt; if(tDirty&&tFlushT<=0){ tTex.needsUpdate=true; tDirty=false; tFlushT=.08; }
+  if(started&&!viewTouched&&!hintSeen.view){ viewHintT+=dt; if(viewHintT>14&&!hintEl.classList.contains('show')) showHint('view',4.5); }
+}
+function resize(){
+  const w=Math.max(1,innerWidth), h=Math.max(1,innerHeight), dpr=Math.min(devicePixelRatio||1,1.5);
+  renderer.setPixelRatio(dpr); renderer.setSize(w,h,false);
+  camera.aspect=w/h; const portrait=h>=w; camera.fov=portrait?40:32;
+  const half=camera.fov*Math.PI/360, tH=Math.tan(half);
+  // 처음 구도: 세로 화면은 휴지 폭이 거의 꽉 차게(시체가 크게), 가로 화면은 휴지 높이가 들어오게. 위에서 비스듬히 내려다본다
+  const dW=(TISSUE+.3)/(2*tH*camera.aspect), dH=(TISSUE+.75)/(2*tH);
+  view.homeR=Math.max(dW,dH);
+  view.minZoom=.42;
+  camera.updateProjectionMatrix(); placeCamera(); sizeSay();
+}
+window.addEventListener('resize',resize);
+document.addEventListener('visibilitychange',()=>{ pageHidden=document.hidden; last=performance.now()/1000; if(pageHidden){ cancelAll(); AU.stopVoice(); } });
+
+// ───────── 바깥(index.html)에서 쓰는 API ─────────
+function clearScene(){
+  cancelAll(); held=null; squeezeLine=null; settle=0; settleRect=null;
+  th.fill(0); clearCorpse(); paintTissue();
+  const sw=TOOLS.swab; sw.soak=sw.cream=0; sw._s=-1; const br=TOOLS.brush; br.stain=br.cream=0; br._k=-1; br.bend.set(0,0,0); br.bendV.set(0,0,0); TOOLS.ointment.used=0; TOOLS.ointment._k=-1; shapeTube(TOOLS.ointment);
+  bubble.text=''; bubble.box=null; AU.stopVoice();
+}
+/** 시체 하나를 받아 휴지 위에 눕힌다. payload: {corpse, sfx} */
+function enter(payload={}){
+  if(payload.sfx) AU.use(payload.sfx);
+  clearScene();
+  if(payload.corpse){ try{ buildCorpse(payload.corpse); }catch(err){ console.error(err); showErr('시체 모양을 불러오지 못했습니다.'); } }
+  // 진물이 닿아 있던 자리는 휴지에 젖어 배어 있다
+  if(corpse?.gooS){ const S=corpse.gooS; for(let i=0;i<S.wx.length;i+=6){ if(S.wy[i]<TISSUE_Y+.014) stain(S.wx[i],S.wz[i],rand(.04,.08),'210,191,146',.05); } }
+  rasterBase(); rebuildOintAll();
+  showOrdinal(Tally.add('care'));
+  newSessionLines();
+  if(!started) setTool(tool,true);
+  started=true; paused=false;
+  resetView(); pen.shown=false; for(const n in TOOLS) TOOLS[n].root.visible=false;
+  loadVoice();
+  startEntry();
+  wake();
+  return api;
+}
+function sleep(){ paused=true; cancelAll(); AU.stopVoice(); bubble.text=''; drawSay(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } return api; }
+function wake(){ paused=false; last=performance.now()/1000; resize(); if(!rafId) rafId=requestAnimationFrame(frame); return api; }
+function reset(){ clearScene(); started=false; paused=true; return api; }
+const api={enter,sleep,wake,reset,
+  // 점검용
+  _debug:{step(n=1,dt=1/60){ for(let i=0;i<n;i++) step(dt); },render(){ renderer.render(scene,camera); drawSay(); },stopLoop(){ if(rafId){ cancelAnimationFrame(rafId); rafId=0; } },
+    get corpse(){ return corpse; },get pen(){ return pen; },get view(){ return view; },tools:TOOLS,SND,lines:LINES,sfxData:()=>SFXDATA,sfxBuildMs(){ const t=performance.now(); sfxBuilder(); return performance.now()-t; },setTool,toolDown,toolMove,toolUp,pickSurface,say,bubble,th,base,camera,scene,AU,VO,loadVoice,
+    press(x,y){ onDown({pointerId:91,clientX:x,clientY:y,button:0,pointerType:'touch',preventDefault(){}}); },move(x,y){ onMove({pointerId:91,clientX:x,clientY:y,pointerType:'touch',preventDefault(){}}); },release(){ onUp({pointerId:91,type:'pointerup'}); }}};
+window.CareRoom=api;
+resize();
+loadVoice();
+if(document.fonts?.load) document.fonts.load('700 20px Gaegu').catch(()=>{});
+rafId=requestAnimationFrame(frame);
+if(EMBEDDED&&window.parent!==window) parent.postMessage({type:'care-room-ready'},location.origin);
+else setTimeout(()=>{ if(!started) showErr('게임에서 구급상자로 바퀴벌레 시체를 집어 와야 열리는 화면입니다.'); },1500);
+</script>
+</body>
+</html>
