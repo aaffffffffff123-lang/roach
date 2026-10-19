@@ -270,7 +270,7 @@ function buildCorpse(p){
 function prepGoo(){
   const goo=corpse.goo, geo=goo.geometry, P=geo.attributes.position, n=P.count;
   P.setUsage(THREE.DynamicDrawUsage); geo.attributes.color.setUsage(THREE.DynamicDrawUsage);
-  const v=new THREE.Vector3(), wx=new Float32Array(n), wy=new Float32Array(n), wz=new Float32Array(n), cells=new Map(), CS=.08;
+  const v=new THREE.Vector3(), wx=new Float64Array(n), wy=new Float64Array(n), wz=new Float64Array(n), cells=new Map(), CS=.08;
   goo.updateMatrixWorld(true);
   for(let i=0;i<n;i++){ v.fromBufferAttribute(P,i).applyMatrix4(goo.matrixWorld); wx[i]=v.x; wy[i]=v.y; wz[i]=v.z;
     const key=Math.floor(v.x/CS)*4096+Math.floor(v.z/CS); let a=cells.get(key); if(!a){ a=[]; cells.set(key,a); } a.push(i); }
@@ -282,15 +282,19 @@ function absorbGoo(x,z,topY,r,rate){
   const P=corpse.goo.geometry.attributes.position, C=corpse.goo.geometry.attributes.color;
   const i0=Math.floor((x-r)/S.CS), i1=Math.floor((x+r)/S.CS), j0=Math.floor((z-r)/S.CS), j1=Math.floor((z+r)/S.CS);
   const sink=-.006/corpse.S;
-  let got=0;
+  let got=0, bi0=GN,bi1=-1,bj0=GN,bj1=-1;
+  const M=corpse.goo.matrixWorld.elements;
   for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){ const a=S.cells.get(i*4096+j); if(!a) continue;
     for(const k of a){ if(S.w[k]>=1) continue; const d=Math.hypot(S.wx[k]-x,S.wz[k]-z); if(d>r||S.wy[k]>topY+.06) continue;
       const f=1-d/r, w0=S.w[k], w=Math.min(1,w0+rate*f*(1.2-S.w[k]*.4)); S.w[k]=w; got+=w-w0;
       const e=sstep(0,1,w);
       P.array[k*3+1]=lerp(S.p0[k*3+1],sink,e);
+      S.wy[k]=M[1]*P.array[k*3]+M[5]*P.array[k*3+1]+M[9]*P.array[k*3+2]+M[13];
+      const ix=Math.round(gix(S.wx[k])), iz=Math.round(gix(S.wz[k]));
+      if(ix>=0&&iz>=0&&ix<GN&&iz<GN){ bi0=Math.min(bi0,ix); bi1=Math.max(bi1,ix); bj0=Math.min(bj0,iz); bj1=Math.max(bj1,iz); }
       for(let q=0;q<3;q++) C.array[k*3+q]=S.c0[k*3+q]*(1-.22*e);
     } }
-  if(got>0){ P.needsUpdate=true; C.needsUpdate=true; }
+  if(got>0){ P.needsUpdate=true; C.needsUpdate=true; if(bi1>=bi0) queueBase(bi0,bi1,bj0,bj1); }
   return got;
 }
 
@@ -347,24 +351,53 @@ function thAt(x,z){ const i=Math.round(gix(x)), j=Math.round(gix(z)); return (i<
 // 들린 다리 끝까지 바닥으로 치면 브러시 털이 그 높이로 튀고 면봉이 다리 위로 뛰어오르며, 연고도 다리를 따라 솟았다.
 // 가는 것들은 브러시에 밀리고 핀셋으로 집힐 뿐 도구를 받치지 않는다
 const paperG=new Float32Array(GN*GN);                 // 휴지·책상 높이만 (칸마다)
+const shellTop=new Float32Array(GN*GN), surfaceTop=new Float32Array(GN*GN), surfaceFill=new Float32Array(GN*GN), surfaceEro=new Float32Array(GN*GN);
+let baseDirty=null;
+function queueBase(i0,i1,j0,j1){
+  if(!baseDirty) baseDirty=[i0,i1,j0,j1];
+  else{ baseDirty[0]=Math.min(baseDirty[0],i0); baseDirty[1]=Math.max(baseDirty[1],i1); baseDirty[2]=Math.min(baseDirty[2],j0); baseDirty[3]=Math.max(baseDirty[3],j1); }
+}
 function rasterBase(){
+  baseDirty=null; shellTop.fill(-1); surfaceTop.fill(-1); surfaceFill.fill(-1); surfaceEro.fill(-1);
   for(let j=0;j<GN;j++) for(let i=0;i<GN;i++){ const k=j*GN+i; paperG[k]=base[k]=paperY(-GW/2+i*GC,-GW/2+j*GC); }
   if(!corpse) return;
-  const N=GN*GN, top=new Float32Array(N).fill(-1), fill=new Float32Array(N).fill(-1), ero=new Float32Array(N).fill(-1), v=new THREE.Vector3();
+  const v=new THREE.Vector3();
   corpse.group.updateMatrixWorld(true);
   for(const m of [corpse.shell,corpse.goo]){ if(!m) continue; const P=m.geometry.attributes.position, M=m.matrixWorld;
-    for(let i=0;i<P.count;i++){ v.fromBufferAttribute(P,i).applyMatrix4(M); if(v.y<TISSUE_Y) continue; const ix=Math.round(gix(v.x)), iz=Math.round(gix(v.z)); if(ix<0||iz<0||ix>=GN||iz>=GN) continue; const k=iz*GN+ix; if(v.y>top[k]) top[k]=v.y; } }
+    for(let i=0;i<P.count;i++){ v.fromBufferAttribute(P,i).applyMatrix4(M); if(v.y<TISSUE_Y) continue; const ix=Math.round(gix(v.x)), iz=Math.round(gix(v.z)); if(ix<0||iz<0||ix>=GN||iz>=GN) continue; const k=iz*GN+ix; if(v.y>surfaceTop[k]) surfaceTop[k]=v.y; if(m===corpse.shell&&v.y>shellTop[k]) shellTop[k]=v.y; } }
+  rasterSurface(0,GN-1,0,GN-1);
+}
+// 처음 높이를 만들 때와 같은 근방 처리를 바뀐 정점 주변에만 적용한다. 지운 진물의 옛 높이는 남기지 않는다.
+function rasterSurface(i0,i1,j0,j1){
+  const top=surfaceTop, fill=surfaceFill, ero=surfaceEro;
   // 정점 사이 빈칸을 메운다 (3×3), 위로 덮이는 연고가 각지지 않게 살짝 뭉갠다
-  for(let j=1;j<GN-1;j++) for(let i=1;i<GN-1;i++){ const k=j*GN+i; let m=-1, s=0, c=0;
+  for(let j=Math.max(1,j0-1);j<=Math.min(GN-2,j1+1);j++) for(let i=Math.max(1,i0-1);i<=Math.min(GN-2,i1+1);i++){ const k=j*GN+i; let m=-1, s=0, c=0; fill[k]=-1;
     for(let b=-1;b<=1;b++) for(let a=-1;a<=1;a++){ const t=top[k+b*GN+a]; if(t>m) m=t; if(t>0){ s+=t; c++; } }
     if(m>0) fill[k]=c>=5?Math.max(m*.55+s/c*.45,top[k]):m*.8; }
   // 가는 것(더듬이·꼬리털·흩어진 부스러기)은 지우고 넓은 덩어리만 남긴다: 5×5에서 가장 낮은 값 → 다시 5×5에서 가장 높은 값
-  for(let j=2;j<GN-2;j++) for(let i=2;i<GN-2;i++){ const k=j*GN+i; let mn=1e9;
+  for(let j=Math.max(2,j0-3);j<=Math.min(GN-3,j1+3);j++) for(let i=Math.max(2,i0-3);i<=Math.min(GN-3,i1+3);i++){ const k=j*GN+i; let mn=1e9; ero[k]=-1;
     for(let b=-2;b<=2&&mn>0;b++) for(let a=-2;a<=2;a++){ const t=fill[k+b*GN+a]; if(t<mn) mn=t; }
     if(mn>0) ero[k]=mn; }
-  for(let j=2;j<GN-2;j++) for(let i=2;i<GN-2;i++){ const k=j*GN+i; let mx=-1;
+  const a0=Math.max(2,i0-5),a1=Math.min(GN-3,i1+5),b0=Math.max(2,j0-5),b1=Math.min(GN-3,j1+5); let changed=false;
+  for(let j=b0;j<=b1;j++) for(let i=a0;i<=a1;i++){ const k=j*GN+i; let mx=-1;
     for(let b=-2;b<=2;b++) for(let a=-2;a<=2;a++){ const t=ero[k+b*GN+a]; if(t>mx) mx=t; }
-    if(mx>base[k]) base[k]=mx; }
+    const h=Math.max(paperG[k],mx); if(base[k]!==h){ base[k]=h; changed=true; } }
+  return changed?[a0,a1,b0,b1]:null;
+}
+function flushBase(){
+  if(!baseDirty) return;
+  const [i0,i1,j0,j1]=baseDirty; baseDirty=null;
+  for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){ const k=j*GN+i; surfaceTop[k]=shellTop[k]; }
+  const S=corpse?.gooS;
+  if(S){
+    const x0=-GW/2+(i0-.5)*GC,x1=-GW/2+(i1+.5)*GC,z0=-GW/2+(j0-.5)*GC,z1=-GW/2+(j1+.5)*GC;
+    for(let i=Math.floor(x0/S.CS);i<=Math.floor(x1/S.CS);i++) for(let j=Math.floor(z0/S.CS);j<=Math.floor(z1/S.CS);j++){
+      const a=S.cells.get(i*4096+j); if(!a) continue;
+      for(const n of a){ const ix=Math.round(gix(S.wx[n])), iz=Math.round(gix(S.wz[n])); if(ix<i0||ix>i1||iz<j0||iz>j1||S.wy[n]<TISSUE_Y) continue; const k=iz*GN+ix; surfaceTop[k]=Math.max(surfaceTop[k],S.wy[n]); }
+    }
+  }
+  const changed=rasterSurface(i0,i1,j0,j1);
+  if(changed){ markDirty(...changed); creamCut=true; }
 }
 
 // ───────── 연고 ─────────
@@ -500,6 +533,7 @@ function sfxBuilder(){
     swab:   {sec:2.4, layers:[{bed:[['bp',2600,.55],['lp',6500]],amp:1,mod:.12,modHz:[1,3]},{g:'fiber',rate:240,amp:.35,spread:.5}]},
     brush:  {sec:2.4, layers:[{bed:[['hp',1600],['bp',5200,.5]],amp:1,mod:.12,modHz:[1,3]},{g:'bristle',rate:420,amp:.3,spread:.5}]},
     smear:  {sec:2.4, layers:[{bed:[['bp',950,.65],['lp',2400]],amp:1,mod:.2,modHz:[1,4]},{g:'squelch',rate:30,amp:.45,spread:.45}]},
+    wick:   {sec:2.8, layers:[{bed:[['bp',720,.55],['lp',1700]],amp:.45,mod:.18,modHz:[1,2]},{g:'squelch',rate:18,amp:.22,spread:.35},{g:'fiber',rate:28,amp:.08,spread:.3}]},
     ooze:   {sec:2.6, layers:[{g:'squelch',rate:44,amp:1,spread:.5},{g:'bubble',rate:4,amp:.3,spread:.5},{bed:[['lp',520,2.5],['hp',90]],amp:.45,mod:.5,modHz:[1,4]}]},
   };
   function buildTexture(spec,banks){
@@ -626,20 +660,24 @@ class CareAudio{
   burst(name,count,spread,{t=0,gain=.3,rate=1}={}){ for(let i=0;i<count;i++) this.grain(name,{t:t+Math.random()*spread,gain:gain*Math.exp(rand(-.6,.6)),rate}); }
   /** 깔아 둔 결의 크기 (0이면 소리 없음) */
   level(name,v,tc=.04){ if(!this.ctx) return; let L=this.loops[name];
+    if(v<.0001) v=0;
     if(!L){ if(v<=.001) return; const B=this.tex?.[name]; if(!B) return; const c=this.ctx, s=c.createBufferSource(); s.buffer=B; s.loop=true; const g=c.createGain(); g.gain.value=0; s.connect(g); g.connect(this.sfxIn); s.start(c.currentTime,Math.random()*B.duration); L=this.loops[name]={src:s,gain:g,v:0,r:1}; }
-    if(Math.abs(v-L.v)<.002) return; L.v=v; L.gain.gain.setTargetAtTime(v,this.ctx.currentTime,tc); }
+    if(v===L.v||(v>0&&Math.abs(v-L.v)<.002)) return; L.v=v; L.gain.gain.setTargetAtTime(v,this.ctx.currentTime,tc); }
   /** 결을 빠르게/느리게 (빨리 문지르면 잔소리도 촘촘해진다) */
   rate(name,r){ const L=this.loops[name]; if(!L||Math.abs(L.r-r)<.01) return; L.r=r; L.src.playbackRate.setTargetAtTime(r,this.ctx.currentTime,.08); }
   silence(){ if(!this.ctx) return; for(const k in this.loops){ const L=this.loops[k]; L.v=0; L.gain.gain.setTargetAtTime(0,this.ctx.currentTime,.03); } }
   /** 목소리: pos는 귀 자리(-1~1) 하나, 또는 [[초,자리],…]로 말하는 동안 옮겨 간다. 새 말이 오면 앞 말은 바로 끊는다 */
   voice(buf,start,dur,pos=0){
-    const c=this.ctx; if(!c||!buf) return; this.stopVoice();
+    const c=this.ensure(); if(!c||c.state!=='running'||!buf) return false; this.stopVoice();
     const s=c.createBufferSource();
-    try{ s.buffer=buf; }catch(e){ redecodeVoice(c); return; }          // 다른 창에서 푼 소리를 못 받는 기기면 이 장치로 다시 푼다
+    try{ s.buffer=buf; }catch(e){ redecodeVoice(c); return false; }    // 다른 창에서 푼 소리를 못 받는 기기면 이 장치로 다시 푼다
     const ear=this.ear(this.voiceOut), t0=c.currentTime+.012;
     if(Array.isArray(pos)){ ear.set(pos[0][1],t0,.004); for(const [tt,p] of pos) ear.set(p,t0+tt/VOICE_RATE,.05); } else ear.set(pos,t0,.004);
-    const g=c.createGain(); g.gain.value=1; s.connect(g); g.connect(ear.inp); s.start(t0,Math.max(0,(start-.01)/VOICE_RATE),(dur+.06)/VOICE_RATE);
+    const g=c.createGain(); g.gain.value=1; s.connect(g); g.connect(ear.inp);
+    try{ s.start(t0,Math.max(0,(start-.01)/VOICE_RATE),(dur+.06)/VOICE_RATE); }
+    catch(e){ try{ s.disconnect(); g.disconnect(); }catch(err){} return false; }
     this.cur={s,g}; s.onended=()=>{ if(this.cur&&this.cur.s===s) this.cur=null; try{ g.disconnect(); }catch(e){} };
+    return true;
   }
   /** 제목 카드 음악 (가운데, 귀 자리 없이) */
   playJingle(){ const c=this.ctx; if(!c||!this.jbuf) return; this.stopJingle(0); const s=c.createBufferSource(); s.buffer=this.jbuf; const g=c.createGain(); g.gain.value=JINGLE_GAIN; s.connect(g); g.connect(c.destination); s.start(c.currentTime+.015); this.jsrc={s,g}; s.onended=()=>{ if(this.jsrc&&this.jsrc.s===s) this.jsrc=null; }; }
@@ -687,7 +725,7 @@ function loadVoice(){
   }).then(b=>{ VO.buf=b; return b; }).catch(err=>{ console.warn(err); VO.buf=null; VO.loading=null; });
   return VO.loading;
 }
-function redecodeVoice(ctx){ if(!VO.raw||VO.redo) return; VO.redo=true; VO.buf=null; decodeWith(ctx,VO.raw.slice(0)).then(b=>{ VO.buf=b; }).catch(err=>console.warn(err)); }
+function redecodeVoice(ctx){ if(!VO.raw||VO.redo) return; VO.redo=true; VO.buf=null; decodeWith(ctx,VO.raw.slice(0)).then(b=>{ VO.buf=b; }).catch(err=>{ console.warn(err); VO.loading=null; }).finally(()=>{ VO.redo=false; }); }
 // 위로의 말은 섞은 순서대로 돌리고, 「바퀴벌레… A~ S~ M~ R~」는 간병마다 4~9번째 말 사이에 한 번 끼어든다 (오래 하면 한참 뒤에 또)
 const GAG=LINES.find(r=>r.length>3)||null, PLAIN=LINES.filter(r=>r.length<=3);
 let bag=[], lastLine=-1, sayN=0, gagAt=6, voiceSide=Math.random()<.5?-1:1;
@@ -698,25 +736,39 @@ function nextLine(){
 function newSessionLines(){ sayN=0; gagAt=4+Math.floor(Math.random()*6); }
 const bubble={text:'',t:0,dur:0,speed:1,alpha:0,a:0,box:null,key:0,side:0,sched:null};
 function say(){
-  sayN++;
-  let row;
-  if(GAG&&sayN>=gagAt){ row=GAG; gagAt=sayN+24+Math.floor(Math.random()*16); } else row=nextLine();
+  if(!VO.buf){ loadVoice(); return false; }                  // 음성이 준비되기 전에는 말풍선도 순서도 소모하지 않는다
+  const nextN=sayN+1, isGag=GAG&&nextN>=gagAt, prevLine=lastLine;
+  const row=isGag?GAG:nextLine();
   const [text,start,dur,pans]=row, playDur=dur/VOICE_RATE;
-  talkLeft=playDur+rand(2.6,4.0);                                // 이 말이 끝나고 잠깐 쉰 뒤에야 다음 말
   // 귀: 보통 말은 왼쪽·오른쪽 귀를 번갈아 가며, 개그 줄은 글자마다 옮겨 다니며
-  let pos; if(pans){ pos=pans; bubble.side=0; } else { voiceSide=-voiceSide; pos=voiceSide*rand(.6,.88); bubble.side=voiceSide; }
-  if(VO.buf) AU.voice(VO.buf,start,dur,pos); else loadVoice();
+  const nextSide=-voiceSide, pos=pans||nextSide*rand(.6,.88);
+  let played=false;
+  try{ played=AU.voice(VO.buf,start,dur,pos); }catch(err){ console.warn(err); }
+  if(!played){
+    if(!isGag){ bag.push(PLAIN.indexOf(row)); lastLine=prevLine; }
+    return false;
+  }
+  sayN=nextN;
+  if(isGag) gagAt=sayN+24+Math.floor(Math.random()*16);
+  if(!pans) voiceSide=nextSide;
+  bubble.side=pans?0:voiceSide;
+  talkLeft=playDur+(Math.random()<.18?rand(8,12):rand(4,7));   // 말 뒤에 여유를 두고, 가끔은 도구 소리만 더 오래 이어 간다
   bubble.text=text; bubble.t=0; bubble.dur=playDur; bubble.speed=typeTime(text)/Math.max(.3,playDur*.8); bubble.alpha=1; bubble.a=0; bubble.box=null; bubble.key++;
   bubble.sched=pans?[[0,1],[.12,2],[.24,3],[.36,4],[.62,5],[pans[1][0],7],[pans[2][0],9],[pans[3][0],11],[pans[4][0],13]].map(([t,n])=>[t/VOICE_RATE,n]):null;   // 글자가 소리에 맞춰 찍힌다
+  return true;
 }
 const schedReveal=(sc,t)=>{ let n=0; for(const [tt,c] of sc){ if(tt>t) break; n=c; } return n; };
 // 도구를 쓰고 있는 동안(누르고 있거나 방금까지 움직였으면) 한마디가 끝날 때마다 다음 한마디가 이어진다. 말하는 중에 다시 눌러도 끊지 않는다
-let talkLeft=0, lastAct=-9, clock=0;
+let talkLeft=0, lastAct=-Infinity, clock=0, talkAfter=0;
 function markAct(){ lastAct=clock; }
+function resetTalk(){
+  AU.stopVoice(); bubble.text=''; bubble.box=null; bubble.sched=null; bubble.t=0; bubble.alpha=0;
+  talkLeft=0; lastAct=-Infinity; drawSay();
+}
 function updateTalk(dt){
   clock+=dt; talkLeft-=dt;
   if(!started||paused||entering||titleUp) return;
-  if((pen.down||clock-lastAct<.5)&&talkLeft<=0) say();
+  if(clock>=talkAfter&&(pen.down||clock-lastAct<.5)&&talkLeft<=0) say();
 }
 let sayW=0,sayH=0,sayDpr=1,sayDrawn=false;
 function sizeSay(){ sayDpr=Math.min(devicePixelRatio||1,2); sayW=innerWidth; sayH=innerHeight; sayCv.width=Math.round(sayW*sayDpr); sayCv.height=Math.round(sayH*sayDpr); sayDrawn=true; }
@@ -762,7 +814,7 @@ function makeSwab(){
   const tip=new THREE.Mesh(head(1),cotton); tip.position.y=.19; tip.castShadow=true; root.add(tip);
   const top=new THREE.Mesh(head(7),cotton.clone()); top.position.y=.2+SL+.02; root.add(top);
   root.visible=false; scene.add(root);
-  return {root,tip,soak:0,cream:0,lowered:0};
+  return {root,tip,soak:0,cream:0,absorb:0,lowered:0};
 }
 // 연고 튜브: 흰 알루미늄 튜브, 청록 띠. 뒤끝은 납작하게 눌려 이음매가 된다. 원점 = 노즐 끝
 function makeTube(){
@@ -880,7 +932,7 @@ const HINTS={
   ointment:'누르고 있는 동안 짜진다. 끌면 따라 나온다.',
   brush:'누른 채 끌어서 쓰다듬는다.',
   tweezer:'다리를 집어 옮긴다. 몸에 붙은 다리는 펴진다.',
-  view:'휴지 바깥을 끌면 시점이 돌아가고, 두 손가락이나 휠로 확대한다.',
+  view:'휴지 바깥을 끌면 시점 회전. 바깥에 두 손가락을 대고 벌리거나 휠로 확대한다.',
 };
 const hintSeen={}; let hintTimer=0, hintDue=null;
 function showDueHint(){ if(started&&!paused&&!titleUp&&hintDue){ showHint(hintDue); hintDue=null; } }
@@ -888,6 +940,7 @@ const hintEl=$('#hint');
 function showHint(key,sec=3.6){ if(hintSeen[key]) return; hintSeen[key]=true; hintEl.textContent=HINTS[key]; hintEl.classList.add('show'); clearTimeout(hintTimer); hintTimer=setTimeout(()=>hintEl.classList.remove('show'),sec*1000); }
 function setTool(k,silent){
   if(!TOOLS[k]) return;
+  cancelAll();
   if(held) dropHeld();
   if(squeezeLine) endSqueeze();
   tool=k;
@@ -965,13 +1018,17 @@ function updateSwab(dt,speed){
     if(got>0){ T.soak=Math.min(1,T.soak+got*.004); stain(p.x+rand(-.02,.02),p.z+rand(-.02,.02),.05+rand(.03),'206,186,138',Math.min(.16,.02+got*.003)); }
     else if(T.soak>.05&&speed>.15&&Math.random()<dt*20) stain(p.x,p.z,.035,'214,197,155',.025*T.soak);   // 묻은 솜으로 문지르면 옅게 번진다
   }
-  // 소리: 솜이 스치는 조용한 슥슥, 문지르는 만큼. 연고 위를 지나거나 솜에 연고가 묻어 있으면 찐득한 소리가 섞인다
-  const mv=pen.down?clamp(speed*1.2):0, wet=pen.down?clamp(Math.max(thAt(p.x,p.z)/.012,T.cream*.55)):0;
+  // 가만히 찍어도 실제로 빨아들이는 동안은 작은 젖은 솜 소리. 흡수가 끝나면 다시 고요해진다.
+  T.absorb=damp(T.absorb,pen.down?clamp(got/(Math.max(dt,.001)*80)):0,18,dt);
+  AU.level('wick',.03*T.absorb); AU.rate('wick',.85+.1*T.absorb);
+  // 마른 솜 · 진물에 젖은 솜 · 연고가 묻은 솜은 문지를 때도 결이 달라진다.
+  const mv=pen.down?clamp(speed*1.2):0, wet=pen.down?clamp(Math.max(thAt(p.x,p.z)/.012,T.cream*.55,T.soak*.65,T.absorb*.35)):0;
   AU.level('swab',.065*mv*(1-.65*wet)); AU.rate('swab',.9+.2*mv);
   AU.level('smear',.07*mv*wet); AU.rate('smear',.9+.15*mv);
   // 솜 빛깔: 진물이 밸수록 크림색 → 누런빛, 연고는 하얗고 번들
   const C=T.tip.geometry.attributes.color, P=T.tip.geometry.attributes.position;
-  if(T._s!==T.soak){ T._s=T.soak; for(let i=0;i<C.count;i++){ const yb=P.getY(i); const low=sstep(.05,-.17,yb)*T.soak; C.setXYZ(i,lerp(1,.86,low),lerp(1,.76,low),lerp(1,.55,low)); } C.needsUpdate=true; }
+  const tintKey=Math.round(T.soak*80)+Math.round(T.cream*80)*100;
+  if(T._s!==tintKey){ T._s=tintKey; for(let i=0;i<C.count;i++){ const f=sstep(.05,-.17,P.getY(i)), st=f*T.soak, cr=f*T.cream*.6; C.setXYZ(i,lerp(lerp(1,.86,st),1.04,cr),lerp(lerp(1,.76,st),1.03,cr),lerp(lerp(1,.55,st),1,cr)); } C.needsUpdate=true; }
 }
 
 // 브러시: 털 휘기 · 눌러 퍼지기 · 다리 쓸기 · 연고 펴 바르기
@@ -1004,12 +1061,13 @@ function updateBrush(dt,speed){
   if(touching){
     const r=T.TR*1.2;
     // 연고: 쓸고 가는 방향으로 밀리며 펴진다
-    if(speed>.02){ const i0=Math.floor(gix(ax-r)),i1=Math.ceil(gix(ax+r)),j0=Math.floor(gix(az-r)),j1=Math.ceil(gix(az+r)); const sh=Math.min(.6,dt*6);
+    if(speed>.02){ const i0=Math.floor(gix(ax-r)),i1=Math.ceil(gix(ax+r)),j0=Math.floor(gix(az-r)),j1=Math.ceil(gix(az+r)); const sh=Math.min(.6,dt*6); let changed=false;
       const vx=pen.vel.x*dt*.8, vz=pen.vel.z*dt*.8;
       for(let j=Math.max(2,j0);j<=Math.min(GN-3,j1);j++) for(let i=Math.max(2,i0);i<=Math.min(GN-3,i1);i++){ const k=j*GN+i, x=-GW/2+i*GC, z=-GW/2+j*GC, d=Math.hypot(x-ax,z-az); if(d>r) continue;
         const sx=gix(x-vx), sz=gix(z-vz), si=Math.round(sx), sj=Math.round(sz); const up=th[clamp(sj,1,GN-2)*GN+clamp(si,1,GN-2)];
-        const avg=(th[k-1]+th[k+1]+th[k-GN]+th[k+GN])*.25; const w=(1-d/r)*sh; const nt=lerp(th[k],lerp(avg,up,.6),w); overCream=Math.max(overCream,th[k]); th[k]=Math.max(0,nt); }
-      if(overCream>.002){ markDirty(i0,i1,j0,j1); creamCut=true; T.cream=Math.min(1,T.cream+dt*speed*.6); } }
+        const avg=(th[k-1]+th[k+1]+th[k-GN]+th[k+GN])*.25; const w=(1-d/r)*sh; const nt=Math.fround(Math.max(0,lerp(th[k],lerp(avg,up,.6),w))); overCream=Math.max(overCream,th[k]); if(nt!==th[k]){ th[k]=nt; changed=true; } }
+      if(changed){ markDirty(i0,i1,j0,j1); creamCut=true; }
+      if(overCream>.002) T.cream=Math.min(1,T.cream+dt*speed*.6); }
     // 진물이 털에 묻는다
     const g=absorbGoo(ax,az,cur.y,r*.6,dt*speed*.6); if(g>0) T.stain=Math.min(1,T.stain+g*.003);
     // 다리: 산 것처럼 움직이지는 않고, 털에 밀려 조금씩 돌아가거나(붙은 다리) 쓸려 간다(떨어진 다리)
@@ -1020,7 +1078,7 @@ function updateBrush(dt,speed){
         else{ const dirx=tip.x-_v2.x, dirz=tip.z-_v2.z; const cr=(dirx*pen.vel.z-dirz*pen.vel.x)/(Math.hypot(dirx,dirz)||1); l.nudge=clamp(l.nudge-cr*dt*.9*k,-.4,.4); applyLeg(l); } } }
   }
   // 소리: 털이 쓸리는 조용한 쓱쓱, 쓸어 가는 만큼. 연고를 펴 바르거나 털에 연고가 묻어 있으면 찐득한 소리가 섞인다
-  const sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0, wet=touching?clamp(Math.max(overCream/.01,T.cream*.55)):0;
+  const sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0, wet=touching?clamp(Math.max(overCream/.01,T.cream*.55,T.stain*.6)):0;
   AU.level('brush',sw*.06*(1-.65*wet)); AU.rate('brush',.9+.2*clamp(speed));
   AU.level('smear',sw*.065*wet); AU.rate('smear',.9+.15*clamp(speed));
   // 털 빛깔: 진물·연고가 묻은 끝
@@ -1060,6 +1118,7 @@ function grabAt(sx,sy,p){
   const T=TOOLS.tweezer; const l=legAt(sx,sy);
   if(!l){ T.gripT=1; SND.grip(); setTimeout(()=>{ if(!held) T.gripT=0; },150); return; }
   T.gripT=1; SND.grip();
+  l.fall=null;                                            // 떨어지는 중 다시 집으면 낙하를 멈춘다
   // 집은 다리를 조금 들어 올린다
   l.mesh.getWorldPosition(_v2);
   held={leg:l,lift:0,startRy:l.ry,pick:p.clone()}; l.top=true;
@@ -1097,7 +1156,7 @@ function dropHeld(){
 }
 function updateFalling(dt){
   if(!corpse) return;
-  for(const l of corpse.legs){ const f=l.fall; if(!f) continue; const S=corpse.S;
+  for(const l of corpse.legs){ const f=l.fall; if(!f||l===held?.leg) continue; const S=corpse.S;
     const floor=(surfFloorUnder(l)-corpse.group.position.y)/S+l.L0.y;
     f.v-=9*dt; l.grp.position.y+=f.v*dt/S;
     if(l.grp.position.y<=floor){ l.grp.position.y=floor; if(Math.abs(f.v)>.6){ f.v=-f.v*.25; SND.tap(.8); } else { l.fall=null; SND.tap(.4); } }
@@ -1220,19 +1279,19 @@ function titleSvg(seed){
 }
 
 const titleEl=$('#title');
-let titleUp=false, titleT=0, titleStamped=false;
+let titleUp=false, titleT=0, titleStamped=false, titleSeen=false;
 /** 시체를 다 눕히면 뜬다. 글자가 하나씩 톡톡 올라오고 우표가 탁 붙은 뒤, 3.4초가 지나거나 아무 데나 누르면 걷힌다 */
 function showTitle(){
   titleEl.innerHTML=titleSvg(1+((Math.random()*2147483645)|0));
   titleEl.classList.remove('out'); titleEl.classList.add('show'); titleEl.setAttribute('aria-hidden','false');
-  titleUp=true; titleT=0; titleStamped=false;
+  titleUp=true; titleT=0; titleStamped=false; titleSeen=true;
   AU.playJingle();
 }
 function hideTitle(now){
   if(!titleUp&&!now) return;
   const was=titleUp; titleUp=false; titleEl.setAttribute('aria-hidden','true');
+  if(was||AU.jsrc){ AU.stopJingle(now?.05:.25); talkAfter=Math.max(talkAfter,clock+.35); }
   if(now){ AU.stopJingle(.05); titleEl.classList.remove('show','out'); titleEl.innerHTML=''; return; }
-  if(was&&titleT<1.2) AU.stopJingle(.25);                        // 우표가 붙기 전에 걷으면 음악도 같이 줄인다 (붙은 뒤면 끝까지 울리게 둔다)
   titleEl.classList.add('out');
   setTimeout(()=>{ if(!titleUp){ titleEl.classList.remove('show','out'); titleEl.innerHTML=''; } },380);
   if(was&&hintDue) setTimeout(showDueHint,450);                // 카드가 걷히면 도구 안내
@@ -1260,7 +1319,7 @@ function updateEntry(dt){
   const yaw=Math.atan2(camera.position.x,camera.position.z)+.75;
   T.root.visible=true;                                     // 내려놓는 동안 도구를 바꿔도 핀셋은 끝까지 보인다
   T.root.position.set(away*.9,.035+hY+away*1.4,away*.4); T.root.rotation.set(-.62,yaw,0,'YXZ');
-  if(e.t>=AWAY){ T.root.visible=tool==='tweezer'&&pen.shown; entering=null; hintDue=tool; showTitle(); }   // 다 눕히면 제목 카드 → 카드가 걷히면 도구 안내
+  if(e.t>=AWAY){ T.root.visible=tool==='tweezer'&&pen.shown; entering=null; hintDue=tool; if(!titleSeen) showTitle(); else showDueHint(); }   // 첫 입장만 제목 카드, 다음 시체부터는 내려놓고 바로 이어 간다
 }
 
 // ───────── 시점 ─────────
@@ -1325,7 +1384,7 @@ function onUp(e){
   if(pen.active&&e.pointerId===pen.id){ pen.active=false; pen.id=null; toolUp(); try{ if(canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId); }catch(err){} }
 }
 function onWheel(e){ if(!started||paused) return; e.preventDefault(); const d=e.deltaY*(e.deltaMode===1?33:e.deltaMode===2?400:1); view.vz+=clamp(d*.0012,-.35,.35); }
-function cancelAll(){ if(pen.active){ pen.active=false; pen.id=null; toolUp(); } viewPtrs.clear(); pinchD=0; AU.silence(); }
+function cancelAll(){ if(pen.active){ pen.active=false; pen.id=null; toolUp(); } pen.down=false; pen.vel.set(0,0,0); TOOLS.swab.absorb=0; viewPtrs.clear(); pinchD=0; AU.silence(); }
 canvas.addEventListener('pointerdown',onDown,{passive:false});
 canvas.addEventListener('pointermove',onMove,{passive:false});
 window.addEventListener('pointerup',onUp); window.addEventListener('pointercancel',onUp);
@@ -1333,7 +1392,7 @@ canvas.addEventListener('lostpointercapture',onUp);
 canvas.addEventListener('wheel',onWheel,{passive:false});
 canvas.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'&&!pen.active){ pen.hover=false; } });
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
-window.addEventListener('blur',cancelAll);
+window.addEventListener('blur',()=>{ cancelAll(); resetTalk(); });
 window.addEventListener('keydown',e=>{
   if(e.code==='Escape'){ e.preventDefault(); if(EMBEDDED) parent.postMessage({type:'care-room-close'},location.origin); return; }
   const map={Digit1:'swab',Digit2:'ointment',Digit3:'brush',Digit4:'tweezer'}; if(map[e.code]){ e.preventDefault(); setTool(map[e.code]); }
@@ -1364,7 +1423,7 @@ function step(dt){
   if(entering) updateEntry(dt);
   placeTools(dt);
   const speed=pen.vel.length();
-  if(tool==='swab') updateSwab(dt,speed); else AU.level('swab',0);
+  if(tool==='swab') updateSwab(dt,speed); else { AU.level('swab',0); AU.level('wick',0); }
   if(tool==='brush'&&pen.shown) updateBrush(dt,speed); else AU.level('brush',0);
   if(tool!=='swab'&&!(tool==='brush'&&pen.shown)) AU.level('smear',0);
   if(pen.shown&&!entering){ _v.copy(cur).project(camera); AU.place(clamp(_v.x*.95,-.92,.92)); }      // 도구 소리는 도구가 있는 쪽 귀에서
@@ -1372,7 +1431,7 @@ function step(dt){
   if(tool==='tweezer') updateHeld(dt);
   updateFalling(dt);
   if(settle>0&&!squeezeLine&&settleRect){ settle-=dt; slump(...settleRect,1); }
-  flushOint(); resettleLegs();
+  flushBase(); flushOint(); resettleLegs();
   tFlushT-=dt; if(tDirty&&tFlushT<=0){ tTex.needsUpdate=true; tDirty=false; tFlushT=.08; }
   if(started&&!viewTouched&&!hintSeen.view){ viewHintT+=dt; if(viewHintT>14&&!hintEl.classList.contains('show')) showHint('view',4.5); }
 }
@@ -1388,14 +1447,14 @@ function resize(){
   camera.updateProjectionMatrix(); placeCamera(); sizeSay();
 }
 window.addEventListener('resize',resize);
-document.addEventListener('visibilitychange',()=>{ pageHidden=document.hidden; last=performance.now()/1000; if(pageHidden){ cancelAll(); AU.stopVoice(); } });
+document.addEventListener('visibilitychange',()=>{ pageHidden=document.hidden; last=performance.now()/1000; if(pageHidden){ cancelAll(); hideTitle(true); resetTalk(); } });
 
 // ───────── 바깥(index.html)에서 쓰는 API ─────────
 function clearScene(){
   cancelAll(); held=null; squeezeLine=null; settle=0; settleRect=null;
   th.fill(0); clearCorpse(); paintTissue();
-  const sw=TOOLS.swab; sw.soak=sw.cream=0; sw._s=-1; const br=TOOLS.brush; br.stain=br.cream=0; br._k=-1; br.bend.set(0,0,0); br.bendV.set(0,0,0); TOOLS.ointment.used=0; TOOLS.ointment._k=-1; shapeTube(TOOLS.ointment);
-  bubble.text=''; bubble.box=null; AU.stopVoice();
+  const sw=TOOLS.swab; sw.soak=sw.cream=sw.absorb=0; sw._s=-1; const br=TOOLS.brush; br.stain=br.cream=0; br._k=-1; br.bend.set(0,0,0); br.bendV.set(0,0,0); TOOLS.ointment.used=0; TOOLS.ointment._k=-1; shapeTube(TOOLS.ointment);
+  resetTalk();
 }
 /** 시체 하나를 받아 휴지 위에 눕힌다. payload: {corpse, sfx} */
 function enter(payload={}){
@@ -1407,7 +1466,7 @@ function enter(payload={}){
   if(corpse?.gooS){ const S=corpse.gooS; for(let i=0;i<S.wx.length;i+=6){ if(S.wy[i]<TISSUE_Y+.014) stain(S.wx[i],S.wz[i],rand(.04,.08),'210,191,146',.05); } }
   rasterBase(); rebuildOintAll();
   showOrdinal(addCareCount());
-  newSessionLines(); talkLeft=0; lastAct=-9;
+  newSessionLines();
   if(!started) setTool(tool,true);
   started=true; paused=false;
   resetView(); pen.shown=false; for(const n in TOOLS) TOOLS[n].root.visible=false;
@@ -1416,8 +1475,8 @@ function enter(payload={}){
   wake();
   return api;
 }
-function sleep(){ paused=true; hideTitle(true); cancelAll(); AU.stopVoice(); bubble.text=''; drawSay(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } return api; }
-function wake(){ paused=false; last=performance.now()/1000; resize(); if(!rafId) rafId=requestAnimationFrame(frame); if(hintDue) setTimeout(showDueHint,500); return api; }
+function sleep(){ paused=true; hideTitle(true); cancelAll(); resetTalk(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } return api; }
+function wake(){ resetTalk(); paused=false; pageHidden=document.hidden; last=performance.now()/1000; resize(); if(!rafId) rafId=requestAnimationFrame(frame); if(hintDue) setTimeout(showDueHint,500); return api; }
 function reset(){ clearScene(); started=false; paused=true; return api; }
 const api={enter,sleep,wake,reset,
   // 점검용
