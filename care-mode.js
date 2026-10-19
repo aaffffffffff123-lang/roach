@@ -64,8 +64,8 @@ export function createCareMode({gameFrame,isBlocked=()=>false,onEnter=null}){
   // ───────── 족집게 모델 (게임 창 three.js로 만든다) ─────────
   function makeRig(){
     const {THREE}=env;
-    const steel=new THREE.MeshStandardMaterial({color:0xc6cbcf,roughness:.28,metalness:.5});
-    const dark=new THREE.MeshStandardMaterial({color:0x7d8388,roughness:.28,metalness:.5});
+    const steel=new THREE.MeshStandardMaterial({color:0xf58cb3,roughness:.34,metalness:.15});
+    const dark=new THREE.MeshStandardMaterial({color:0xd8578b,roughness:.34,metalness:.15});
     const root=new THREE.Group(); root.name='care-tweezer'; root.rotation.order='YXZ';
     const arms=[];
     for(const side of [-1,1]){
