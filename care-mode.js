@@ -10,7 +10,7 @@ const ease=t=>t*t*(3-2*t);
 // 0 ~ .14초: 집게가 벌어진 채 내려온다 / .14 ~ .24초: 딸깍 집는다 / .24 ~ .86초: 바닥에서 떼어 들어 올린다
 const CAP_DOWN=.14, CAP_GRIP=.24, CAP_LIFT=.86;
 
-export function createCareMode({gameFrame,isBlocked=()=>false}){
+export function createCareMode({gameFrame,isBlocked=()=>false,onEnter=null}){
   let env=null;               // {G,gameWindow,THREE,GSFX}
   let wrapped=null;           // 이 게임 창에 걸어 둔 래퍼 (중복 방지)
   let rig=null;               // 족집게 (게임 장면 안)
@@ -42,6 +42,8 @@ export function createCareMode({gameFrame,isBlocked=()=>false}){
       else if(!open){ try{ room()?.sleep?.(); }catch(err){} }
     }
     if(e.data?.type==='care-room-close') close();
+    // 핀셋이 시체를 휴지에 다 눕히면: index.html이 편지(간병의 효과)를 띄운다. 편지가 떠 있는 동안 간병 화면은 잠깐 재워 둔다
+    if(e.data?.type==='care-room-entered'&&open) onEnter?.({pause:()=>{ try{ room()?.sleep?.(); }catch(err){} },resume:()=>{ if(open) try{ room()?.wake?.(); }catch(err){} }});
   });
   const room=()=>{ try{ return frame.contentWindow?.CareRoom||null; }catch(err){ return null; } };
   // 처음 구급상자를 고를 때 한 번만 불러 두고 재운다 (집을 때마다 불러오면 로딩 공백이 생긴다)

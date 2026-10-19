@@ -26,6 +26,16 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#efe6d6;tou
 #ordinal.show{opacity:1}
 #err{position:fixed;z-index:6;inset:auto 16px calc(18px + env(safe-area-inset-bottom));display:none;padding:12px 15px;border-radius:14px;background:rgba(83,25,18,.94);color:#f8f0dc;font:700 13px/1.5 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;text-align:center}
 #err.show{display:block}
+#title{position:fixed;inset:0;z-index:8;display:grid;place-items:center;padding:16px;background:rgba(255,238,200,.42);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .25s ease-out,visibility 0s linear .25s}
+#title.show{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .25s ease-out}
+#title.show.out{opacity:0;pointer-events:none;transition:opacity .35s ease-in}
+#title svg{display:block;width:min(94vw,680px);max-height:80vh;height:auto;overflow:visible}
+#title .tP{transform-box:fill-box;transform-origin:center;animation:tPop .5s cubic-bezier(.3,1.6,.5,1) both;animation-delay:calc(.12s + var(--i)*.075s)}
+#title .tB{transform-box:fill-box;transform-origin:center;animation:tBob 2s ease-in-out infinite;animation-delay:calc(var(--i)*.13s)}
+#title .tS{transform-box:fill-box;transform-origin:center;animation:tSlap .42s cubic-bezier(.2,1.5,.45,1) both;animation-delay:.95s}
+@keyframes tPop{0%{transform:scale(.2);opacity:0}60%{opacity:1}100%{transform:none;opacity:1}}
+@keyframes tBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
+@keyframes tSlap{0%{transform:scale(1.9) rotate(-16deg);opacity:0}55%{opacity:1}100%{transform:none;opacity:1}}
 @media(max-width:400px){.tool{min-width:58px;height:46px;font-size:12px}}
 @media(max-height:560px){.tool{height:42px}#toolbar{bottom:calc(6px + env(safe-area-inset-bottom))}#viewHome{bottom:calc(62px + env(safe-area-inset-bottom))}}
 </style>
@@ -44,13 +54,13 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#efe6d6;tou
 <div id="hint"></div>
 <div id="ordinal"></div>
 <div id="err" role="alert"></div>
+<div id="title" aria-hidden="true"></div>
 <script type="module">
 // care-room.html — 간병: 구급상자로 집어 온 바퀴벌레 시체를 휴지 위에 눕혀 놓고 면봉·연고·브러시·핀셋으로 돌본다.
 // 시체는 이미 죽어 있어서 스스로는 아무 반응도 없다(도구에 밀려 흔들리거나 쓸리는 것만 있다). 모양은 바닥에 깔려 있던 그대로다.
-// 도구를 쓸 때마다(누를 때마다) 맥락 없이 위로의 한마디를 목소리와 말풍선으로 내뱉는다. 들어올 때도 한마디.
+// 도구를 쓰는 동안 맥락 없이 위로의 한마디를 목소리와 말풍선으로 하나씩 이어 간다 (앞 말이 끝나야 다음 말). 들어올 때는 「지금 이대로도 괜찮아」 제목 카드가 잠깐 뜬다.
 import * as THREE from 'three';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
-import {Tally} from './tally.js';
 import {measureBubble,drawBubble,revealAt,typeTime} from './talk-bubble.js';
 
 const $=s=>document.querySelector(s);
@@ -431,13 +441,9 @@ function sfxBuilder(){
   };
   // 결: 조각을 촘촘히 흩뿌리고 바탕 숨소리를 깐 2초 남짓한 고리. 크기는 도구 움직임에 따라 조절한다
   const TEX={
-    swab:   {sec:2.4, layers:[{g:'fiber',rate:360,amp:1,spread:.85},{bed:[['bp',3200,.6],['lp',7000]],amp:.22,mod:.6}]},
-    swabWet:{sec:2.2, layers:[{g:'squelch',rate:70,amp:1,spread:.6},{g:'bubble',rate:45,amp:.6,spread:.8},{g:'fiber',rate:180,amp:.4,spread:.6}]},
-    paper:  {sec:2.6, layers:[{g:'paper',rate:220,amp:1,spread:.9},{bed:[['bp',2600,.8]],amp:.2,mod:.5}]},
-    brush:  {sec:2.4, layers:[{g:'bristle',rate:1000,amp:.8,spread:.85},{bed:[['hp',1800],['bp',6000,.5]],amp:.45,mod:.45}]},
-    shell:  {sec:2.2, layers:[{g:'paper',rate:160,amp:1,spread:.8},{g:'bristle',rate:260,amp:.9,spread:.9}]},
-    smear:  {sec:2.4, layers:[{g:'squelch',rate:110,amp:1,spread:.6},{g:'bubble',rate:55,amp:.55,spread:.8},{bed:[['lp',900,1.5]],amp:.45,mod:.5}]},
-    ooze:   {sec:2.6, layers:[{g:'squelch',rate:62,amp:1,spread:.5},{g:'bubble',rate:26,amp:.7,spread:.7},{bed:[['lp',520,2.5],['hp',90]],amp:.35,mod:.7}]},
+    swab:   {sec:2.4, layers:[{bed:[['bp',2600,.55],['lp',6500]],amp:1,mod:.12,modHz:[1,3]},{g:'fiber',rate:240,amp:.35,spread:.5}]},
+    brush:  {sec:2.4, layers:[{bed:[['hp',1600],['bp',5200,.5]],amp:1,mod:.12,modHz:[1,3]},{g:'bristle',rate:420,amp:.3,spread:.5}]},
+    ooze:   {sec:2.6, layers:[{g:'squelch',rate:44,amp:1,spread:.5},{g:'bubble',rate:4,amp:.3,spread:.5},{bed:[['lp',520,2.5],['hp',90]],amp:.45,mod:.5,modHz:[1,4]}]},
   };
   function buildTexture(spec,banks){
     const n=Math.round(AFS*spec.sec), out=new Float32Array(n);
@@ -447,7 +453,7 @@ function sfxBuilder(){
         for(const f of ly.bed) DSP.filt(b,f[0],f[1],f[2]);
         for(let i=0;i<m;i++){ const w=i/m; b[i]=b[i]*w+b[n+i]*(1-w); }              // 끝을 앞에 겹쳐 고리 이음매가 안 들리게
         // 손이 움직이는 듯 천천히 출렁이는 크기 (고리 길이에 딱 맞는 주기만 써서 이음매가 없다)
-        const mods=[]; for(let k=0;k<5;k++) mods.push([Math.max(1,Math.round(rand(3,13)*spec.sec))/spec.sec,Math.random()*TAU,rand(.3,1)]);
+        const [h0,h1]=ly.modHz||[3,13], mods=[]; for(let k=0;k<5;k++) mods.push([Math.max(1,Math.round(rand(h0,h1)*spec.sec))/spec.sec,Math.random()*TAU,rand(.3,1)]);
         const r=DSP.rms(b.subarray(0,n))||1;
         for(let i=0;i<n;i++){ const t=i/AFS; let am=0; for(const [f,p,a] of mods) am+=a*Math.sin(TAU*f*t+p); out[i]+=b[i]/r*ly.amp*.25*Math.max(.12,1+ly.mod*am/2.4); }
         continue;
@@ -540,36 +546,30 @@ class CareAudio{
 const AU=new CareAudio();
 // 도구 소리 (한 번 나는 것)
 const SND={
-  // 도구를 집어 들 때: 도구마다 다른 소리
+  // 도구를 집어 들 때: 도구마다 다른 작은 소리
   pick(kind){
-    if(kind==='swab'){ AU.grain('wood',{gain:.1,rate:2.4}); AU.burst('paper',2,.03,{gain:.16}); }
-    else if(kind==='ointment'){ AU.burst('crinkle',7,.14,{gain:.22}); AU.grain('thump',{gain:.16,rate:1.7}); }
-    else if(kind==='brush'){ AU.grain('wood',{gain:.32}); AU.burst('bristle',5,.04,{gain:.14}); }
-    else if(kind==='tweezer'){ AU.grain('metal',{gain:.19}); }
+    if(kind==='swab'){ AU.grain('wood',{gain:.04,rate:2.4}); AU.burst('paper',2,.03,{gain:.06}); }
+    else if(kind==='ointment'){ AU.burst('crinkle',6,.14,{gain:.09}); AU.grain('thump',{gain:.06,rate:1.7}); }
+    else if(kind==='brush'){ AU.grain('wood',{gain:.12}); }
+    else if(kind==='tweezer'){ AU.grain('metal',{gain:.08}); }
   },
-  // 휴지 위에 내려놓을 때: 몸이 종이에 톡 닿고, 종이가 바스락
-  place(){ AU.grain('thump',{gain:.3}); AU.burst('paper',12,.2,{gain:.21,t:.008}); },
+  // 휴지 위에 내려놓을 때: 종이에 톡 닿는 소리
+  place(){ AU.grain('thump',{gain:.12}); AU.burst('paper',8,.18,{gain:.07,t:.008}); },
   // 핀셋 끝이 맞닿는 틱 / 벌어지는 틱
-  grip(){ AU.grain('metal',{gain:.22}); AU.burst('paper',2,.02,{gain:.08,t:.01}); },
-  release(){ AU.grain('metal',{gain:.13,rate:1.12}); },
+  grip(){ AU.grain('metal',{gain:.1}); },
+  release(){ AU.grain('metal',{gain:.05,rate:1.12}); },
   // 종이에 다리가 톡
-  tap(k=1){ AU.grain('paper',{gain:.3*k}); AU.grain('thump',{gain:.14*k,rate:1.9}); },
-  // 면봉이 찍힐 때: 솜이 눌리며 퐁, 종이가 살짝
-  dab(){ AU.grain('thump',{gain:.13,rate:1.5}); AU.burst('fiber',9,.05,{gain:.15}); AU.burst('paper',2,.03,{gain:.09}); },
-  // 진물이 솜에 빨려 들 때 쪽
-  sip(k){ AU.burst('bubble',1+Math.round(k*3),.06,{gain:.07+.09*k}); AU.burst('squelch',1+Math.round(k*2),.05,{gain:.09+.1*k}); },
-  // 연고 튜브를 쥘 때: 알루미늄이 구겨지는 바스락 + 크림이 뿌직
-  squeeze(){ AU.burst('crinkle',13,.2,{gain:.17}); AU.burst('squelch',3,.12,{gain:.21,t:.07}); AU.burst('bubble',2,.1,{gain:.11,t:.1}); },
-  // 걸쭉한 크림 속 공기 방울이 뽁
-  pop(){ AU.grain('bubble',{gain:rand(.08,.2),rate:rand(.7,1.25)}); if(Math.random()<.4) AU.grain('squelch',{gain:rand(.08,.16),t:.01}); },
-  // 손을 떼면 연고 줄이 끊기며 쪽
-  unsqueeze(){ AU.grain('bubble',{gain:.2,rate:.7}); AU.grain('squelch',{gain:.26,t:.01}); },
-  // 털이 처음 닿을 때 스
-  brushIn(){ AU.burst('bristle',14,.07,{gain:.14}); },
-  // 브러시를 들 때 털이 튀는 타닥
-  flick(k){ AU.burst('bristle',4+Math.round(k*8),.05,{gain:.08+.16*k}); },
-  // 마른 껍질 위를 털이 지날 때 바삭
-  crackle(k){ AU.grain(Math.random()<.5?'paper':'bristle',{gain:(.06+.18*Math.random())*k}); },
+  tap(k=1){ AU.grain('paper',{gain:.12*k}); AU.grain('thump',{gain:.05*k,rate:1.9}); },
+  // 면봉이 닿을 때: 솜이 살짝 눌리는 소리
+  dab(){ AU.grain('thump',{gain:.05,rate:1.5}); AU.burst('fiber',5,.05,{gain:.06}); },
+  // 연고 튜브를 쥘 때: 알루미늄이 구겨지는 바스락 + 크림이 나오는 소리
+  squeeze(){ AU.burst('crinkle',10,.2,{gain:.08}); AU.burst('squelch',2,.12,{gain:.08,t:.07}); },
+  // 크림 속 공기 방울 (아주 드물게, 작게)
+  pop(){ AU.grain('bubble',{gain:rand(.02,.045),rate:rand(.7,1)}); },
+  // 손을 떼면 연고 줄이 끊기는 소리
+  unsqueeze(){ AU.grain('squelch',{gain:.1}); },
+  // 제목 카드의 우표가 붙을 때: 종이에 탁
+  stamp(){ AU.grain('thump',{gain:.1,rate:1.25}); AU.burst('paper',3,.05,{gain:.06,t:.005}); },
 };
 
 // ───────── 위로의 한마디: 목소리 + 말풍선 ─────────
@@ -599,6 +599,7 @@ function say(){
   let row;
   if(GAG&&sayN>=gagAt){ row=GAG; gagAt=sayN+24+Math.floor(Math.random()*16); } else row=nextLine();
   const [text,start,dur,pans]=row;
+  talkLeft=dur+rand(.8,1.4);                                // 이 말이 끝나고 잠깐 쉰 뒤에야 다음 말
   // 귀: 보통 말은 왼쪽·오른쪽 귀를 번갈아 가며, 개그 줄은 글자마다 옮겨 다니며
   let pos; if(pans){ pos=pans; bubble.side=0; } else { voiceSide=-voiceSide; pos=voiceSide*rand(.6,.88); bubble.side=voiceSide; }
   if(VO.buf) AU.voice(VO.buf,start,dur,pos); else loadVoice();
@@ -606,6 +607,14 @@ function say(){
   bubble.sched=pans?[[0,1],[.12,2],[.24,3],[.36,4],[.62,5],[pans[1][0],7],[pans[2][0],9],[pans[3][0],11],[pans[4][0],13]]:null;   // 글자가 소리에 맞춰 찍힌다
 }
 const schedReveal=(sc,t)=>{ let n=0; for(const [tt,c] of sc){ if(tt>t) break; n=c; } return n; };
+// 도구를 쓰고 있는 동안(누르고 있거나 방금까지 움직였으면) 한마디가 끝날 때마다 다음 한마디가 이어진다. 말하는 중에 다시 눌러도 끊지 않는다
+let talkLeft=0, lastAct=-9, clock=0;
+function markAct(){ lastAct=clock; }
+function updateTalk(dt){
+  clock+=dt; talkLeft-=dt;
+  if(!started||paused||entering||titleUp) return;
+  if((pen.down||clock-lastAct<.5)&&talkLeft<=0) say();
+}
 let sayW=0,sayH=0,sayDpr=1,sayDrawn=false;
 function sizeSay(){ sayDpr=Math.min(devicePixelRatio||1,2); sayW=innerWidth; sayH=innerHeight; sayCv.width=Math.round(sayW*sayDpr); sayCv.height=Math.round(sayH*sayDpr); sayDrawn=true; }
 function tickSay(dt){
@@ -770,7 +779,8 @@ const HINTS={
   tweezer:'다리를 집어 옮긴다. 몸에 붙은 다리는 펴진다.',
   view:'휴지 바깥을 끌면 시점이 돌아가고, 두 손가락이나 휠로 확대한다.',
 };
-const hintSeen={}; let hintTimer=0;
+const hintSeen={}; let hintTimer=0, hintDue=null;
+function showDueHint(){ if(started&&!paused&&!titleUp&&hintDue){ showHint(hintDue); hintDue=null; } }
 const hintEl=$('#hint');
 function showHint(key,sec=3.6){ if(hintSeen[key]) return; hintSeen[key]=true; hintEl.textContent=HINTS[key]; hintEl.classList.add('show'); clearTimeout(hintTimer); hintTimer=setTimeout(()=>hintEl.classList.remove('show'),sec*1000); }
 function setTool(k,silent){
@@ -782,7 +792,7 @@ function setTool(k,silent){
   for(const n in TOOLS) TOOLS[n].root.visible=false;
   TOOLS.ointment.rope.visible=false;
   pen.shown=false;
-  if(!silent){ SND.pick(k); if(started&&!entering) showHint(k); }
+  if(!silent){ SND.pick(k); if(started&&!entering&&!titleUp) showHint(k); }
 }
 for(const b of document.querySelectorAll('.tool')) b.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); AU.ensure(); setTool(b.dataset.tool); });
 
@@ -807,22 +817,21 @@ const inWork=p=>p&&Math.abs(p.x)<WORK&&Math.abs(p.z)<WORK;
 function toolDown(p){
   pen.down=true; pen.moved=0; pen.prev.copy(p); pen.p.copy(p); target.copy(p);
   if(!pen.shown){ cur.copy(p); cur.y+=.25; pen.shown=true; }
-  say();                                                  // 무엇을 하든 누를 때마다 한마디
+  markAct();
   if(tool==='swab'){ SND.dab(); }
   else if(tool==='ointment'){ startSqueeze(p); }
-  else if(tool==='brush'){ SND.brushIn(); }
   else if(tool==='tweezer'){ grabAt(pen.x,pen.y,p); }
 }
-function toolMove(p){ pen.moved+=p.distanceTo(pen.p); pen.p.copy(p); target.copy(p); }
+function toolMove(p){ pen.moved+=p.distanceTo(pen.p); pen.p.copy(p); target.copy(p); markAct(); }
 function toolUp(){
   if(!pen.down) return; pen.down=false;
   if(tool==='ointment') endSqueeze();
-  else if(tool==='brush'){ SND.flick(clamp(TOOLS.brush.bend.length()*6)); TOOLS.brush.bendV.addScaledVector(TOOLS.brush.bend,-14); }
+  else if(tool==='brush'){ TOOLS.brush.bendV.addScaledVector(TOOLS.brush.bend,-14); }
   else if(tool==='tweezer') dropHeld();
 }
 
 // 연고 짜기
-function startSqueeze(p){ SND.squeeze(); squeezeLine={x:p.x,z:p.z,t:0,flow:0,popT:.25}; }
+function startSqueeze(p){ SND.squeeze(); squeezeLine={x:p.x,z:p.z,t:0,flow:0,popT:rand(.6,1.4)}; }
 function endSqueeze(){ if(!squeezeLine) return; if(squeezeLine.t>.08) SND.unsqueeze(); settle=.8; squeezeLine=null; AU.level('ooze',0); }
 function updateSqueeze(dt){
   const S=squeezeLine; if(!S) return; const T=TOOLS.ointment;
@@ -836,8 +845,8 @@ function updateSqueeze(dt){
   const r=Math.ceil(.3/GC), ci=Math.round(gix(S.x)), cj=Math.round(gix(S.z));
   slump(ci-r,ci+r,cj-r,cj+r,2);
   settleRect=[ci-r,ci+r,cj-r,cj+r];
-  AU.level('ooze',.18*S.flow*(.8+.2*Math.sin(S.t*9)));
-  S.popT-=dt; if(S.popT<=0){ S.popT=rand(.09,.4); SND.pop(); }
+  AU.level('ooze',.07*S.flow*(.85+.15*Math.sin(S.t*9)));
+  S.popT-=dt; if(S.popT<=0){ S.popT=rand(.9,2.4); SND.pop(); }
 }
 
 // 면봉
@@ -850,14 +859,12 @@ function updateSwab(dt,speed){
     const i0=Math.floor(gix(p.x-.09)),i1=Math.ceil(gix(p.x+.09)),j0=Math.floor(gix(p.z-.09)),j1=Math.ceil(gix(p.z+.09)); let took=0;
     for(let j=Math.max(1,j0);j<=Math.min(GN-2,j1);j++) for(let i=Math.max(1,i0);i<=Math.min(GN-2,i1);i++){ const k=j*GN+i; if(th[k]<=0) continue; const x=-GW/2+i*GC, z=-GW/2+j*GC, d=Math.hypot(x-p.x,z-p.z); if(d>.09) continue; const m=th[k]*Math.min(1,dt*(1.5+speed*5))*(1-d/.09); th[k]-=m; took+=m; }
     if(took>0){ markDirty(i0,i1,j0,j1); T.cream=Math.min(1,T.cream+took*40); }
-    if(got>0){ T.soak=Math.min(1,T.soak+got*.004); stain(p.x+rand(-.02,.02),p.z+rand(-.02,.02),.05+rand(.03),'206,186,138',Math.min(.16,.02+got*.003)); if(Math.random()<dt*14) SND.sip(clamp(got*.02)); }
+    if(got>0){ T.soak=Math.min(1,T.soak+got*.004); stain(p.x+rand(-.02,.02),p.z+rand(-.02,.02),.05+rand(.03),'206,186,138',Math.min(.16,.02+got*.003)); }
     else if(T.soak>.05&&speed>.15&&Math.random()<dt*20) stain(p.x,p.z,.035,'214,197,155',.025*T.soak);   // 묻은 솜으로 문지르면 옅게 번진다
   }
-  // 소리: 솜 결은 문지르는 만큼. 휴지 위면 종이 바스락이 같이, 연고 위나 진물이 밴 솜이면 찐득한 결이 같이
-  const kind=surfKind(p.x,p.z), mv=pen.down?clamp(speed*1.2):0;
-  AU.level('swab',pen.down?(.01+.155*mv)*(kind==='cream'?.45:1):0); AU.rate('swab',.88+.3*mv);
-  AU.level('paper',pen.down&&kind==='paper'?.18*mv:0);
-  AU.level('swabWet',pen.down?(kind==='cream'?.04+.23*mv:T.soak>.25?.14*mv*T.soak:0):0);
+  // 소리: 솜이 스치는 조용한 슥슥 하나만, 문지르는 만큼
+  const mv=pen.down?clamp(speed*1.2):0;
+  AU.level('swab',.065*mv); AU.rate('swab',.9+.2*mv);
   // 솜 빛깔: 진물이 밸수록 크림색 → 누런빛, 연고는 하얗고 번들
   const C=T.tip.geometry.attributes.color, P=T.tip.geometry.attributes.position;
   if(T._s!==T.soak){ T._s=T.soak; for(let i=0;i<C.count;i++){ const yb=P.getY(i); const low=sstep(.05,-.17,yb)*T.soak; C.setXYZ(i,lerp(1,.86,low),lerp(1,.76,low),lerp(1,.55,low)); } C.needsUpdate=true; }
@@ -889,7 +896,7 @@ function updateBrush(dt,speed){
   P.needsUpdate=true; T.tuft.geometry.computeVertexNormals();
   // 닿아서 쓸고 있는 동안
   const touching=pen.down&&contact>.01;
-  let overShell=0, overCream=0;
+  let overCream=0;
   if(touching){
     const r=T.TR*1.2;
     // 연고: 쓸고 가는 방향으로 밀리며 펴진다
@@ -905,18 +912,11 @@ function updateBrush(dt,speed){
     if(corpse&&speed>.03){ for(const l of corpse.legs){ if(l===held?.leg) continue; l.mesh.getWorldPosition(_v2); const tip=legTipWorld(l,_v); const d=Math.min(Math.hypot(_v2.x-ax,_v2.z-az),Math.hypot(tip.x-ax,tip.z-az)); if(d>r) continue;
         const k=(1-d/r);
         if(l.detached){ _v.set(pen.vel.x,0,pen.vel.z).multiplyScalar(dt*.55*k); moveLegWorld(l,_v); }
-        else{ const dirx=tip.x-_v2.x, dirz=tip.z-_v2.z; const cr=(dirx*pen.vel.z-dirz*pen.vel.x)/(Math.hypot(dirx,dirz)||1); l.nudge=clamp(l.nudge-cr*dt*.9*k,-.4,.4); applyLeg(l); }
-        overShell=Math.max(overShell,k); } }
-    // 껍질 위를 지날 때 바삭바삭 잔소리
-    if(corpse){ const hb=surfY(ax,az)-tissueH(ax,az); if(hb>.02&&speed>.05){ overShell=Math.max(overShell,clamp(hb*12)); } }
+        else{ const dirx=tip.x-_v2.x, dirz=tip.z-_v2.z; const cr=(dirx*pen.vel.z-dirz*pen.vel.x)/(Math.hypot(dirx,dirz)||1); l.nudge=clamp(l.nudge-cr*dt*.9*k,-.4,.4); applyLeg(l); } } }
   }
-  // 소리: 털 결은 쓸어 가는 만큼. 휴지 위면 종이가, 껍질 위면 바삭한 잔소리가, 연고 위면 찐득한 결이 같이
-  const kind=surfKind(ax,az), sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0;
-  AU.level('brush',sw*(kind==='cream'?.085:.17)); AU.rate('brush',.85+.3*clamp(speed));
-  AU.level('paper',touching&&kind==='paper'?sw*.14:0);
-  AU.level('shell',touching&&overShell>0?sw*.15*clamp(overShell):0);
-  AU.level('smear',touching&&overCream>.004?clamp(speed*.9)*.24:0);
-  if(overShell>0&&speed>.05&&Math.random()<dt*speed*40) SND.crackle(overShell);
+  // 소리: 털이 쓸리는 조용한 쓱쓱 하나만, 쓸어 가는 만큼
+  const sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0;
+  AU.level('brush',sw*.06); AU.rate('brush',.9+.2*clamp(speed));
   // 털 빛깔: 진물·연고가 묻은 끝
   const C=T.tuft.geometry.attributes.color;
   const key=Math.round(T.stain*40)+Math.round(T.cream*40)*100;
@@ -989,12 +989,6 @@ function updateFalling(dt){
 function surfFloorUnder(l){ l.grp.getWorldPosition(_v2); return surfY(_v2.x,_v2.z)-.002; }
 // 다리를 옮긴 뒤 바닥 높이맵을 다시 그린다 (연고는 그대로)
 function rasterAndKeep(){ rasterBase(); rebuildOintAll(); }
-// 도구가 닿은 자리: 연고 위 / 시체 몸 위 / 휴지 / 책상 (소리 결을 고를 때 쓴다)
-function surfKind(x,z){
-  const i=Math.round(gix(x)), j=Math.round(gix(z)); if(i<1||j<1||i>GN-2||j>GN-2) return 'desk';
-  const k=j*GN+i; if(th[k]>.004) return 'cream'; if(base[k]-tissueH(x,z)>.012) return 'body';
-  return Math.abs(x)<=TW&&Math.abs(z)<=TW?'paper':'desk';
-}
 
 // ───────── 도구 자리 잡기 (매 장면) ─────────
 const TILT={swab:.78,ointment:.5,brush:.72,tweezer:0};
@@ -1037,9 +1031,104 @@ function placeTools(dt){
   }
 }
 
+// ───────── 들어올 때 제목 카드: 「지금 이대로도 괜찮아」 + 바퀴벌레 우표 ─────────
+// 공유 미리보기 카드(「바퀴벌레와 친해지기」)처럼 글자마다 다른 색 크레파스로 칠하고 흰 스티커 테두리를 두른 글자.
+// 글자 모양은 Jua(SIL Open Font License) 윤곽을 SVG 경로로 구워 둔 것이라 폰트를 못 받아와도 똑같이 뜬다.
+const TJ={
+  '지':{adv:79.7,d:'M41.8 -72.8Q45.9 -72.8 48.8 -72.1Q51.7 -71.4 53.4 -68.5Q55 -65.8 53.9 -63.1Q52.5 -60.3 48.9 -59.8Q46.5 -59.4 43.4 -59.4Q40.3 -59.3 35.2 -59.5Q35.1 -57.8 35.1 -56Q35.1 -54.1 35.1 -52.5Q35.1 -51 35.2 -49.9Q35.2 -48.8 35.2 -48.5V-37.3Q35.2 -36.5 35.3 -35.2Q35.4 -33.8 35.5 -33.1Q36.3 -32.3 37.7 -30.8Q39.1 -29.2 39.9 -28.2Q40.9 -27 42 -25.7Q43 -24.4 44.1 -22.8Q44.9 -21.9 45.5 -21Q46.1 -20.1 46.6 -19.4Q48.5 -16.7 50.5 -13.5Q52.5 -10.3 53.2 -7.1Q53.5 -5.7 53.2 -4.1Q53 -2.4 51.8 -1.3Q50.1 0.2 48 0.2Q45.7 0.2 43.6 -1.1Q41.5 -2.3 40.2 -3.7Q38.3 -5.7 36.7 -7.9Q35 -10.1 33.4 -12.2Q32.3 -13.8 31.1 -15.4Q29.9 -16.9 28.6 -18.4Q28.4 -18.8 28.2 -18.9Q28.2 -18.8 28.2 -18.8Q28.1 -18.8 28.1 -18.7Q27.6 -17.9 27 -17.2Q26.3 -16.4 25.8 -15.6Q25 -14.7 24.4 -13.8Q23.7 -12.8 23.1 -11.9Q21.7 -9.8 20.3 -7.8Q18.9 -5.7 17.1 -3.9Q12.8 0.4 9 0.4Q8 0.4 7.1 0.1Q4.8 -0.5 4 -2.7Q3.2 -4.4 3.5 -6.4Q3.7 -8.4 4.4 -9.9Q5.2 -11.6 6.2 -13.1Q7.2 -14.6 8.3 -16.1Q9 -17 9.7 -17.9Q10.3 -18.8 10.8 -19.7Q11.7 -21.2 13.2 -23.2Q14.8 -25.3 16.4 -27.2Q17.9 -29.2 19.2 -30.8Q20.5 -32.4 21 -33.1V-59.5H14.9Q11.1 -59.5 9.7 -59.5Q8.2 -59.6 7.5 -59.8Q3.7 -60.4 2.4 -64.1Q1.3 -67.3 3.2 -69.7Q4.9 -72.1 8 -72.7Q8.5 -72.8 9 -72.8Q9.5 -72.9 10.1 -72.9Q11.1 -72.9 11.5 -72.8ZM75.5 -5.4Q75.3 -4.2 75.2 -3.1Q75.1 -1.9 74.7 -0.7Q74.5 -0.3 74.4 0Q74.3 0.3 74.1 0.7Q73.4 2.1 72.3 2.9Q70 4.3 67.2 3.6Q65.6 3.3 64.6 2.4Q63.7 1.6 63.2 0.4Q62.8 -0.9 62.6 -2.1Q62.3 -3.3 62.3 -4.2Q62.3 -5.1 62.3 -5.2V-65.9Q62.3 -67.1 62.3 -68.5Q62.3 -69.9 62.5 -71.3Q62.7 -72.7 63.1 -73.9Q63.5 -75.1 64.2 -75.8Q65.3 -76.9 66.5 -77.2Q67.7 -77.4 69.1 -77.4Q70.8 -77.4 72.2 -76.5Q73.7 -75.5 74.3 -73.8Q75.2 -71.7 75.3 -69.4Q75.4 -67.1 75.5 -64.8V-64.3Q75.7 -56.6 75.6 -48.5Q75.5 -40.4 75.5 -33.2V-9Q75.5 -8.1 75.6 -7.2Q75.6 -6.3 75.5 -5.4Z'},
+  '금':{adv:78.9,d:'M9.8 1.8Q9.7 1.8 9.5 1.6Q8.5 0.8 8.2 -0.6Q7.8 -2 7.8 -3.1Q7.7 -4.9 7.6 -6.7Q7.4 -8.5 7.4 -10.2Q7.4 -12.8 7.4 -14.9Q7.4 -17 7.9 -19.5Q8.2 -21.1 8.9 -22.1Q9.6 -23 11.1 -23.6Q13.9 -24.7 16.7 -24.7H61.8Q63.7 -24.6 65.7 -24.4Q67.7 -24.2 69.5 -23.4Q71.5 -22.6 72.2 -21.2Q72.8 -19.7 73 -17.7Q73.1 -16 73.2 -13.8Q73.2 -11.6 73.1 -9.4Q73 -7.1 72.8 -4.9Q72.6 -2.7 72.1 -0.9Q71.8 0.2 71.4 1.1Q71 1.9 69.8 2.3Q68.7 2.7 67.6 2.8Q66.4 2.9 65.3 2.9L15.2 2.7Q13.9 2.6 12.4 2.6Q10.9 2.6 9.8 1.8ZM14.5 -60.4Q12.8 -60.5 11.2 -61Q9.6 -61.4 8.4 -62.2Q7.2 -63 6.7 -64.3Q6.2 -65.6 6.7 -67.5Q7.5 -70.7 10.6 -72.3Q12.9 -73.6 15.4 -73.8Q18 -74 20.6 -74Q21.4 -74.1 22.2 -74.1Q23.1 -74.1 23.9 -74.1Q24.7 -74.2 25.6 -74.2Q26.4 -74.2 27.3 -74.2Q28.1 -74.2 31.6 -74.2Q35 -74.2 39 -74.2Q43 -74.1 46.4 -74.1Q49.8 -74 50.6 -74Q52.2 -73.9 53.8 -73.8Q55.3 -73.8 56.9 -73.8Q59.3 -73.8 61.7 -73.5Q64.1 -73.3 66.4 -72.6Q68.6 -71.9 69 -70.3Q69.3 -68.8 69.6 -66.8Q69.9 -64.6 70.1 -62.9Q70.2 -61.2 70.2 -59.6Q70.1 -58 69.9 -56.3Q69.7 -54.6 69.5 -52.4Q69.3 -50.4 68.8 -48.8Q68.3 -47.2 66.3 -46.4Q64.7 -45.8 62.4 -45.7Q60.1 -45.6 58.8 -47Q57.7 -48.1 57.6 -50Q57.4 -51.8 57.2 -53.3Q57 -54.7 57.1 -56.3Q57.2 -57.9 56.4 -59Q55.7 -59.9 54.6 -60.2Q53.4 -60.6 52.2 -60.7Q50.9 -60.7 49.7 -60.7Q48.4 -60.6 47.5 -60.6H22.1Q21.5 -60.6 20.7 -60.5Q19.9 -60.5 19.1 -60.4Q17.2 -60.2 14.5 -60.4ZM65.4 -42.4Q67 -42.4 69.1 -42.4Q71.1 -42.4 72.8 -41.9Q74.5 -41.4 75.7 -40.2Q76.9 -38.9 76.9 -36.3Q76.9 -33.9 74.9 -32.1Q73.3 -30.7 71 -30.6Q68.8 -30.4 66.8 -30.5Q66.7 -30.5 66.2 -30.6Q65.8 -30.6 64.2 -30.6Q62.5 -30.6 59 -30.6Q55.5 -30.6 49.2 -30.6Q43 -30.6 33.4 -30.6Q23.8 -30.6 9.9 -30.6Q9.8 -30.6 9 -30.6Q8.2 -30.6 7.2 -30.8Q6.1 -31 5 -31.4Q3.9 -31.7 3.2 -32.5Q2 -33.8 2 -36Q2 -38.1 3.3 -39.4Q4.6 -40.6 6 -41.4Q7.4 -42.2 8.9 -42.4Q9.2 -42.4 9.5 -42.4Q9.8 -42.3 10.1 -42.4Q11.5 -42.6 13.1 -42.5Q14.7 -42.3 16.4 -42.4Q21.6 -42.6 27 -42.5Q32.3 -42.4 38.1 -42.4Q44.4 -42.4 51.5 -42.5Q58.6 -42.6 65.4 -42.4ZM19.3 -9.6Q19.3 -9.1 19.4 -8.6Q19.4 -8.1 19.7 -7.9Q19.9 -7.7 20.4 -7.7Q20.8 -7.6 21.3 -7.6Q21.8 -7.6 22.5 -7.7H51.8Q53.2 -7.6 54.5 -7.5Q55.6 -7.4 56.8 -7.4Q58 -7.4 59 -7.6Q60 -7.7 60.2 -8.2Q60.4 -8.7 60.5 -9.6Q60.6 -10.4 60.6 -11.4Q60.6 -12.5 60 -13.3Q59.3 -14.1 58.1 -14.2Q56.8 -14.2 55.8 -14.1H30Q27.8 -14.3 25.7 -14.2Q23.6 -14.2 21.4 -14.1Q20.6 -14.1 20.2 -14.1Q19.7 -14 19.5 -13.1Q19.3 -12.4 19.3 -11.8Q19.3 -11.1 19.3 -10.5Q19.4 -10.3 19.4 -10.1Q19.3 -9.9 19.3 -9.6Z'},
+  '이':{adv:79.7,d:'M24.7 -77.2Q26 -77.2 27.2 -77.1Q28.4 -77 29.6 -76.8Q33.4 -76.2 36.3 -73.3Q38.7 -70.7 40.2 -67.3Q41.8 -64 42.7 -60.3Q43.6 -56.6 44 -52.8Q44.4 -48.9 44.6 -45.3Q44.8 -40.7 44.7 -36.1Q44.6 -31.5 44.1 -27Q43.6 -22.3 42.7 -17.6Q41.7 -12.8 39.2 -9Q37.1 -5.8 34 -3.8Q30.9 -1.7 27.5 -1Q24.4 -0.4 21.2 -0.8Q18 -1.2 15.1 -2.9Q12.4 -4.5 10.6 -6.9Q8.7 -9.3 7.3 -12.5Q5.3 -17.3 5 -22.4Q4.6 -26.6 4.5 -30.8Q4.3 -35 4.3 -39.2Q4.3 -44.8 4.9 -50.4Q5.1 -52.7 5.3 -55Q5.5 -57.2 5.9 -59.4Q6.3 -61.2 6.6 -62.8Q6.9 -64.4 7.7 -66.1Q8.5 -67.8 9.4 -69.3Q10.4 -70.8 11.7 -72Q13.9 -74.2 16.6 -75.4Q19.3 -76.6 22.2 -77Q22.8 -77.1 23.5 -77.1Q24.1 -77.1 24.7 -77.2ZM73.2 -5.6Q73 -4.4 72.9 -3.2Q72.8 -2.1 72.4 -0.9Q72.2 -0.5 72.1 -0.2Q72 0.1 71.8 0.5Q71.1 1.9 70 2.7Q67.7 4.1 64.9 3.4Q63.3 3.1 62.3 2.2Q61.4 1.4 61 0.2Q60.5 -1.1 60.2 -2.3Q60 -3.5 60 -4.4Q60 -5.3 60 -5.4V-65.9Q60 -67.1 60 -68.5Q60 -69.9 60.2 -71.3Q60.4 -72.7 60.8 -73.9Q61.2 -75.1 61.9 -75.8Q63 -76.9 64.2 -77.2Q65.4 -77.4 66.8 -77.4Q68.5 -77.4 70 -76.5Q71.4 -75.5 72 -73.8Q72.9 -71.7 73 -69.4Q73.1 -67.1 73.2 -64.8V-64.3Q73.4 -56.6 73.3 -48.5Q73.2 -40.4 73.2 -33.2V-9.2Q73.2 -8.3 73.2 -7.4Q73.3 -6.5 73.2 -5.6ZM24.4 -14.3Q26.3 -14.3 28.1 -15.5Q29.8 -16.7 30.5 -18.7Q31.2 -20.7 31.7 -23.1Q32.5 -27.7 32.6 -32.9Q32.7 -38.1 32.5 -42.9Q32.5 -44.8 32.4 -47Q32.3 -49.1 32.1 -51.2Q31.8 -53.3 31.3 -55.2Q30.8 -57.2 29.9 -58.7Q28.9 -60.4 27.5 -61.3Q26.1 -62.2 24.5 -62Q22.8 -61.8 21.4 -60.8Q20 -59.8 19.1 -57.8L18.2 -55.7Q17.6 -53.8 17.3 -51.8Q17 -49.7 16.8 -47.7Q16.6 -45.7 16.5 -43.6Q16.4 -41.5 16.4 -39.5Q16.5 -37.5 16.4 -35.6Q16.2 -33.7 16.4 -31.7Q16.6 -29.1 17 -26.1Q17.3 -23.1 18.1 -20.5Q18.9 -17.8 20.4 -16.1Q21.9 -14.3 24.4 -14.3Z'},
+  '대':{adv:78.2,d:'M74.6 -72.3Q75.1 -71.4 75.1 -70.3Q75 -69.3 75.2 -68.2V-8.9Q75.2 -7.5 75.2 -6.1Q75.1 -4.6 74.9 -3.2Q74.7 -1 73.1 0.4Q71.5 1.7 69.2 1.5Q67.3 1.3 66.3 0.2Q65.3 -0.8 64.8 -2.3Q64.4 -3.8 64.3 -5.6Q64.2 -7.3 64.2 -8.9V-33.5H57.1V-9.2Q57.3 -7.8 57.2 -6.7Q57.1 -5.5 57.1 -4.4Q56.9 -3 56.5 -2.1Q56.1 -1.2 55.7 -0.6Q54.8 0.5 53.2 1.1Q51.7 1.7 50.3 1.2Q48.7 0.6 47.8 -0.5Q46.9 -1.6 46.5 -3Q46 -4.3 45.9 -5.8Q45.8 -7.2 45.8 -8.6Q45.8 -9.5 45.7 -10.2Q45.5 -10.8 45.5 -11.3V-66.3Q45.5 -67.1 45.7 -67.9Q45.8 -68.7 45.8 -69.3Q45.8 -70.2 46 -71.1Q46.2 -71.9 46.4 -72.6Q46.6 -73.3 47 -73.9Q47.4 -74.5 47.9 -75.2Q48.4 -75.9 49.1 -76.2Q49.7 -76.5 50.5 -76.7Q51.6 -77.2 52.7 -76.7Q53.2 -76.5 53.8 -76.2Q54.3 -76 54.5 -75.5Q55.2 -75 55.8 -74.3Q56.3 -73.7 56.5 -72.6Q56.7 -71.7 56.9 -70.6Q57.1 -69.5 57.1 -68.2V-45.6H64.2V-68.7Q64.2 -69.6 64.2 -70.5Q64.3 -71.4 64.5 -72.3Q64.9 -74.1 65.7 -75.2Q66.4 -75.9 67.1 -76.3Q67.8 -76.7 68.9 -76.7Q70 -76.9 71.1 -76.6Q72.2 -76.2 72.9 -75.5Q73.5 -74.8 74 -74.1Q74.4 -73.4 74.6 -72.3ZM38.2 -12.9Q38.8 -12.7 39.2 -12.3Q39.7 -11.9 40.2 -11.4Q41.4 -10.6 41.4 -8.8Q41.6 -8.1 41.5 -7.3Q41.3 -6.6 41.1 -6.1Q40.6 -5.3 40.2 -4.9Q39.8 -4.4 39.3 -4Q38.7 -3.8 38 -3.5Q37.3 -3.1 36.4 -3.1Q35.7 -2.9 34.9 -2.7Q34.1 -2.5 33.4 -2.5H18.7Q17.8 -2.5 16.8 -2.7Q15.7 -2.8 14.6 -2.8Q13.7 -2.8 12.6 -3Q11.5 -3.2 10.7 -3.4Q8.7 -3.9 7.1 -5.1Q6.4 -5.6 5.9 -6.4Q5.3 -7.1 4.8 -8.2Q3.9 -9.1 3.9 -10.5Q3.7 -11.4 3.6 -12.1Q3.5 -12.8 3.3 -13.5V-61.8Q3.1 -62.4 3 -63.3Q3 -64.1 3 -65Q3.2 -65.7 3.3 -66.6Q3.4 -67.5 3.6 -68.3Q3.6 -69.9 4.5 -71.3Q5 -71.8 5.5 -72.2Q5.9 -72.6 6.5 -72.8Q7.8 -73.7 9.2 -73.7Q9.9 -73.9 10.4 -74Q10.9 -74 11.5 -74.2H30.1Q30.8 -74 31.6 -74Q32.5 -73.9 33.2 -73.7Q35 -73.7 36.4 -72.8Q38 -72 38.5 -70.4Q38.7 -69.7 38.9 -69Q39 -68.3 38.8 -67.5Q38.8 -66.5 38.8 -66Q38.7 -65.5 38.5 -65Q37.7 -63.9 35.8 -62.9Q35.1 -62.9 33.7 -62.8Q32.2 -62.6 30.1 -62.6H19.9Q18.5 -62.6 17.5 -62.1Q17.1 -62.1 16.7 -61.2Q16.5 -60.7 16.3 -60.3Q16.1 -59.9 16.1 -59.4V-55.6L16.4 -18.8Q16.4 -17.4 16.5 -16.6Q16.5 -15.7 17 -15.3Q17.7 -14.4 19.6 -14.4H23.3Q24.4 -14.4 25.6 -14.2Q26.7 -14.1 28 -14.1H32.9Q33.5 -14.1 34.2 -14.1Q34.8 -14 35.5 -13.8Q36.8 -13.8 38.2 -12.9Z'},
+  '로':{adv:81.2,d:'M70.6 -14.8Q70.9 -14.7 71.2 -14.8Q71.5 -14.8 71.8 -14.8Q73.5 -14.6 75 -14.2Q76.4 -13.7 77.8 -12.5Q79.2 -11.1 79.2 -9Q79.2 -7.9 78.8 -6.7Q78.5 -5.4 77.9 -4.7Q77.1 -3.9 75.9 -3.5Q74.7 -3.1 73.6 -3Q72.5 -2.8 71.7 -2.8Q70.8 -2.8 70.7 -2.8H14.7Q14.2 -2.8 13.7 -2.8Q13.2 -2.7 12.7 -2.7Q10.6 -2.6 8.2 -2.8Q5.8 -2.9 4.1 -4.3Q2 -6.2 2 -8.6Q2 -10.1 2.9 -11.7Q3.8 -13.3 5.3 -13.9Q7.3 -14.7 9.5 -14.7Q11.6 -14.7 13.8 -14.8H14.3Q23.9 -15 33.9 -14.8L33.8 -24.2H23.4Q21.4 -24.2 19.2 -24.2Q17.1 -24.2 14.9 -24.3Q12.8 -24.5 11.4 -26.4Q10 -28.3 9.8 -30.9Q9.7 -31.8 9.7 -33.8Q9.6 -35.8 9.6 -38Q9.5 -40.2 9.5 -42.1Q9.5 -44 9.5 -44.8V-47.2Q9.4 -48.4 9.6 -49.8Q9.7 -51.1 10.6 -52.2Q11.9 -53.9 14.2 -54.4Q16.6 -54.8 18.8 -54.8Q19.3 -54.8 20.5 -54.7Q21.6 -54.6 22.3 -54.7H57.8V-63.1H21.3Q20.8 -63.1 20.2 -63Q19.6 -63 19.1 -63Q18.5 -63 17.9 -63Q17.2 -62.9 16.6 -62.9Q14.5 -62.9 13.2 -63.3Q11.5 -63.7 10.4 -65.6Q9.1 -67.9 9.7 -70.5Q10.2 -72.3 12 -73.2Q13.8 -74.1 14.9 -74.3Q15.7 -74.5 16.4 -74.5Q17.2 -74.5 18.1 -74.5H21.6Q23.2 -74.5 25.6 -74.5Q27.9 -74.4 30.5 -74.4Q33.1 -74.4 35.8 -74.5Q38.4 -74.5 40.6 -74.5H60.8Q62.5 -74.5 64.2 -74.4Q65.9 -74.3 67.5 -73.8Q69.9 -73.1 70.6 -70.8Q71.3 -68.4 71.3 -66.2V-53Q71.3 -52.2 71.2 -50.9Q71 -49.6 70.7 -48.2Q70.4 -46.8 69.8 -45.6Q69.3 -44.3 68.5 -43.8Q67.1 -43 65.8 -42.9Q64.5 -42.7 63.3 -42.8H23.8V-34.8H63.4Q64.3 -34.8 65.2 -34.8Q66 -34.8 66.8 -34.7Q68.3 -34.6 69.5 -33.9Q70.8 -33.1 71.3 -31.4Q71.8 -29.4 71.2 -27.6Q70.5 -25.8 68.7 -25Q67.5 -24.5 66.2 -24.4Q65 -24.2 63.9 -24.2H46.7L46.8 -14.8Q49.2 -14.8 51.2 -14.9Q53.3 -14.9 55.4 -14.9Q57.4 -14.9 59.5 -14.9Q61.5 -14.8 63.8 -14.8Q65.6 -14.7 67.3 -14.9Q69 -15 70.6 -14.8Z'},
+  '도':{adv:81.2,d:'M33.2 -14.9 33.1 -28.3Q30.5 -28.4 28.3 -28.4Q26.1 -28.4 23.2 -28.4Q20.9 -28.4 18.5 -28.6Q16 -28.7 13.9 -29.3Q12.2 -29.8 10.9 -31.1Q9.5 -32.4 8.7 -34.1Q8.2 -35.2 8 -36.7Q7.8 -38.2 7.7 -39.7Q7.6 -41.1 7.7 -42.2Q7.7 -43.2 7.7 -43.3V-61.5Q7.7 -61.7 7.7 -62.8Q7.6 -63.9 7.8 -65.3Q7.9 -66.8 8.2 -68.3Q8.5 -69.9 9.3 -71.1Q10.6 -73.1 13.3 -73.7Q16 -74.3 18.8 -74.3H60.7Q60.8 -74.3 62.2 -74.2Q63.6 -74.2 65.3 -73.9Q67 -73.6 68.6 -72.8Q70.1 -72 70.6 -70.4Q70.8 -69.8 70.8 -69Q70.9 -68.1 70.9 -67.2Q70.9 -66.3 70.8 -65.5Q70.6 -64.7 70.4 -64.3Q69.6 -62.9 67.9 -62.5Q66.4 -62.1 62.4 -62.1H26.2Q23.9 -62.1 22.8 -61.3Q21.6 -60.5 21.1 -59.5Q20.5 -58.4 20.5 -57.4Q20.5 -56.3 20.5 -55.8L20.9 -46.7Q21 -45.7 21.1 -44.3Q21.3 -42.9 22 -42.3Q23 -41.3 24.6 -41.2Q26.1 -41.2 27.9 -41.2L61.9 -41.3Q66.8 -41.3 70.1 -39.8Q71.1 -39.3 71.8 -38.2Q72.5 -37 72.7 -35.9Q73 -34.8 72.8 -33.8Q72.5 -32.7 71.8 -31.9Q69.2 -28.5 64.4 -28.4Q59.9 -28.2 55.6 -28.2Q51.2 -28.1 46.6 -28.2L46.7 -14.9H71.8Q73.5 -14.7 75 -14.3Q76.4 -13.9 77.8 -12.7Q79.2 -11.3 79.2 -9.2Q79.2 -8.1 78.8 -6.8Q78.5 -5.6 77.9 -4.9Q77.1 -4.1 75.9 -3.7Q74.7 -3.3 73.6 -3.2Q72.5 -3 71.7 -3Q70.8 -3 70.7 -3Q56.6 -3 46.8 -3Q37 -3 30.6 -3Q24.3 -3 20.8 -3Q17.2 -3.1 15.4 -3.1Q13.7 -3.1 13.3 -3.1Q12.9 -3.1 12.7 -3.1Q10.6 -3.1 8.2 -3.2Q5.8 -3.3 4.1 -4.7Q2 -6.6 2 -8.8Q2 -10.3 2.9 -11.9Q3.8 -13.5 5.3 -14.1Q7.3 -14.9 9.5 -14.9Q11.6 -14.9 13.8 -15Z'},
+  '괜':{adv:83.0,d:'M63.4 -67.5Q63.4 -67.4 63.4 -65.9Q63.3 -64.4 63.3 -62.6Q63.3 -60.7 63.3 -59Q63.3 -57.2 63.3 -56.5Q63.8 -56.4 65.1 -56.4Q66.4 -56.3 67.8 -56.2Q67.8 -59.2 67.8 -62.5Q67.8 -65.8 67.9 -67.8Q67.8 -68.9 67.8 -70Q67.9 -71 68.2 -72.1Q68.6 -73.6 70 -75.1Q71.6 -77.1 74.7 -76.7Q77.3 -76.3 78.3 -74.1Q78.9 -72.9 79.1 -71.2Q79.2 -69.5 79.1 -69.1V-31.4Q79.1 -31.3 79.1 -30.7Q79 -30.1 78.7 -29.2Q78.4 -28.4 77.9 -27.5Q77.3 -26.6 76.3 -26Q75.2 -25.3 74 -25.3Q72 -25.3 70.7 -26.3Q69.6 -27.1 69 -28.3Q68.2 -29.7 68 -31.8Q67.7 -33.8 67.7 -36.1Q67.6 -38.3 67.7 -40.5Q67.8 -42.6 67.8 -44.1V-45.2Q66.8 -45.2 65.1 -45.2Q63.4 -45.3 63.3 -45.3V-33.3Q63.2 -32.2 63 -31.1Q62.8 -29.9 62.2 -28.8Q61.5 -27.5 60.5 -26.9Q59.8 -26.4 59.3 -26.1Q58.8 -25.8 57.9 -25.8Q56.5 -25.8 55.1 -26.6Q54.1 -27.2 53.5 -28.1Q52.9 -29 52.6 -29.8Q52.3 -30.6 52.2 -31.2Q52.1 -31.9 52.1 -31.9V-68.8Q52 -69.3 52.2 -71Q52.3 -72.8 52.9 -74Q53.9 -76.1 57 -76.4Q58.7 -76.6 59.8 -76.2Q60.9 -75.8 61.7 -74.9Q62.4 -74.1 62.6 -73.4Q62.8 -72.6 63 -71.8Q63.3 -70.8 63.4 -69.7Q63.4 -68.6 63.4 -67.5ZM75.2 -9.9Q75.3 -9.9 75.9 -9.7Q76.5 -9.5 77.2 -9.1Q78 -8.6 78.7 -7.8Q79.3 -7.1 79.5 -6.1Q80.1 -2.3 78.3 -0.2Q77.2 1.2 75.9 1.5Q74.6 1.8 74.5 1.8H22.3Q18.5 1.8 16.3 0.6Q14.1 -0.7 14.1 -3V-11.9Q13.9 -14.1 14.1 -16.4Q14.3 -18.5 15.7 -19.8Q17.1 -21.1 19.2 -21.1Q19.7 -21.1 20.6 -21.1Q21.4 -21 21.9 -20.8Q23.2 -20.4 23.9 -19.6Q24.6 -18.8 25 -17.8Q25.4 -16.7 25.5 -15.6Q25.6 -14.4 25.7 -13.3Q25.7 -12.5 25.8 -11.7Q25.9 -10.8 26.1 -10.1Q26.3 -10 28 -9.9Q29.6 -9.7 33.1 -9.7Q36.1 -9.7 38.5 -9.8Q40.8 -9.9 40.9 -9.9ZM34.9 -73.3Q35.8 -73.3 37 -73.3Q38.2 -73.3 39 -73.1Q40.4 -72.6 41.8 -71.9Q43.1 -71.2 44 -70Q45 -68.7 45.5 -66.8Q45.9 -64.8 45.9 -63.3L45.8 -53Q45.7 -51.7 45.7 -51Q45.7 -50.2 45.7 -49.6Q45.6 -48.9 45.3 -48.2Q45 -47.6 44.4 -46.4Q43.6 -45 42.4 -44.2Q41.2 -43.5 39.9 -43.4Q38.5 -43.2 37.2 -43.7Q35.9 -44.1 35 -45.2Q33.9 -47 34 -48.9Q34.2 -50.8 34.3 -52.6V-58.9Q34.2 -60.1 33.9 -60.7Q33.5 -61.3 32.9 -61.5Q32.3 -61.7 31.5 -61.8Q30.7 -61.8 29.7 -61.8H19.2Q17.6 -61.8 16.9 -61.8Q16.1 -61.8 15.5 -61.9Q14.9 -61.9 14.1 -62.1Q13.2 -62.2 11.4 -62.4Q10.1 -62.6 9.4 -63.4Q8.7 -64.1 8.5 -65.1Q8.2 -66.1 8.2 -67.2Q8.3 -68.4 8.5 -69.3Q8.9 -71.2 10.6 -72.4Q11.7 -73.1 13 -73.2Q14.3 -73.2 15.5 -73.3ZM11.3 -30.3Q11.2 -30.3 10.5 -30.3Q9.8 -30.3 8.9 -30.5Q7.9 -30.7 6.9 -31.2Q5.9 -31.6 5.3 -32.5Q4.7 -33.1 4.5 -33.7Q4.3 -34.2 4.3 -35.3Q4.3 -36.4 4.6 -37Q4.8 -37.6 5.3 -38.3Q6.4 -39.6 8.2 -40Q10 -40.4 11.3 -40.6H16.4Q16.4 -43.5 16.5 -46.7Q16.6 -49.8 16.8 -51.7Q16.9 -52.9 17.9 -53.9Q18.9 -54.8 20.4 -55.3Q21.8 -55.8 23.4 -55.9Q25 -55.9 26.2 -55.2Q27.5 -54.5 28.1 -53.8Q28.8 -53 29.1 -52Q29.4 -51.1 29.4 -49.8Q29.4 -48.4 29.4 -46.5Q29.3 -45.2 29.3 -43.7Q29.3 -42.2 29.2 -40.7L37.6 -40.8Q39.5 -40.8 41.3 -40.7Q43.1 -40.6 44.8 -39.8Q47.6 -38.5 47.6 -35.1Q47.6 -33.8 47.1 -33.3Q46.6 -32.8 45.8 -31.9Q45.1 -31.1 43.9 -30.8Q42.7 -30.4 41.4 -30.2Q40 -30.1 38.7 -30.2Q37.4 -30.2 36.5 -30.3Z'},
+  '찮':{adv:84.9,d:'M39.8 -45.9Q41.5 -43.9 43.2 -41.7Q44.9 -39.5 45.5 -37.3Q45.7 -36.3 45.5 -35.2Q45.3 -34.1 44.4 -33.3Q42.9 -32.3 41.2 -32.3Q39.3 -32.3 37.6 -33.2Q35.8 -34.1 34.7 -35Q33 -36.5 31.6 -38Q30.2 -39.6 28.8 -41.1Q27.7 -42.3 26.4 -43.5Q25.1 -44.7 24.1 -46.1L14.2 -35.2Q12.6 -33.5 10.8 -32.9Q9 -32.2 7.4 -32.2Q6.9 -32.2 5.9 -32.4Q4 -32.9 3.3 -34.2Q2.7 -35.3 2.9 -36.7Q3.1 -38.1 3.7 -39.2Q4.4 -40.4 5.2 -41.4Q6.1 -42.4 7 -43.5Q9.6 -46.4 12.1 -49.6Q14.5 -52.7 17.4 -55.7V-61.2Q16.6 -61.1 15.4 -61.2Q14.2 -61.2 12.5 -61.2Q11.4 -61.2 10 -61.1Q8.6 -61 7.2 -61.2Q5.9 -61.4 4.8 -62.1Q3.7 -62.7 3.1 -64.2Q2.6 -65.3 2.5 -66.7Q2.4 -68.1 2.7 -69.3Q3 -70.7 4.2 -71.2Q5.5 -71.8 6.6 -72Q7.6 -72.2 8.4 -72.2Q8.7 -72.2 9 -72.2Q9.3 -72.1 9.6 -72.1H17.7Q17.9 -74.4 18.7 -76.5Q19.4 -78.5 21.6 -79.3Q23.3 -79.9 24.8 -79.6Q26.2 -79.3 27.3 -78.4Q28.4 -77.5 29.1 -76.1Q29.8 -74.7 30 -73.2Q30.1 -72.9 30.2 -72.7Q30.2 -72.4 30.2 -72.1H35.9Q39.4 -72.1 41.5 -71.7Q43.6 -71.2 45 -69.2Q45.4 -68.6 45.6 -67.6Q45.8 -66.5 45.7 -65.5Q45.5 -64.4 45.1 -63.5Q44.7 -62.6 44.1 -62.2Q43.3 -61.9 42.4 -61.6Q41.4 -61.2 40.6 -61.2Q39.4 -61.1 38.5 -61.2Q37.5 -61.2 36.3 -61.2Q34.5 -61.2 33.5 -61.2Q32.5 -61.1 31.1 -61.2Q31.1 -59.9 31.1 -59.6Q31.1 -59.2 31.1 -58.9Q31.1 -58.6 31.1 -58Q31.1 -57.4 31.1 -55.7Q31.6 -55.3 32.4 -54.1Q33.2 -52.9 34 -52.1Q34.8 -51.3 35.7 -50.4Q36.6 -49.4 37.6 -48.3Q38.3 -47.6 38.8 -47Q39.3 -46.4 39.8 -45.9ZM73.4 -7.6Q73.4 -4.6 72.1 -1.9Q70.7 0.9 68.2 2.8Q64.9 5.2 60.7 5.5Q56.5 5.8 52.9 4.3Q49.2 2.8 46.7 -0.2Q44.2 -3.3 44.2 -7.6Q44.2 -12.1 46.5 -15.2H45.8Q43.5 -15.2 42 -16.7Q40.4 -18.1 40.4 -20.1Q40.4 -22.1 42 -23.6Q43.5 -25 45.8 -25H53.2V-26.2Q53.2 -27.9 54.8 -29.2Q56.3 -30.4 58.5 -30.4Q60.7 -30.4 62.2 -29.2Q63.8 -27.9 63.8 -26.2V-25H71.9Q74.2 -25 75.8 -23.6Q77.3 -22.1 77.3 -20.1Q77.3 -18.1 75.8 -16.7Q74.2 -15.2 71.9 -15.2H71.1Q72.2 -13.7 72.8 -11.8Q73.4 -9.9 73.4 -7.6ZM72.8 -48V-39.9Q72.8 -37.3 71.3 -35.4Q69.8 -33.4 66.7 -33.4Q65 -33.4 63.9 -34.1Q61.9 -35.3 61.4 -37.1Q60.8 -38.8 60.8 -39.6V-69.5Q60.7 -69.9 60.9 -71.7Q61.1 -73.5 61.7 -74.7Q62.7 -76.8 65.7 -77.1Q69.4 -77.6 71.2 -75.6Q71.8 -74.8 72 -74Q72.3 -73.3 72.5 -72.5Q72.8 -71.6 72.8 -69.9Q72.9 -68.2 72.8 -67.2V-59.1Q73.2 -59.1 74.3 -59Q75.4 -59 76.6 -59Q77.8 -58.9 78.9 -58.8Q80 -58.7 80.5 -58.6Q82.5 -58.2 83.3 -57.5Q84.1 -56.7 84.3 -55.6Q84.6 -54.5 84.6 -53Q84.6 -51.6 84 -50.6Q82.8 -48.6 80.4 -48.4Q78 -48.1 75.1 -48ZM37.7 -9Q37.8 -9 38.5 -8.8Q39.1 -8.6 39.9 -8.2Q40.7 -7.7 41.4 -7Q42 -6.3 42.2 -5.3Q42.8 -1.4 41 0.7Q40.4 1.4 39.5 1.8Q38.6 2.2 37.7 2.4Q36.8 2.6 36.2 2.7Q35.5 2.7 35.5 2.7H20.5Q16.3 2.7 13.4 1.4Q10.4 0.1 10.4 -2.2V-17.4Q10.2 -19.5 10.4 -21.8Q10.6 -23.9 12.1 -25.2Q13.5 -26.5 15.8 -26.5Q16.3 -26.5 17.6 -26.5Q18.8 -26.4 19.3 -26.2Q20.6 -25.8 21.4 -25Q22.2 -24.2 22.6 -23.2Q23 -22.2 23.1 -21.1Q23.2 -19.9 23.3 -18.8Q23.3 -18.3 23.3 -16.9Q23.3 -15.5 23.4 -13.9Q23.4 -12.3 23.5 -10.9Q23.6 -9.5 23.7 -9.2Q24 -9.1 25.3 -8.9Q26.6 -8.8 30.4 -8.8Q33.6 -8.8 34.4 -8.9Q35.1 -9 35.2 -9ZM59.9 -2.9Q61.6 -3.2 62.9 -4.4Q64.1 -5.6 64.1 -7.6Q64.1 -10 62.5 -11.2Q60.8 -12.5 58.9 -12.5Q56.9 -12.5 55.2 -11.3Q53.6 -10.1 53.6 -7.6Q53.6 -4.7 55.6 -3.6Q57.6 -2.4 59.9 -2.9Z'},
+  '아':{adv:83.0,d:'M24.9 -77.2Q26.2 -77.2 27.4 -77.1Q28.6 -77 29.8 -76.8Q33.6 -76.2 36.5 -73.3Q38.9 -70.7 40.4 -67.3Q41.9 -64 42.8 -60.3Q43.6 -56.6 43.9 -52.8Q44.2 -48.9 44.4 -45.3Q44.6 -40.7 44.5 -36.1Q44.5 -31.5 44 -27Q43.5 -22.3 42.5 -17.6Q41.6 -12.8 39.1 -9Q37 -5.8 34 -3.8Q31.1 -1.7 27.7 -1Q24.6 -0.4 21.4 -0.8Q18.2 -1.2 15.3 -2.9Q12.6 -4.5 11 -6.9Q9.3 -9.3 7.9 -12.5Q5.9 -17.3 5.6 -22.4Q5.2 -26.6 5.1 -30.8Q4.9 -35 4.9 -39.2Q4.9 -44.8 5.5 -50.4Q5.7 -52.7 5.9 -55Q6.1 -57.2 6.5 -59.4Q6.9 -61.2 7.2 -62.8Q7.5 -64.4 8.3 -66.1Q9.1 -67.8 10.1 -69.3Q11 -70.8 12.3 -72Q16.5 -76.2 22.4 -77Q23 -77.1 23.6 -77.1Q24.3 -77.1 24.9 -77.2ZM74.9 -46.5Q75.4 -46.5 75.8 -46.4Q76.3 -46.3 76.8 -46.3Q77.3 -46.2 77.9 -46.2Q78.5 -46.1 79.1 -46Q80.2 -45.8 81.3 -45.2Q82.4 -44.7 82.9 -43.6Q83.6 -42.5 83.6 -41Q83.6 -40.2 83.6 -39.6Q83.5 -38.9 83.3 -38.1Q83.1 -37.3 82.9 -36.4Q82.6 -35.5 81.9 -35Q80.5 -34 79.2 -33.7Q77.6 -33.5 75.3 -33.6Q73 -33.7 71.4 -33.6Q71.3 -33.6 71.2 -33.5H71.1L71 -33.4V-33.1Q71 -31.9 71 -30.2Q71 -28.5 71 -26.8Q71 -25 71 -23.4Q71 -21.7 71 -20.4Q71.2 -15.2 71 -10.2V-8.8Q71 -7.5 71 -6Q70.9 -4.4 70.7 -2.9Q70.5 -1.4 70 -0.1Q69.5 1.3 68.6 2.2Q67.4 3.6 65.4 3.6Q65.4 3.6 65.2 3.5Q62.8 3.4 61.4 2.1Q59.9 0.8 59.2 -1.1Q58.4 -3 58.2 -5.1Q58 -7.1 58 -8.7V-68.1Q58 -68.2 58 -69.1Q58 -69.9 58.2 -71.1Q58.4 -72.2 58.9 -73.5Q59.3 -74.7 60.1 -75.5Q60.8 -76.2 62.2 -76.6Q63.5 -76.9 64.6 -76.9Q66.8 -76.9 68.3 -75.4Q69.7 -74 70 -72.5Q70.2 -70.9 70.4 -69.2Q70.5 -68.8 70.5 -68Q70.7 -66.3 70.8 -64.5Q70.8 -62.7 70.9 -60.9Q70.9 -59.8 71 -58.8Q71 -57.7 71 -56.6Q70.9 -56 71 -55.5Q71 -54.9 71 -54.4V-48.9Q71 -48.4 71 -47.8Q71 -47.2 71.2 -46.7Q71.2 -46.6 72.2 -46.6Q73.2 -46.6 73.3 -46.6Q74.2 -46.4 74.7 -46.5ZM24.6 -14.3Q26.5 -14.3 28.3 -15.5Q30 -16.7 30.7 -18.7Q31.4 -20.7 31.9 -23.1Q32.7 -27.7 32.8 -32.9Q32.9 -38.1 32.7 -42.9Q32.7 -44.8 32.6 -47Q32.5 -49.1 32.2 -51.2Q32 -53.3 31.5 -55.2Q31 -57.2 30.1 -58.7Q29.1 -60.4 27.7 -61.3Q26.3 -62.2 24.7 -62Q23 -61.8 21.6 -60.8Q20.1 -59.8 19.2 -57.8L18.3 -55.7Q17.7 -53.8 17.4 -51.8Q17.1 -49.7 16.9 -47.7Q16.7 -45.7 16.6 -43.6Q16.5 -41.5 16.5 -39.5Q16.6 -37.5 16.5 -35.6Q16.3 -33.7 16.5 -31.7Q16.7 -29.1 17.1 -26.1Q17.4 -23.1 18.2 -20.5Q19.1 -17.8 20.6 -16.1Q22.1 -14.3 24.6 -14.3Z'},
+};
+const TITLE=[{text:'지금 이대로도',size:60,colors:['#ec4d63','#f4a52f','#20b5a6','#3b7fe0','#8f5bd3','#ec5191']},
+             {text:'괜찮아',size:86,colors:['#38ad4b','#f39c22','#2c8ce8']}];
+const TITLE_SKY='#f7b9c8';                                   // 우표 하늘색
+function tRand(seed){ let s=(seed>>>0)%2147483647||1; return ()=>{ s=(s*16807)%2147483647; return (s-1)/2147483646; }; }
+// 손으로 따라 그린 듯 윤곽선을 살짝 떨리게
+const tWobble=(d,amp,rnd)=>d.replace(/-?\d+(?:\.\d+)?/g,n=>(+n+(rnd()*2-1)*amp).toFixed(1));
+function titleSvg(seed){
+  const rnd=tRand(seed);
+  // 줄마다 글자 자리 (글자는 제 가운데를 축으로 살짝 기울고 오르내린다)
+  const rows=TITLE.map(L=>{ let x=0, i=0; const g=[];
+    for(const ch of L.text){ if(ch===' '){ x+=L.size*.3; continue; } const t=TJ[ch]; const w=t.adv/100*L.size;
+      g.push({t,x,w,s:L.size,col:L.colors[i%L.colors.length],rot:(rnd()*2-1)*5,dy:(rnd()*2-1)*L.size*.03}); x+=w; i++; }
+    return {g,w:x,s:L.size}; });
+  const pad=20, gap=8, W=Math.ceil(Math.max(...rows.map(r=>r.w))+pad*2);
+  let y=pad+4; const base=[];
+  for(const r of rows){ y+=r.s*.8; base.push(y); y+=r.s*.2+gap; }
+  const H=Math.ceil(y-gap+pad+6);
+  // 우표: 둘째 줄 오른쪽 끝에 비스듬히 붙인다
+  const r2=rows[1], x2=(W-r2.w)/2-r2.s*.24, sw=r2.s*1.02, sh=sw*78/62;
+  const sx=x2+r2.w+r2.s*.05, sy=base[1]-r2.s*.86;
+  let shadow='', white='', color='', glyphs='', k=0;
+  rows.forEach((r,ri)=>{ const x0=ri===1?x2:(W-r.w)/2;
+    for(const q of r.g){
+      const sc=(q.s/100).toFixed(4), cx=(q.w/2).toFixed(1), cy=(-q.s*.38).toFixed(1);
+      const tr=`translate(${(x0+q.x).toFixed(1)} ${(base[ri]+q.dy).toFixed(1)}) rotate(${q.rot.toFixed(1)} ${cx} ${cy}) scale(${sc})`;
+      const open=`<g class="tP" style="--i:${k}"><g class="tB" style="--i:${k}"><g transform="${tr}">`, close='</g></g></g>';
+      glyphs+=`<path id="tcG${k}" d="${q.t.d}"/>`;                // 글자 모양은 한 번만 두고 겹마다 가져다 쓴다
+      shadow+=`${open}<use href="#tcG${k}" transform="translate(0 5)" fill="#d9b07a" stroke="#d9b07a" stroke-width="25"/>${close}`;
+      white+=`${open}<use href="#tcG${k}" fill="#fffaf0" stroke="#fffaf0" stroke-width="25"/>${close}`;
+      color+=`${open}<use href="#tcG${k}" fill="${q.col}" stroke="${q.col}" stroke-width="7"/><use href="#tcG${k}" fill="url(#tcHatch)" stroke="url(#tcHatch)" stroke-width="7"/>`
+        +`<path d="${tWobble(q.t.d,.55,rnd)}" fill="none" stroke="#3b2416" stroke-width="2.7" stroke-linecap="round"/>${close}`;
+      k++;
+    } });
+  // 바퀴벌레 우표 (편지에 붙던 것과 같은 그림)
+  let perf=''; for(let x=1;x<64;x+=6) perf+=`<circle cx="${x}" cy="0" r="2.6"/><circle cx="${x}" cy="78" r="2.6"/>`; for(let yy=4;yy<78;yy+=6) perf+=`<circle cx="0" cy="${yy}" r="2.6"/><circle cx="62" cy="${yy}" r="2.6"/>`;
+  const stamp=`<g class="tS"><g transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)}) rotate(9 ${(sw/2).toFixed(1)} ${(sh/2).toFixed(1)}) scale(${(sw/62).toFixed(4)})">`
+    +`<rect x="2" y="5" width="62" height="78" rx="2" fill="#000" opacity=".16"/>`
+    +`<g mask="url(#tcPerf)"><rect width="62" height="78" fill="#fff"/><rect x="5" y="5" width="52" height="68" fill="url(#tcSky)"/><circle cx="46" cy="16" r="6" fill="#ffd45a"/><rect x="5" y="58" width="52" height="15" fill="#d9a766"/></g>`
+    +`<g transform="translate(31 38)"><ellipse cx="1.5" cy="3" rx="10" ry="19" fill="#000" opacity=".18"/>`
+    +`<g stroke="#2b1406" stroke-width="1.1" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M-2 -17 C-6 -24 -11 -27 -18 -30"/><path d="M2 -17 C6 -24 11 -27 18 -30"/><path d="M-6 -8 L-12 -11 L-16 -17"/><path d="M6 -8 L12 -11 L16 -17"/><path d="M-7 -2 L-14 1 L-19 6"/><path d="M7 -2 L14 1 L19 6"/><path d="M-6 3 L-13 10 L-17 21"/><path d="M6 3 L13 10 L17 21"/></g>`
+    +`<path d="M0 -8 C8 -8 9 2 8 10 C7 18 3 22 0 22 C-3 22 -7 18 -8 10 C-9 2 -8 -8 0 -8 Z" fill="url(#tcWing)"/><path d="M0 -7 C-1 4 -1 14 0 22" stroke="#3a1a06" stroke-width=".8" fill="none"/>`
+    +`<path d="M-4 -4 C-6 4 -5 12 -3 18" stroke="#f0c48a" stroke-width="1.1" fill="none" opacity=".45" stroke-linecap="round"/>`
+    +`<path d="M0 -17 C6 -17 9 -13 9 -9 C9 -7 5 -6 0 -6 C-5 -6 -9 -7 -9 -9 C-9 -13 -6 -17 0 -17 Z" fill="url(#tcPro)"/>`
+    +`<path d="M-2.4 -15.5 C-3 -12 -3 -9 -2.2 -7 M2.4 -15.5 C3 -12 3 -9 2.2 -7" stroke="#3a1a06" stroke-width="1.5" fill="none" stroke-linecap="round"/><ellipse cx="0" cy="-18" rx="2.8" ry="2" fill="#5a2d10"/></g></g></g>`;
+  const Wt=Math.ceil(Math.max(W,sx+sw+pad)), Ht=Math.ceil(Math.max(H,sy+sh+pad));
+  return `<svg viewBox="0 0 ${Wt} ${Ht}" role="img" aria-label="지금 이대로도 괜찮아"><defs>`
+    +`<pattern id="tcHatch" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-56)">`
+    +`<path d="M-2 2.5H8.5M11 2.5H16" stroke="#fff" stroke-opacity=".45" stroke-width="1.5" stroke-linecap="round"/>`
+    +`<path d="M-2 6.5H4M6.5 6.5H16" stroke="#fff" stroke-opacity=".3" stroke-width="1.2" stroke-linecap="round"/>`
+    +`<path d="M-2 10H12" stroke="#fff" stroke-opacity=".38" stroke-width="1.7" stroke-linecap="round"/>`
+    +`<path d="M3 12.8H16" stroke="#000" stroke-opacity=".09" stroke-width="1.1" stroke-linecap="round"/></pattern>`
+    +glyphs+`<mask id="tcPerf"><rect width="62" height="78" fill="#fff"/><g fill="#000">${perf}</g></mask>`
+    +`<radialGradient id="tcWing" cx=".42" cy=".3" r=".8"><stop offset="0" stop-color="#c98a4b"/><stop offset=".55" stop-color="#8a4a1e"/><stop offset="1" stop-color="#4a220b"/></radialGradient>`
+    +`<radialGradient id="tcPro" cx=".45" cy=".35" r=".75"><stop offset="0" stop-color="#e2b77c"/><stop offset="1" stop-color="#9a6630"/></radialGradient>`
+    +`<linearGradient id="tcSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${TITLE_SKY}"/><stop offset="1" stop-color="#fff6d8"/></linearGradient>`
+    +`</defs><g stroke-linejoin="round">${shadow}${white}${color}</g>${stamp}</svg>`;
+}
+
+const titleEl=$('#title');
+let titleUp=false, titleT=0, titleStamped=false;
+/** 시체를 다 눕히면 뜬다. 글자가 하나씩 톡톡 올라오고 우표가 탁 붙은 뒤, 3.4초가 지나거나 아무 데나 누르면 걷힌다 */
+function showTitle(){
+  titleEl.innerHTML=titleSvg(1+((Math.random()*2147483645)|0));
+  titleEl.classList.remove('out'); titleEl.classList.add('show'); titleEl.setAttribute('aria-hidden','false');
+  titleUp=true; titleT=0; titleStamped=false;
+}
+function hideTitle(now){
+  if(!titleUp&&!now) return;
+  const was=titleUp; titleUp=false; titleEl.setAttribute('aria-hidden','true');
+  if(now){ titleEl.classList.remove('show','out'); titleEl.innerHTML=''; return; }
+  titleEl.classList.add('out');
+  setTimeout(()=>{ if(!titleUp){ titleEl.classList.remove('show','out'); titleEl.innerHTML=''; } },380);
+  if(was&&hintDue) setTimeout(showDueHint,450);                // 카드가 걷히면 도구 안내
+}
+function updateTitle(dt){
+  if(!titleUp) return; titleT+=dt;
+  if(!titleStamped&&titleT>=1.15){ titleStamped=true; SND.stamp(); }      // 우표가 탁 붙는 소리
+  if(titleT>=3.4) hideTitle();
+}
+titleEl.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); if(titleUp&&titleT>.5) hideTitle(); });   // 뜨자마자 누른 건 무시
+
 // ───────── 들어올 때: 핀셋이 시체를 휴지 위에 내려놓는다 ─────────
 let entering=null;
-function startEntry(){ entering={t:0,landed:false,opened:false,said:false}; const T=TOOLS.tweezer; T.root.visible=true; T.grip=1; T.setGrip(1); AU.place(0); }
+function startEntry(){ entering={t:0,landed:false,opened:false}; const T=TOOLS.tweezer; T.root.visible=true; T.grip=1; T.setGrip(1); AU.place(0); }
 function updateEntry(dt){
   const e=entering; if(!e) return; e.t+=dt; const T=TOOLS.tweezer, g=corpse?.group;
   const DOWN=.5, OPEN=.62, AWAY=1.0;
@@ -1053,7 +1142,7 @@ function updateEntry(dt){
   const yaw=Math.atan2(camera.position.x,camera.position.z)+.75;
   T.root.visible=true;                                     // 내려놓는 동안 도구를 바꿔도 핀셋은 끝까지 보인다
   T.root.position.set(away*.9,.035+hY+away*1.4,away*.4); T.root.rotation.set(-.62,yaw,0,'YXZ');
-  if(e.t>=AWAY){ T.root.visible=tool==='tweezer'&&pen.shown; entering=null; setTimeout(()=>{ if(started&&!paused){ say(); setTimeout(()=>showHint(tool),400); } },180); }
+  if(e.t>=AWAY){ T.root.visible=tool==='tweezer'&&pen.shown; entering=null; hintDue=tool; showTitle(); }   // 다 눕히면 제목 카드 → 카드가 걷히면 도구 안내
 }
 
 // ───────── 시점 ─────────
@@ -1095,7 +1184,7 @@ homeBtn.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagatio
 
 // ───────── 입력 ─────────
 function onDown(e){
-  if(!started||paused) return;
+  if(!started||paused||titleUp) return;
   e.preventDefault(); AU.ensure();
   viewUp(e.pointerId);
   if(e.button===2||e.button===1){ viewDown(e); return; }
@@ -1133,6 +1222,9 @@ window.addEventListener('keydown',e=>{
 });
 
 // ───────── 번째 ─────────
+// 간병한 횟수는 이 화면이 직접 센다. 저장 이름은 tally.js 방식(roach_tally_…)에 맞춰 두어, 나중에 처치 수 밑에 「간병 N마리」를 붙일 때 그대로 이어진다
+const CARE_KEY='roach_tally_care';
+function addCareCount(){ try{ const v=Math.max(0,parseInt(localStorage.getItem(CARE_KEY)||'0',10)||0)+1; localStorage.setItem(CARE_KEY,String(v)); return v; }catch(e){ return 0; } }
 const ordEl=$('#ordinal');
 function showOrdinal(n){ ordEl.textContent=n>0?`${n}번째 간병`:''; ordEl.classList.toggle('show',n>0); }
 
@@ -1148,13 +1240,14 @@ function frame(){
 }
 function step(dt){
   updateView(dt);
+  updateTalk(dt);
+  updateTitle(dt);
   tickSay(dt);
   if(entering) updateEntry(dt);
   placeTools(dt);
   const speed=pen.vel.length();
-  if(tool==='swab') updateSwab(dt,speed); else { AU.level('swab',0); AU.level('swabWet',0); }
-  if(tool==='brush'&&pen.shown) updateBrush(dt,speed); else { AU.level('brush',0); AU.level('shell',0); AU.level('smear',0); }
-  if(tool!=='swab'&&!(tool==='brush'&&pen.shown)) AU.level('paper',0);
+  if(tool==='swab') updateSwab(dt,speed); else AU.level('swab',0);
+  if(tool==='brush'&&pen.shown) updateBrush(dt,speed); else AU.level('brush',0);
   if(pen.shown&&!entering){ _v.copy(cur).project(camera); AU.place(clamp(_v.x*.95,-.92,.92)); }      // 도구 소리는 도구가 있는 쪽 귀에서
   if(tool==='ointment') updateSqueeze(dt);
   if(tool==='tweezer') updateHeld(dt);
@@ -1187,14 +1280,15 @@ function clearScene(){
 }
 /** 시체 하나를 받아 휴지 위에 눕힌다. payload: {corpse, sfx} */
 function enter(payload={}){
+  hideTitle(true);
   if(payload.sfx) AU.use(payload.sfx);
   clearScene();
   if(payload.corpse){ try{ buildCorpse(payload.corpse); }catch(err){ console.error(err); showErr('시체 모양을 불러오지 못했습니다.'); } }
   // 진물이 닿아 있던 자리는 휴지에 젖어 배어 있다
   if(corpse?.gooS){ const S=corpse.gooS; for(let i=0;i<S.wx.length;i+=6){ if(S.wy[i]<TISSUE_Y+.014) stain(S.wx[i],S.wz[i],rand(.04,.08),'210,191,146',.05); } }
   rasterBase(); rebuildOintAll();
-  showOrdinal(Tally.add('care'));
-  newSessionLines();
+  showOrdinal(addCareCount());
+  newSessionLines(); talkLeft=0; lastAct=-9;
   if(!started) setTool(tool,true);
   started=true; paused=false;
   resetView(); pen.shown=false; for(const n in TOOLS) TOOLS[n].root.visible=false;
@@ -1203,13 +1297,13 @@ function enter(payload={}){
   wake();
   return api;
 }
-function sleep(){ paused=true; cancelAll(); AU.stopVoice(); bubble.text=''; drawSay(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } return api; }
-function wake(){ paused=false; last=performance.now()/1000; resize(); if(!rafId) rafId=requestAnimationFrame(frame); return api; }
+function sleep(){ paused=true; hideTitle(true); cancelAll(); AU.stopVoice(); bubble.text=''; drawSay(); if(rafId){ cancelAnimationFrame(rafId); rafId=0; } return api; }
+function wake(){ paused=false; last=performance.now()/1000; resize(); if(!rafId) rafId=requestAnimationFrame(frame); if(hintDue) setTimeout(showDueHint,500); return api; }
 function reset(){ clearScene(); started=false; paused=true; return api; }
 const api={enter,sleep,wake,reset,
   // 점검용
   _debug:{step(n=1,dt=1/60){ for(let i=0;i<n;i++) step(dt); },render(){ renderer.render(scene,camera); drawSay(); },stopLoop(){ if(rafId){ cancelAnimationFrame(rafId); rafId=0; } },
-    get corpse(){ return corpse; },get pen(){ return pen; },get view(){ return view; },tools:TOOLS,SND,lines:LINES,sfxData:()=>SFXDATA,sfxBuildMs(){ const t=performance.now(); sfxBuilder(); return performance.now()-t; },setTool,toolDown,toolMove,toolUp,pickSurface,say,bubble,th,base,camera,scene,AU,VO,loadVoice,
+    get corpse(){ return corpse; },get pen(){ return pen; },get view(){ return view; },get state(){ return {started,paused,entering:!!entering,talkLeft:+talkLeft.toFixed(2),lastAct:+(clock-lastAct).toFixed(2),raf:!!rafId,tool,hintDue,titleUp}; },tools:TOOLS,SND,lines:LINES,sfxData:()=>SFXDATA,sfxBuildMs(){ const t=performance.now(); sfxBuilder(); return performance.now()-t; },setTool,toolDown,toolMove,toolUp,pickSurface,say,bubble,th,base,camera,scene,AU,VO,loadVoice,
     press(x,y){ onDown({pointerId:91,clientX:x,clientY:y,button:0,pointerType:'touch',preventDefault(){}}); },move(x,y){ onMove({pointerId:91,clientX:x,clientY:y,pointerType:'touch',preventDefault(){}}); },release(){ onUp({pointerId:91,type:'pointerup'}); }}};
 window.CareRoom=api;
 resize();
