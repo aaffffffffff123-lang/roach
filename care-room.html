@@ -243,7 +243,7 @@ function buildCorpse(p){
     const m=new THREE.Mesh(geo,L.style==='fold'?MAT.charLimb:MAT.limb); m.castShadow=true; m.receiveShadow=true; lg.add(m); g.add(lg);
     // 짜부된 시체에서 떨어져 나간 다리는 바닥 높이가 .012, 붙은 다리는 .014
     const detached=p.mode==='crushed'&&Math.abs(L.y-.012)<.0006;
-    return {grp:lg,mesh:m,rest:Float32Array.from(geo.attributes.position.array),L0:{...L},detached,ry:L.ry,rz:L.rz,rx:L.rx,nudge:0,fall:null,samples:null};
+    return {grp:lg,mesh:m,rest:Float32Array.from(geo.attributes.position.array),supH:new Float32Array(geo.attributes.position.count),L0:{...L},detached,ry:L.ry,rz:L.rz,rx:L.rx,nudge:0,fall:null,samples:null,top:false};
   });
   for(const k in geos) geos[k].dispose();
   // 머리가 화면 위쪽을 보게 눕히고 조금 비튼다
@@ -315,32 +315,55 @@ function paperY(x,z){
 // 위아래 순서는 그대로 두고 눌러서(면에 가까울수록 부드럽게) 두께가 뒤집히거나 꺾이지 않는다
 const DRAPE_H0=.0012, DRAPE_H1=.006;
 const _dInv=new THREE.Matrix4();
-function drape(mesh,rest){
+// store: 정점마다 받친 높이를 적어 둔다. lowerOnly면 적어 둔 높이보다 낮아진 곳만 따라 내려간다 (연고가 걷히면 내려앉고, 덮여도 솟지 않는다)
+function drape(mesh,rest,sup=paperY,store=null,lowerOnly=false){
   if(!mesh||!rest) return;
+  const fast=sup===paperY&&!store;                           // 휴지는 .1보다 높지 않아 그 위 정점은 건너뛴다
   mesh.updateMatrixWorld(true);
   const P=mesh.geometry.attributes.position, A=P.array, e=mesh.matrixWorld.elements, ie=_dInv.copy(mesh.matrixWorld).invert().elements, B=DRAPE_H1-DRAPE_H0;
   for(let i=0;i<P.count;i++){
     const k=i*3, x=rest[k], y=rest[k+1], z=rest[k+2];
     const wx=e[0]*x+e[4]*y+e[8]*z+e[12], wy=e[1]*x+e[5]*y+e[9]*z+e[13], wz=e[2]*x+e[6]*y+e[10]*z+e[14];
-    let h=1, s=0; if(wy<.1){ s=paperY(wx,wz); h=wy-s; }
+    let h=1, s=0; if(!fast||wy<.1){ s=sup(wx,wz); if(store){ if(lowerOnly&&store[i]<s) s=store[i]; store[i]=s; } h=wy-s; }
     if(h>=DRAPE_H1){ A[k]=x; A[k+1]=y; A[k+2]=z; continue; }
     const ny=s+DRAPE_H0+B*Math.exp((h-DRAPE_H1)/B);
     A[k]=ie[0]*wx+ie[4]*ny+ie[8]*wz+ie[12]; A[k+1]=ie[1]*wx+ie[5]*ny+ie[9]*wz+ie[13]; A[k+2]=ie[2]*wx+ie[6]*ny+ie[10]*wz+ie[14];
   }
   P.needsUpdate=true; mesh.geometry.computeBoundingSphere();
 }
+// 다리가 놓이는 바닥: 아직 안 건드린 다리는 휴지 위에 있어서 그 위로 짠 연고에 덮인다.
+// 핀셋으로 옮기거나 브러시에 쓸린 다리는 연고 위에 얹힌다 (떨어진 다리는 몸통 위에도, 몸에 붙은 다리는 휴지 쪽 연고 위에만)
+function sideY(x,z){
+  const fx=gix(x), fz=gix(z); if(fx<0||fz<0||fx>GN-1.001||fz>GN-1.001) return paperY(x,z);
+  const i=fx|0, j=fz|0, u=fx-i, v=fz-j, k=j*GN+i;
+  const h=q=>paperG[q]+(base[q]-paperG[q]<.004?th[q]:0);
+  return lerp(lerp(h(k),h(k+1),u),lerp(h(k+GN),h(k+GN+1),u),v);
+}
+const legSup=l=>!l.top?paperY:(l.detached?surfY:sideY);
+/** 연고 두께 (가장 가까운 칸) */
+function thAt(x,z){ const i=Math.round(gix(x)), j=Math.round(gix(z)); return (i<0||j<0||i>=GN||j>=GN)?0:th[j*GN+i]; }
+// 도구가 닿는 바닥 높이 = 휴지·책상 + 시체 몸통·진물. 다리와 더듬이처럼 가는 것은 넣지 않는다:
+// 들린 다리 끝까지 바닥으로 치면 브러시 털이 그 높이로 튀고 면봉이 다리 위로 뛰어오르며, 연고도 다리를 따라 솟았다.
+// 가는 것들은 브러시에 밀리고 핀셋으로 집힐 뿐 도구를 받치지 않는다
+const paperG=new Float32Array(GN*GN);                 // 휴지·책상 높이만 (칸마다)
 function rasterBase(){
-  for(let j=0;j<GN;j++) for(let i=0;i<GN;i++){ const x=-GW/2+i*GC, z=-GW/2+j*GC; base[j*GN+i]=paperY(x,z); }
+  for(let j=0;j<GN;j++) for(let i=0;i<GN;i++){ const k=j*GN+i; paperG[k]=base[k]=paperY(-GW/2+i*GC,-GW/2+j*GC); }
   if(!corpse) return;
-  const top=new Float32Array(GN*GN).fill(-1), v=new THREE.Vector3();
+  const N=GN*GN, top=new Float32Array(N).fill(-1), fill=new Float32Array(N).fill(-1), ero=new Float32Array(N).fill(-1), v=new THREE.Vector3();
   corpse.group.updateMatrixWorld(true);
-  const meshes=[corpse.shell,corpse.goo,...corpse.legs.map(l=>l.mesh)];
-  for(const m of meshes){ if(!m) continue; const P=m.geometry.attributes.position, M=m.matrixWorld;
+  for(const m of [corpse.shell,corpse.goo]){ if(!m) continue; const P=m.geometry.attributes.position, M=m.matrixWorld;
     for(let i=0;i<P.count;i++){ v.fromBufferAttribute(P,i).applyMatrix4(M); if(v.y<TISSUE_Y) continue; const ix=Math.round(gix(v.x)), iz=Math.round(gix(v.z)); if(ix<0||iz<0||ix>=GN||iz>=GN) continue; const k=iz*GN+ix; if(v.y>top[k]) top[k]=v.y; } }
-  // 정점 사이 빈칸을 메운다 (3×3 최댓값), 위로 덮이는 연고가 각지지 않게 살짝 뭉갠다
+  // 정점 사이 빈칸을 메운다 (3×3), 위로 덮이는 연고가 각지지 않게 살짝 뭉갠다
   for(let j=1;j<GN-1;j++) for(let i=1;i<GN-1;i++){ const k=j*GN+i; let m=-1, s=0, c=0;
     for(let b=-1;b<=1;b++) for(let a=-1;a<=1;a++){ const t=top[k+b*GN+a]; if(t>m) m=t; if(t>0){ s+=t; c++; } }
-    if(m>0){ const h=c>=5?Math.max(m*.55+s/c*.45,top[k]):m*.8; if(h>base[k]) base[k]=h; } }
+    if(m>0) fill[k]=c>=5?Math.max(m*.55+s/c*.45,top[k]):m*.8; }
+  // 가는 것(더듬이·꼬리털·흩어진 부스러기)은 지우고 넓은 덩어리만 남긴다: 5×5에서 가장 낮은 값 → 다시 5×5에서 가장 높은 값
+  for(let j=2;j<GN-2;j++) for(let i=2;i<GN-2;i++){ const k=j*GN+i; let mn=1e9;
+    for(let b=-2;b<=2&&mn>0;b++) for(let a=-2;a<=2;a++){ const t=fill[k+b*GN+a]; if(t<mn) mn=t; }
+    if(mn>0) ero[k]=mn; }
+  for(let j=2;j<GN-2;j++) for(let i=2;i<GN-2;i++){ const k=j*GN+i; let mx=-1;
+    for(let b=-2;b<=2;b++) for(let a=-2;a<=2;a++){ const t=ero[k+b*GN+a]; if(t>mx) mx=t; }
+    if(mx>base[k]) base[k]=mx; }
 }
 
 // ───────── 연고 ─────────
@@ -366,10 +389,11 @@ const ointMat=new THREE.MeshPhysicalMaterial({color:0xf2eadb,roughness:.2,metaln
 ointMat.onBeforeCompile=sh=>ointShader(sh,true);
 const ointDepth=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); ointDepth.onBeforeCompile=sh=>ointShader(sh,false);
 const oint=new THREE.Mesh(ointGeo,ointMat); oint.customDepthMaterial=ointDepth; oint.castShadow=true; oint.receiveShadow=true; oint.frustumCulled=false; oint.renderOrder=2; scene.add(oint);
-let dirty=null;                    // 연고·바닥이 바뀐 칸 범위 [i0,i1,j0,j1]
+let dirty=null, resettle=null, creamCut=false;     // dirty: 연고·바닥이 바뀐 칸 범위 [i0,i1,j0,j1] / creamCut: 면봉·브러시가 연고를 걷거나 밀었다 → 그 위에 얹혀 있던 다리를 다시 앉힌다
 function markDirty(i0,i1,j0,j1){ i0=Math.max(1,i0); j0=Math.max(1,j0); i1=Math.min(GN-2,i1); j1=Math.min(GN-2,j1); if(!dirty) dirty=[i0,i1,j0,j1]; else{ dirty[0]=Math.min(dirty[0],i0); dirty[1]=Math.max(dirty[1],i1); dirty[2]=Math.min(dirty[2],j0); dirty[3]=Math.max(dirty[3],j1); } }
 function flushOint(){
   if(!dirty) return; const [i0,i1,j0,j1]=dirty; dirty=null;
+  if(creamCut){ creamCut=false; resettle=resettle?[Math.min(resettle[0],i0),Math.max(resettle[1],i1),Math.min(resettle[2],j0),Math.max(resettle[3],j1)]:[i0,i1,j0,j1]; }
   const PA=ointGeo.attributes.position, NA=ointGeo.attributes.normal, TA=ointGeo.attributes.th;
   for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){ const k=j*GN+i, t=th[k]; oPos[k*3+1]=base[k]+(t>1e-4?t+.0005:-.0025); oTh[k]=t; }
   const a0=Math.max(1,i0-2), a1=Math.min(GN-2,i1+2), b0=Math.max(1,j0-2), b1=Math.min(GN-2,j1+2);
@@ -474,6 +498,7 @@ function sfxBuilder(){
   const TEX={
     swab:   {sec:2.4, layers:[{bed:[['bp',2600,.55],['lp',6500]],amp:1,mod:.12,modHz:[1,3]},{g:'fiber',rate:240,amp:.35,spread:.5}]},
     brush:  {sec:2.4, layers:[{bed:[['hp',1600],['bp',5200,.5]],amp:1,mod:.12,modHz:[1,3]},{g:'bristle',rate:420,amp:.3,spread:.5}]},
+    smear:  {sec:2.4, layers:[{bed:[['bp',950,.65],['lp',2400]],amp:1,mod:.2,modHz:[1,4]},{g:'squelch',rate:30,amp:.45,spread:.45}]},
     ooze:   {sec:2.6, layers:[{g:'squelch',rate:44,amp:1,spread:.5},{g:'bubble',rate:4,amp:.3,spread:.5},{bed:[['lp',520,2.5],['hp',90]],amp:.45,mod:.5,modHz:[1,4]}]},
   };
   function buildTexture(spec,banks){
@@ -935,13 +960,14 @@ function updateSwab(dt,speed){
     // 연고가 묻어 있으면 솜에 묻어 나온다
     const i0=Math.floor(gix(p.x-.09)),i1=Math.ceil(gix(p.x+.09)),j0=Math.floor(gix(p.z-.09)),j1=Math.ceil(gix(p.z+.09)); let took=0;
     for(let j=Math.max(1,j0);j<=Math.min(GN-2,j1);j++) for(let i=Math.max(1,i0);i<=Math.min(GN-2,i1);i++){ const k=j*GN+i; if(th[k]<=0) continue; const x=-GW/2+i*GC, z=-GW/2+j*GC, d=Math.hypot(x-p.x,z-p.z); if(d>.09) continue; const m=th[k]*Math.min(1,dt*(1.5+speed*5))*(1-d/.09); th[k]-=m; took+=m; }
-    if(took>0){ markDirty(i0,i1,j0,j1); T.cream=Math.min(1,T.cream+took*40); }
+    if(took>0){ markDirty(i0,i1,j0,j1); creamCut=true; T.cream=Math.min(1,T.cream+took*40); }
     if(got>0){ T.soak=Math.min(1,T.soak+got*.004); stain(p.x+rand(-.02,.02),p.z+rand(-.02,.02),.05+rand(.03),'206,186,138',Math.min(.16,.02+got*.003)); }
     else if(T.soak>.05&&speed>.15&&Math.random()<dt*20) stain(p.x,p.z,.035,'214,197,155',.025*T.soak);   // 묻은 솜으로 문지르면 옅게 번진다
   }
-  // 소리: 솜이 스치는 조용한 슥슥 하나만, 문지르는 만큼
-  const mv=pen.down?clamp(speed*1.2):0;
-  AU.level('swab',.065*mv); AU.rate('swab',.9+.2*mv);
+  // 소리: 솜이 스치는 조용한 슥슥, 문지르는 만큼. 연고 위를 지나거나 솜에 연고가 묻어 있으면 찐득한 소리가 섞인다
+  const mv=pen.down?clamp(speed*1.2):0, wet=pen.down?clamp(Math.max(thAt(p.x,p.z)/.012,T.cream*.55)):0;
+  AU.level('swab',.065*mv*(1-.65*wet)); AU.rate('swab',.9+.2*mv);
+  AU.level('smear',.07*mv*wet); AU.rate('smear',.9+.15*mv);
   // 솜 빛깔: 진물이 밸수록 크림색 → 누런빛, 연고는 하얗고 번들
   const C=T.tip.geometry.attributes.color, P=T.tip.geometry.attributes.position;
   if(T._s!==T.soak){ T._s=T.soak; for(let i=0;i<C.count;i++){ const yb=P.getY(i); const low=sstep(.05,-.17,yb)*T.soak; C.setXYZ(i,lerp(1,.86,low),lerp(1,.76,low),lerp(1,.55,low)); } C.needsUpdate=true; }
@@ -982,18 +1008,20 @@ function updateBrush(dt,speed){
       for(let j=Math.max(2,j0);j<=Math.min(GN-3,j1);j++) for(let i=Math.max(2,i0);i<=Math.min(GN-3,i1);i++){ const k=j*GN+i, x=-GW/2+i*GC, z=-GW/2+j*GC, d=Math.hypot(x-ax,z-az); if(d>r) continue;
         const sx=gix(x-vx), sz=gix(z-vz), si=Math.round(sx), sj=Math.round(sz); const up=th[clamp(sj,1,GN-2)*GN+clamp(si,1,GN-2)];
         const avg=(th[k-1]+th[k+1]+th[k-GN]+th[k+GN])*.25; const w=(1-d/r)*sh; const nt=lerp(th[k],lerp(avg,up,.6),w); overCream=Math.max(overCream,th[k]); th[k]=Math.max(0,nt); }
-      if(overCream>.002){ markDirty(i0,i1,j0,j1); T.cream=Math.min(1,T.cream+dt*speed*.6); } }
+      if(overCream>.002){ markDirty(i0,i1,j0,j1); creamCut=true; T.cream=Math.min(1,T.cream+dt*speed*.6); } }
     // 진물이 털에 묻는다
     const g=absorbGoo(ax,az,cur.y,r*.6,dt*speed*.6); if(g>0) T.stain=Math.min(1,T.stain+g*.003);
     // 다리: 산 것처럼 움직이지는 않고, 털에 밀려 조금씩 돌아가거나(붙은 다리) 쓸려 간다(떨어진 다리)
     if(corpse&&speed>.03){ for(const l of corpse.legs){ if(l===held?.leg) continue; l.mesh.getWorldPosition(_v2); const tip=legTipWorld(l,_v); const d=Math.min(Math.hypot(_v2.x-ax,_v2.z-az),Math.hypot(tip.x-ax,tip.z-az)); if(d>r) continue;
         const k=(1-d/r);
+        l.top=true;
         if(l.detached){ _v.set(pen.vel.x,0,pen.vel.z).multiplyScalar(dt*.55*k); moveLegWorld(l,_v); }
         else{ const dirx=tip.x-_v2.x, dirz=tip.z-_v2.z; const cr=(dirx*pen.vel.z-dirz*pen.vel.x)/(Math.hypot(dirx,dirz)||1); l.nudge=clamp(l.nudge-cr*dt*.9*k,-.4,.4); applyLeg(l); } } }
   }
-  // 소리: 털이 쓸리는 조용한 쓱쓱 하나만, 쓸어 가는 만큼
-  const sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0;
-  AU.level('brush',sw*.06); AU.rate('brush',.9+.2*clamp(speed));
+  // 소리: 털이 쓸리는 조용한 쓱쓱, 쓸어 가는 만큼. 연고를 펴 바르거나 털에 연고가 묻어 있으면 찐득한 소리가 섞인다
+  const sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0, wet=touching?clamp(Math.max(overCream/.01,T.cream*.55)):0;
+  AU.level('brush',sw*.06*(1-.65*wet)); AU.rate('brush',.9+.2*clamp(speed));
+  AU.level('smear',sw*.065*wet); AU.rate('smear',.9+.15*clamp(speed));
   // 털 빛깔: 진물·연고가 묻은 끝
   const C=T.tuft.geometry.attributes.color;
   const key=Math.round(T.stain*40)+Math.round(T.cream*40)*100;
@@ -1003,9 +1031,22 @@ function updateBrush(dt,speed){
 // ───────── 다리 ─────────
 const _lv=new THREE.Vector3();
 function legTipWorld(l,out){ const s=l.samples; let far=s[0], fx=-1; for(const q of s){ if(q.x>fx){ fx=q.x; far=q; } } return out.copy(far).applyMatrix4(l.mesh.matrixWorld); }
-function applyLeg(l){ l.grp.rotation.set(l.rx,l.ry+l.nudge,l.rz,'YXZ'); l.grp.updateMatrixWorld(true); drape(l.mesh,l.rest); }
+function applyLeg(l){ l.grp.rotation.set(l.rx,l.ry+l.nudge,l.rz,'YXZ'); l.grp.updateMatrixWorld(true); drape(l.mesh,l.rest,legSup(l),l.top?l.supH:null); }
+/** 면봉·브러시가 연고를 걷거나 민 자리에 얹혀 있던 다리를 다시 앉힌다: 밑이 낮아진 곳만 따라 내려앉고(떨어진 다리는 떨어진다), 덮인 연고 위로 솟지는 않는다 */
+function resettleLegs(){
+  const R=resettle; resettle=null; if(!R||!corpse) return;
+  for(const l of corpse.legs){ if(!l.top||l===held?.leg) continue;
+    l.mesh.updateMatrixWorld(true); let a=1e9,b=-1e9,c=1e9,d=-1e9;
+    for(const q of l.samples){ _v.copy(q).applyMatrix4(l.mesh.matrixWorld); const i=gix(_v.x), j=gix(_v.z); if(i<a) a=i; if(i>b) b=i; if(j<c) c=j; if(j>d) d=j; }
+    if(b<R[0]-2||a>R[1]+2||d<R[2]-2||c>R[3]+2) continue;
+    if(l.fall) continue;
+    if(l.detached){ const S=corpse.S, floor=(surfFloorUnder(l)-corpse.group.position.y)/S+l.L0.y;
+      if(l.grp.position.y>floor+.002/S){ l.fall={v:0}; continue; } }        // 밑의 연고가 걷혔다 → 떨어진다
+    drape(l.mesh,l.rest,legSup(l),l.supH,true);                           // 낮아진 곳만 따라 내려앉는다 (덮인 연고 위로 솟지는 않는다)
+  }
+}
 /** 떨어진 다리를 월드 기준으로 d만큼 옮긴다 */
-function moveLegWorld(l,d){ const S=corpse.S; _lv.copy(d); const q=corpse.group.quaternion.clone().invert(); _lv.applyQuaternion(q).multiplyScalar(1/S); l.grp.position.x+=_lv.x; l.grp.position.z+=_lv.z; l.grp.updateMatrixWorld(true); drape(l.mesh,l.rest); }
+function moveLegWorld(l,d){ const S=corpse.S; _lv.copy(d); const q=corpse.group.quaternion.clone().invert(); _lv.applyQuaternion(q).multiplyScalar(1/S); l.grp.position.x+=_lv.x; l.grp.position.z+=_lv.z; l.grp.updateMatrixWorld(true); drape(l.mesh,l.rest,legSup(l),l.top?l.supH:null); }
 /** 화면 점 근처의 다리를 고른다 */
 function legAt(sx,sy){
   if(!corpse) return null;
@@ -1020,7 +1061,7 @@ function grabAt(sx,sy,p){
   T.gripT=1; SND.grip();
   // 집은 다리를 조금 들어 올린다
   l.mesh.getWorldPosition(_v2);
-  held={leg:l,lift:0,startRy:l.ry,pick:p.clone()};
+  held={leg:l,lift:0,startRy:l.ry,pick:p.clone()}; l.top=true;
   if(l.detached){ held.off=new THREE.Vector3(_v2.x-p.x,0,_v2.z-p.z); }
 }
 function updateHeld(dt){
@@ -1052,20 +1093,17 @@ function dropHeld(){
   const h=held; if(!h) return; held=null;
   const T=TOOLS.tweezer; T.gripT=0; SND.release();
   if(h.leg.detached){ h.leg.fall={v:0}; }
-  else setTimeout(rasterAndKeep,30);
 }
 function updateFalling(dt){
   if(!corpse) return;
   for(const l of corpse.legs){ const f=l.fall; if(!f) continue; const S=corpse.S;
     const floor=(surfFloorUnder(l)-corpse.group.position.y)/S+l.L0.y;
     f.v-=9*dt; l.grp.position.y+=f.v*dt/S;
-    if(l.grp.position.y<=floor){ l.grp.position.y=floor; if(Math.abs(f.v)>.6){ f.v=-f.v*.25; SND.tap(.8); } else { l.fall=null; SND.tap(.4); rasterAndKeep(); } }
+    if(l.grp.position.y<=floor){ l.grp.position.y=floor; if(Math.abs(f.v)>.6){ f.v=-f.v*.25; SND.tap(.8); } else { l.fall=null; SND.tap(.4); } }
     applyLeg(l); }
 }
 // 다리 밑 바닥 높이 (휴지·시체 몸·연고 가운데 가장 높은 곳)
 function surfFloorUnder(l){ l.grp.getWorldPosition(_v2); return surfY(_v2.x,_v2.z)-.002; }
-// 다리를 옮긴 뒤 바닥 높이맵을 다시 그린다 (연고는 그대로)
-function rasterAndKeep(){ rasterBase(); rebuildOintAll(); }
 
 // ───────── 도구 자리 잡기 (매 장면) ─────────
 const TILT={swab:.78,ointment:.5,brush:.72,tweezer:0};
@@ -1327,12 +1365,13 @@ function step(dt){
   const speed=pen.vel.length();
   if(tool==='swab') updateSwab(dt,speed); else AU.level('swab',0);
   if(tool==='brush'&&pen.shown) updateBrush(dt,speed); else AU.level('brush',0);
+  if(tool!=='swab'&&!(tool==='brush'&&pen.shown)) AU.level('smear',0);
   if(pen.shown&&!entering){ _v.copy(cur).project(camera); AU.place(clamp(_v.x*.95,-.92,.92)); }      // 도구 소리는 도구가 있는 쪽 귀에서
   if(tool==='ointment') updateSqueeze(dt);
   if(tool==='tweezer') updateHeld(dt);
   updateFalling(dt);
   if(settle>0&&!squeezeLine&&settleRect){ settle-=dt; slump(...settleRect,1); }
-  flushOint();
+  flushOint(); resettleLegs();
   tFlushT-=dt; if(tDirty&&tFlushT<=0){ tTex.needsUpdate=true; tDirty=false; tFlushT=.08; }
   if(started&&!viewTouched&&!hintSeen.view){ viewHintT+=dt; if(viewHintT>14&&!hintEl.classList.contains('show')) showHint('view',4.5); }
 }
@@ -1382,7 +1421,7 @@ function reset(){ clearScene(); started=false; paused=true; return api; }
 const api={enter,sleep,wake,reset,
   // 점검용
   _debug:{step(n=1,dt=1/60){ for(let i=0;i<n;i++) step(dt); },render(){ renderer.render(scene,camera); drawSay(); },stopLoop(){ if(rafId){ cancelAnimationFrame(rafId); rafId=0; } },
-    get corpse(){ return corpse; },get pen(){ return pen; },get view(){ return view; },get state(){ return {started,paused,entering:!!entering,talkLeft:+talkLeft.toFixed(2),lastAct:+(clock-lastAct).toFixed(2),raf:!!rafId,tool,hintDue,titleUp}; },tools:TOOLS,SND,lines:LINES,sfxData:()=>SFXDATA,sfxBuildMs(){ const t=performance.now(); sfxBuilder(); return performance.now()-t; },setTool,toolDown,toolMove,toolUp,pickSurface,say,bubble,th,base,paperY,camera,scene,AU,VO,loadVoice,
+    get corpse(){ return corpse; },get pen(){ return pen; },get view(){ return view; },get state(){ return {started,paused,entering:!!entering,talkLeft:+talkLeft.toFixed(2),lastAct:+(clock-lastAct).toFixed(2),raf:!!rafId,tool,hintDue,titleUp}; },tools:TOOLS,SND,lines:LINES,sfxData:()=>SFXDATA,sfxBuildMs(){ const t=performance.now(); sfxBuilder(); return performance.now()-t; },setTool,toolDown,toolMove,toolUp,pickSurface,say,bubble,th,base,paperY,surfY,camera,scene,AU,VO,loadVoice,
     press(x,y){ onDown({pointerId:91,clientX:x,clientY:y,button:0,pointerType:'touch',preventDefault(){}}); },move(x,y){ onMove({pointerId:91,clientX:x,clientY:y,pointerType:'touch',preventDefault(){}}); },release(){ onUp({pointerId:91,type:'pointerup'}); }}};
 window.CareRoom=api;
 resize();
