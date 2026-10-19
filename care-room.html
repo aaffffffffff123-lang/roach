@@ -239,11 +239,13 @@ function buildCorpse(p){
   const geos={}; for(const k in p.legGeos) geos[k]=toGeo(p.legGeos[k]);
   const legs=p.legs.map(L=>{
     const lg=new THREE.Group(); lg.position.set(L.x,L.y,L.z); lg.rotation.set(L.rx,L.ry,L.rz,'YXZ');
-    const m=new THREE.Mesh(geos[L.key],L.style==='fold'?MAT.charLimb:MAT.limb); m.castShadow=true; m.receiveShadow=true; lg.add(m); g.add(lg);
+    const geo=geos[L.key].clone(); geo.attributes.position.setUsage(THREE.DynamicDrawUsage);            // 다리마다 따로 (휴지 위에 얹을 때 모양이 달라진다)
+    const m=new THREE.Mesh(geo,L.style==='fold'?MAT.charLimb:MAT.limb); m.castShadow=true; m.receiveShadow=true; lg.add(m); g.add(lg);
     // 짜부된 시체에서 떨어져 나간 다리는 바닥 높이가 .012, 붙은 다리는 .014
     const detached=p.mode==='crushed'&&Math.abs(L.y-.012)<.0006;
-    return {grp:lg,mesh:m,L0:{...L},detached,ry:L.ry,rz:L.rz,rx:L.rx,nudge:0,fall:null,samples:null};
+    return {grp:lg,mesh:m,rest:Float32Array.from(geo.attributes.position.array),L0:{...L},detached,ry:L.ry,rz:L.rz,rx:L.rx,nudge:0,fall:null,samples:null};
   });
+  for(const k in geos) geos[k].dispose();
   // 머리가 화면 위쪽을 보게 눕히고 조금 비튼다
   g.rotation.y=Math.PI+rand(-.45,.45);
   g.scale.setScalar(S);
@@ -255,8 +257,12 @@ function buildCorpse(p){
   else{ const box=new THREE.Box3().setFromObject(g); g.position.x-=(box.min.x+box.max.x)/2; g.position.z-=(box.min.z+box.max.z)/2; }
   g.updateMatrixWorld(true);
   corpse={group:g,shell,goo,legs,S,mode:p.mode,baseY:TISSUE_Y,gooS:null};
+  // 휴지 밑으로 들어간 곳은 휴지 위로 (다리는 옮길 때마다 다시)
+  drape(shell,Float32Array.from(shell.geometry.attributes.position.array));
+  if(goo) drape(goo,Float32Array.from(goo.geometry.attributes.position.array));
+  for(const l of legs) drape(l.mesh,l.rest);
   // 다리마다 집기 판정용 점 몇 개 (다리 자기 좌표)
-  for(const l of legs){ const P=l.mesh.geometry.attributes.position, step=Math.max(1,Math.floor(P.count/14)), pts=[]; for(let i=0;i<P.count;i+=step) pts.push(new THREE.Vector3().fromBufferAttribute(P,i)); l.samples=pts; }
+  for(const l of legs){ const R=l.rest, n=R.length/3, step=Math.max(1,Math.floor(n/14)), pts=[]; for(let i=0;i<n;i+=step) pts.push(new THREE.Vector3(R[i*3],R[i*3+1],R[i*3+2])); l.samples=pts; }
   if(goo) prepGoo();
 }
 // 진물: 면봉으로 찍어 내면 납작해지다 휴지 밑으로 빠진다(휴지에 배어 얼룩만 남는다)
@@ -298,8 +304,33 @@ function surfY(x,z){
   const s00=base[k]+th[k], s10=base[k+1]+th[k+1], s01=base[k+GN]+th[k+GN], s11=base[k+GN+1]+th[k+GN+1];
   return lerp(lerp(s00,s10,u),lerp(s01,s11,u),v);
 }
+/** 휴지(휴지 밖이면 책상) 윗면 높이 — 연고·시체는 빼고 */
+function paperY(x,z){
+  const ax=Math.abs(x), az=Math.abs(z); if(ax>TW||az>TW) return 0;
+  if(x*x*.9025+z*z<.36&&Math.max(ax,az)<TW*.74) return TISSUE_Y;          // 시체가 놓이는 가운데는 평평하다 (주름 계산 생략)
+  return tissueH(x,z);
+}
+// 휴지 위에 얹기: 게임에선 바닥 밑으로 들어간 부분(접혀 내려간 다리 끝, 처진 더듬이 끝)이 바닥에 가려 안 보였는데,
+// 여기선 휴지가 얇은 종이라 그대로 두면 휴지를 뚫고 들어간 것처럼 보인다. 휴지 면보다 낮은 곳은 면 위로 눌러 얹는다.
+// 위아래 순서는 그대로 두고 눌러서(면에 가까울수록 부드럽게) 두께가 뒤집히거나 꺾이지 않는다
+const DRAPE_H0=.0012, DRAPE_H1=.006;
+const _dInv=new THREE.Matrix4();
+function drape(mesh,rest){
+  if(!mesh||!rest) return;
+  mesh.updateMatrixWorld(true);
+  const P=mesh.geometry.attributes.position, A=P.array, e=mesh.matrixWorld.elements, ie=_dInv.copy(mesh.matrixWorld).invert().elements, B=DRAPE_H1-DRAPE_H0;
+  for(let i=0;i<P.count;i++){
+    const k=i*3, x=rest[k], y=rest[k+1], z=rest[k+2];
+    const wx=e[0]*x+e[4]*y+e[8]*z+e[12], wy=e[1]*x+e[5]*y+e[9]*z+e[13], wz=e[2]*x+e[6]*y+e[10]*z+e[14];
+    let h=1, s=0; if(wy<.1){ s=paperY(wx,wz); h=wy-s; }
+    if(h>=DRAPE_H1){ A[k]=x; A[k+1]=y; A[k+2]=z; continue; }
+    const ny=s+DRAPE_H0+B*Math.exp((h-DRAPE_H1)/B);
+    A[k]=ie[0]*wx+ie[4]*ny+ie[8]*wz+ie[12]; A[k+1]=ie[1]*wx+ie[5]*ny+ie[9]*wz+ie[13]; A[k+2]=ie[2]*wx+ie[6]*ny+ie[10]*wz+ie[14];
+  }
+  P.needsUpdate=true; mesh.geometry.computeBoundingSphere();
+}
 function rasterBase(){
-  for(let j=0;j<GN;j++) for(let i=0;i<GN;i++){ const x=-GW/2+i*GC, z=-GW/2+j*GC; base[j*GN+i]=(Math.abs(x)<=TW&&Math.abs(z)<=TW)?tissueH(x,z):0; }
+  for(let j=0;j<GN;j++) for(let i=0;i<GN;i++){ const x=-GW/2+i*GC, z=-GW/2+j*GC; base[j*GN+i]=paperY(x,z); }
   if(!corpse) return;
   const top=new Float32Array(GN*GN).fill(-1), v=new THREE.Vector3();
   corpse.group.updateMatrixWorld(true);
@@ -385,7 +416,7 @@ function slump(i0,i1,j0,j1,iters){
 // 크림 속 방울이 터지는 소리, 쇠 끝이 맞닿는 소리 같은 아주 짧은 조각을 미리 계산해 두고, 도구가 움직이는 만큼 흘리거나 깔아 둔 결의 크기를 움직인다.
 // 도구가 화면 왼쪽에 있으면 왼쪽 귀, 오른쪽이면 오른쪽 귀에서 들린다(먼 귀는 작고 먹먹하게). 목소리는 줄마다 귀를 번갈아 가며 들린다.
 // 게임 소리 장치의 AudioContext를 빌려 쓴다 (폰에서도 게임하며 이미 소리가 풀려 있어서). 따로 열면 첫 터치에 푼다
-const VOICE_GAIN=1.0, SFX_GAIN=1.0;
+const VOICE_GAIN=1.0, SFX_GAIN=1.0, JINGLE_GAIN=.42;
 // 소리 조각·결 계산: 스스로 완결된 함수라 따로 일꾼(Worker)에서 돌린다 — 계산하는 동안 게임 화면이 멈칫하지 않게
 function sfxBuilder(){
   const AFS=48000, TAU=Math.PI*2, rand=(a,b)=>a+Math.random()*(b-a);     // 48kHz로 계산해 두면 재생할 때 장치 표본율로 바뀐다
@@ -468,7 +499,49 @@ function sfxBuilder(){
   }
   const banks={}; for(const k in GRAIN){ banks[k]=[]; for(let i=0;i<(k==='metal'||k==='wood'||k==='thump'?10:40);i++) banks[k].push(GRAIN[k]()); }
   const tex={}; for(const k in TEX) tex[k]=buildTexture(TEX[k],banks);
-  return {fs:AFS,banks,tex};
+  // 제목 카드 음악 (3.2초): 글자가 톡톡 올라올 때마다 실로폰 한 음씩 「도레미솔라솔 / 미레도」,
+  // 우표가 탁 붙을 때 마림바 화음과 종, 끝에 반짝 두 음. 막대 악기는 부분음을 더해 만든다(실제 실로폰·마림바 막대의 배음 비)
+  function jingle(){
+    const SEC=3.2, n=Math.round(AFS*SEC), L=new Float32Array(n), R=new Float32Array(n);
+    const hz=m=>440*Math.pow(2,(m-69)/12);
+    const note=(t0,midi,vel,pan,parts,click)=>{
+      const f0=hz(midi), i0=Math.round(t0*AFS); if(i0>=n) return;
+      const gl=Math.cos((pan+1)*Math.PI/4), gr=Math.sin((pan+1)*Math.PI/4), at=AFS*.0012;
+      for(const [ratio,amp,tau] of parts){
+        const f=f0*ratio*(1+(Math.random()-.5)*.0016); if(f>AFS*.45) continue;
+        const w=TAU*f/AFS, c=Math.cos(w), s=Math.sin(w), d=Math.exp(-1/(tau*AFS)), len=Math.min(n-i0,Math.ceil(tau*AFS*9.2));
+        let x=Math.cos(Math.random()*TAU), y=Math.sin(Math.random()*TAU), env=vel*amp;
+        for(let i=0;i<len;i++){ const nx=x*c-y*s; y=x*s+y*c; x=nx; const v=y*env*(i<at?i/at:1); L[i0+i]+=v*gl; R[i0+i]+=v*gr; env*=d; }
+      }
+      if(click){ const cl=Math.round(AFS*.005); let lp=0; for(let i=0;i<cl&&i0+i<n;i++){ const r=Math.random()*2-1; lp+=(r-lp)*.55; const v=(r-lp)*vel*click*Math.exp(-i/(AFS*.0006)); L[i0+i]+=v*gl; R[i0+i]+=v*gr; } }
+    };
+    const GLOCK=[[1,1,.42],[2.756,.38,.15],[5.404,.13,.06],[8.933,.04,.03]];
+    const SPARK=[[1,1,.7],[2.756,.32,.2],[5.404,.1,.07]];
+    const MARIMBA=[[1,1,.5],[3.98,.26,.1],[9.4,.06,.03]];
+    const BELL=[[1,1,.95],[2.01,.28,.5],[3.02,.12,.3],[4.23,.06,.15]];
+    // 글자 아홉 개가 올라오는 때(0.22초부터 0.075초 간격)
+    const run=[84,86,88,91,93,91,88,86,84];
+    run.forEach((m,i)=>note(.22+i*.075,m,i<6?.30:.36,i%2?.28:-.28,GLOCK,.22));
+    // 우표가 붙는 때(1.17초): 마림바로 펼친 도미솔도 + 종
+    [[60,0],[64,.014],[67,.028],[72,.042]].forEach(([m,dt],k)=>note(1.17+dt,m,.5,(k-1.5)*.16,MARIMBA,.12));
+    note(1.17,84,.24,0,BELL,0);
+    // 반짝
+    note(1.52,91,.12,.38,SPARK,.1); note(1.65,96,.1,-.38,SPARK,.1);
+    // 방 울림 (짧은 슈뢰더 잔향)
+    const verb=(src,off)=>{ const out=new Float32Array(n), combs=[1557,1617,1491,1422].map(v=>v+off), cb=combs.map(d=>({d,b:new Float32Array(d),i:0,lp:0}));
+      for(let i=0;i<n;i++){ let s=0; for(const C of cb){ const y=C.b[C.i]; C.lp=y*.72+C.lp*.28; C.b[C.i]=src[i]+C.lp*.7; C.i=(C.i+1)%C.d; s+=y; } out[i]=s*.25; }
+      for(const [d,g] of [[556+off,.5],[225+off,.5]]){ const b=new Float32Array(d); let k=0; for(let i=0;i<n;i++){ const bo=b[k], x=out[i]; const y=-x+bo; b[k]=x+bo*g; k=(k+1)%d; out[i]=y; } }
+      return out; };
+    const mono=new Float32Array(n); let hp=0; for(let i=0;i<n;i++){ const v=(L[i]+R[i])*.5; hp+=(v-hp)*.04; mono[i]=v-hp; }   // 300Hz 아래는 잔향에 안 넣는다
+    const wl=verb(mono,0), wr=verb(mono,23);
+    for(let i=0;i<n;i++){ L[i]+=wl[i]*.11; R[i]+=wr[i]*.11; }
+    // 끝을 부드럽게 닫고, 최댓값을 맞춘다
+    const fo=Math.round(AFS*.25); for(let i=0;i<fo;i++){ const g=i/fo; L[n-1-i]*=g; R[n-1-i]*=g; }
+    let pk=0; for(let i=0;i<n;i++) pk=Math.max(pk,Math.abs(L[i]),Math.abs(R[i]));
+    const k=.6/(pk||1); for(let i=0;i<n;i++){ L[i]*=k; R[i]*=k; }
+    return {L,R};
+  }
+  return {fs:AFS,banks,tex,jingle:jingle()};
 }
 let SFXDATA=null, sfxReady=null;
 function sfxLoad(){
@@ -476,7 +549,7 @@ function sfxLoad(){
   return sfxReady=new Promise(res=>{
     const done=d=>{ SFXDATA=d; res(d); };
     try{
-      const src='const d=('+sfxBuilder.toString()+')(); const tr=[]; for(const k in d.banks) for(const a of d.banks[k]) tr.push(a.buffer); for(const k in d.tex) tr.push(d.tex[k].buffer); postMessage(d,tr);';
+      const src='const d=('+sfxBuilder.toString()+')(); const tr=[]; for(const k in d.banks) for(const a of d.banks[k]) tr.push(a.buffer); for(const k in d.tex) tr.push(d.tex[k].buffer); if(d.jingle) tr.push(d.jingle.L.buffer,d.jingle.R.buffer); postMessage(d,tr);';
       const url=URL.createObjectURL(new Blob([src],{type:'text/javascript'})), w=new Worker(url);
       w.onmessage=e=>{ w.terminate(); URL.revokeObjectURL(url); done(e.data); };
       w.onerror=e=>{ e.preventDefault?.(); try{ w.terminate(); }catch(err){} URL.revokeObjectURL(url); done(sfxBuilder()); };
@@ -486,7 +559,7 @@ function sfxLoad(){
 sfxLoad();                                                               // 화면을 불러오자마자 맡겨 둔다
 
 class CareAudio{
-  constructor(){ this.ctx=null; this.voiceOut=null; this.sfxIn=null; this.sfxEar=null; this.bufs=null; this.tex=null; this.loops={}; this.cur=null; this.pos=0; }
+  constructor(){ this.ctx=null; this.voiceOut=null; this.sfxIn=null; this.sfxEar=null; this.bufs=null; this.tex=null; this.jbuf=null; this.jsrc=null; this.loops={}; this.cur=null; this.pos=0; }
   use(sfx){ const c=sfx?.ctx; if(c&&c!==this.ctx) this.attach(c); }
   ensure(){ if(!this.ctx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){} try{ this.attach(new C()); }catch(e){ return null; } }
     if(this.ctx.state==='suspended') this.ctx.resume().catch(()=>{}); return this.ctx; }
@@ -497,10 +570,11 @@ class CareAudio{
     const lim=c.createDynamicsCompressor(); lim.threshold.value=-3; lim.knee.value=3; lim.ratio.value=20; lim.attack.value=.002; lim.release.value=.12; lim.connect(c.destination);
     this.sfxEar=this.ear(lim); this.sfxIn=c.createGain(); this.sfxIn.gain.value=SFX_GAIN; this.sfxIn.connect(this.sfxEar.inp); this.sfxEar.set(0,c.currentTime,.01); this.pos=0;
     this.voiceOut=c.createGain(); this.voiceOut.gain.value=VOICE_GAIN; this.voiceOut.connect(c.destination);
-    this.bufs=null; this.tex=null;
+    this.bufs=null; this.tex=null; this.jbuf=null; this.jsrc=null;
     const make=D=>{ if(this.ctx!==c) return; const toBuf=a=>{ const b=c.createBuffer(1,a.length,D.fs); b.getChannelData(0).set(a); return b; };
       this.bufs={}; for(const k in D.banks) this.bufs[k]=D.banks[k].map(toBuf);
-      this.tex={}; for(const k in D.tex) this.tex[k]=toBuf(D.tex[k]); };
+      this.tex={}; for(const k in D.tex) this.tex[k]=toBuf(D.tex[k]);
+      if(D.jingle){ const J=c.createBuffer(2,D.jingle.L.length,D.fs); J.getChannelData(0).set(D.jingle.L); J.getChannelData(1).set(D.jingle.R); this.jbuf=J; } };
     if(SFXDATA) make(SFXDATA); else sfxLoad().then(make);
   }
   /** 귀 자리: p = -1(왼쪽 귀) ~ 1(오른쪽 귀). 먼 귀는 작고 높은 소리가 깎인다 (지연 없이 — 폰 스피커로 합쳐 들어도 소리가 안 패인다) */
@@ -541,6 +615,9 @@ class CareAudio{
     const g=c.createGain(); g.gain.value=1; s.connect(g); g.connect(ear.inp); s.start(t0,Math.max(0,start-.01),dur+.06);
     this.cur={s,g}; s.onended=()=>{ if(this.cur&&this.cur.s===s) this.cur=null; try{ g.disconnect(); }catch(e){} };
   }
+  /** 제목 카드 음악 (가운데, 귀 자리 없이) */
+  playJingle(){ const c=this.ctx; if(!c||!this.jbuf) return; this.stopJingle(0); const s=c.createBufferSource(); s.buffer=this.jbuf; const g=c.createGain(); g.gain.value=JINGLE_GAIN; s.connect(g); g.connect(c.destination); s.start(c.currentTime+.015); this.jsrc={s,g}; s.onended=()=>{ if(this.jsrc&&this.jsrc.s===s) this.jsrc=null; }; }
+  stopJingle(fade=.06){ const j=this.jsrc; if(!j||!this.ctx) return; this.jsrc=null; const t=this.ctx.currentTime; try{ j.g.gain.cancelScheduledValues(t); j.g.gain.setValueAtTime(j.g.gain.value,t); j.g.gain.linearRampToValueAtTime(0,t+Math.max(.01,fade)); j.s.stop(t+Math.max(.01,fade)+.02); }catch(e){} }
   stopVoice(){ const v=this.cur; if(!v||!this.ctx) return; this.cur=null; const t=this.ctx.currentTime; try{ v.g.gain.cancelScheduledValues(t); v.g.gain.setValueAtTime(v.g.gain.value,t); v.g.gain.linearRampToValueAtTime(0,t+.05); v.s.stop(t+.06); }catch(e){} }
 }
 const AU=new CareAudio();
@@ -926,9 +1003,9 @@ function updateBrush(dt,speed){
 // ───────── 다리 ─────────
 const _lv=new THREE.Vector3();
 function legTipWorld(l,out){ const s=l.samples; let far=s[0], fx=-1; for(const q of s){ if(q.x>fx){ fx=q.x; far=q; } } return out.copy(far).applyMatrix4(l.mesh.matrixWorld); }
-function applyLeg(l){ l.grp.rotation.set(l.rx,l.ry+l.nudge,l.rz,'YXZ'); l.grp.updateMatrixWorld(true); }
+function applyLeg(l){ l.grp.rotation.set(l.rx,l.ry+l.nudge,l.rz,'YXZ'); l.grp.updateMatrixWorld(true); drape(l.mesh,l.rest); }
 /** 떨어진 다리를 월드 기준으로 d만큼 옮긴다 */
-function moveLegWorld(l,d){ const S=corpse.S; _lv.copy(d); const q=corpse.group.quaternion.clone().invert(); _lv.applyQuaternion(q).multiplyScalar(1/S); l.grp.position.x+=_lv.x; l.grp.position.z+=_lv.z; l.grp.updateMatrixWorld(true); }
+function moveLegWorld(l,d){ const S=corpse.S; _lv.copy(d); const q=corpse.group.quaternion.clone().invert(); _lv.applyQuaternion(q).multiplyScalar(1/S); l.grp.position.x+=_lv.x; l.grp.position.z+=_lv.z; l.grp.updateMatrixWorld(true); drape(l.mesh,l.rest); }
 /** 화면 점 근처의 다리를 고른다 */
 function legAt(sx,sy){
   if(!corpse) return null;
@@ -1110,11 +1187,13 @@ function showTitle(){
   titleEl.innerHTML=titleSvg(1+((Math.random()*2147483645)|0));
   titleEl.classList.remove('out'); titleEl.classList.add('show'); titleEl.setAttribute('aria-hidden','false');
   titleUp=true; titleT=0; titleStamped=false;
+  AU.playJingle();
 }
 function hideTitle(now){
   if(!titleUp&&!now) return;
   const was=titleUp; titleUp=false; titleEl.setAttribute('aria-hidden','true');
-  if(now){ titleEl.classList.remove('show','out'); titleEl.innerHTML=''; return; }
+  if(now){ AU.stopJingle(.05); titleEl.classList.remove('show','out'); titleEl.innerHTML=''; return; }
+  if(was&&titleT<1.2) AU.stopJingle(.25);                        // 우표가 붙기 전에 걷으면 음악도 같이 줄인다 (붙은 뒤면 끝까지 울리게 둔다)
   titleEl.classList.add('out');
   setTimeout(()=>{ if(!titleUp){ titleEl.classList.remove('show','out'); titleEl.innerHTML=''; } },380);
   if(was&&hintDue) setTimeout(showDueHint,450);                // 카드가 걷히면 도구 안내
@@ -1303,7 +1382,7 @@ function reset(){ clearScene(); started=false; paused=true; return api; }
 const api={enter,sleep,wake,reset,
   // 점검용
   _debug:{step(n=1,dt=1/60){ for(let i=0;i<n;i++) step(dt); },render(){ renderer.render(scene,camera); drawSay(); },stopLoop(){ if(rafId){ cancelAnimationFrame(rafId); rafId=0; } },
-    get corpse(){ return corpse; },get pen(){ return pen; },get view(){ return view; },get state(){ return {started,paused,entering:!!entering,talkLeft:+talkLeft.toFixed(2),lastAct:+(clock-lastAct).toFixed(2),raf:!!rafId,tool,hintDue,titleUp}; },tools:TOOLS,SND,lines:LINES,sfxData:()=>SFXDATA,sfxBuildMs(){ const t=performance.now(); sfxBuilder(); return performance.now()-t; },setTool,toolDown,toolMove,toolUp,pickSurface,say,bubble,th,base,camera,scene,AU,VO,loadVoice,
+    get corpse(){ return corpse; },get pen(){ return pen; },get view(){ return view; },get state(){ return {started,paused,entering:!!entering,talkLeft:+talkLeft.toFixed(2),lastAct:+(clock-lastAct).toFixed(2),raf:!!rafId,tool,hintDue,titleUp}; },tools:TOOLS,SND,lines:LINES,sfxData:()=>SFXDATA,sfxBuildMs(){ const t=performance.now(); sfxBuilder(); return performance.now()-t; },setTool,toolDown,toolMove,toolUp,pickSurface,say,bubble,th,base,paperY,camera,scene,AU,VO,loadVoice,
     press(x,y){ onDown({pointerId:91,clientX:x,clientY:y,button:0,pointerType:'touch',preventDefault(){}}); },move(x,y){ onMove({pointerId:91,clientX:x,clientY:y,pointerType:'touch',preventDefault(){}}); },release(){ onUp({pointerId:91,type:'pointerup'}); }}};
 window.CareRoom=api;
 resize();
