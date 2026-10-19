@@ -177,6 +177,7 @@ html #intro .box,html #mail .card,html #slimeDone .card,html #petName .card{marg
 let THREE=null;
 import {createSlimeMode} from './slime-mode.js'; import {createPetMode} from './pet-mode.js'; import {createCutscene} from './cutscene.js';
 import {installTallyHud} from './tally.js';
+import {createCareMode} from './care-mode.js';
 
 const gameFrame=document.getElementById('gameFrame');
 const labLayer=document.getElementById('labLayer');
@@ -227,6 +228,9 @@ const pet=PET_ON?createPetMode({
 }):{install(){},reset(){},isOpen:()=>false,isBusy:()=>false,isTankOpen:()=>false};
 // 죽일 때 가끔: 「사랑이 이긴다」 편지 대신 바퀴 두 마리가 대화하는 창
 const cut=createCutscene({getG:()=>G,getSfx:()=>GSFX,onClose:()=>{lastLetterAt=performance.now()/1000;}});
+// 간병모드(구급상자): 아직 공개 전이라 주소 끝에 ?care=1 을 붙여 들어올 때만 「구급상자」가 생긴다. 공개할 때는 CARE_ON을 true로
+const CARE_ON=(()=>{ const v=new URLSearchParams(location.search).get('care'); return v!==null&&v!=='0'; })();
+const care=CARE_ON?createCareMode({gameFrame,isBlocked:()=>mailOpen}):{install(){},reset(){},isOpen:()=>false,isBusy:()=>false};
 
 const showError=text=>{
   errorEl.textContent=text;
@@ -253,7 +257,7 @@ async function waitForGame(){
         GSFX=w.__SFX||null;
         installTweezerMode();
         installLetters();
-         slime.install({G,gameWindow,THREE,GSFX}); pet.install({G,gameWindow,THREE,GSFX});
+         slime.install({G,gameWindow,THREE,GSFX}); pet.install({G,gameWindow,THREE,GSFX}); care.install({G,gameWindow,THREE,GSFX});
         installTallyHud(gameWindow);
         if(introActive)holdGameForIntro();
         else if(startWhenReady)beginTreatment();
@@ -271,7 +275,7 @@ async function waitForGame(){
 gameFrame.addEventListener('load',()=>{
   installed=false;
   cap=null;
-  slime.reset(); pet.reset();
+  slime.reset(); pet.reset(); care.reset();
   waitForGame();
 });
 
@@ -402,7 +406,7 @@ function closeLetter(){
 mailOk.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(performance.now()-(mailEl._at||0)<900)return;closeLetter();});   // 뜨고 0.9초 안에 눌린 건 잡던 손이라 닫지 않는다
 mailEl.addEventListener('pointerdown',()=>{if(mailOpen)mailEl.classList.add('open');});
 
-const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!pet.isBusy()&&!mailOpen&&!cut.isOpen()&&!introActive&&!cap;
+const letterFree=()=>G&&G.state==='r1'&&!labOpen&&!slime.isOpen()&&!pet.isBusy()&&!care.isBusy()&&!mailOpen&&!cut.isOpen()&&!introActive&&!cap;
 const sinceLetter=()=>performance.now()/1000-lastLetterAt;
 let deathSeen=false, killsSinceLetter=0, cutSeen=false;
 
@@ -940,7 +944,7 @@ window.addEventListener('keydown',e=>{
     const st=G?G.state:'';
     const onIntro=!introEl.hidden&&!introEl.classList.contains('gone');
     let pos='tl';
-    if(labOpen||slime.isOpen()||pet.isOpen())pos='tr';
+    if(labOpen||slime.isOpen()||pet.isOpen()||care.isOpen())pos='tr';
     else if(!onIntro&&(st==='r1'||st==='confirm'))pos='br';
     if(face.dataset.pos!==pos)face.dataset.pos=pos;
     const playing=!onIntro&&(labOpen||slime.isOpen()||pet.isOpen()||st==='r1'||st==='confirm'||st==='r2'||st==='to_r2');
