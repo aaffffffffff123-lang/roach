@@ -228,8 +228,8 @@ const pet=PET_ON?createPetMode({
 }):{install(){},reset(){},isOpen:()=>false,isBusy:()=>false,isTankOpen:()=>false};
 // 죽일 때 가끔: 「사랑이 이긴다」 편지 대신 바퀴 두 마리가 대화하는 창
 const cut=createCutscene({getG:()=>G,getSfx:()=>GSFX,onClose:()=>{lastLetterAt=performance.now()/1000;}});
-// 간병모드(구급상자): 아직 공개 전이라 주소 끝에 ?care=1 을 붙여 들어올 때만 「구급상자」가 생긴다. 공개할 때는 CARE_ON을 true로
-const CARE_ON=(()=>{ const v=new URLSearchParams(location.search).get('care'); return v!==null&&v!=='0'; })();
+// 간병모드(구급상자): 기본 공개. 게임 안의 「구급상자」로 시체를 집으면 간병 화면에 들어간다
+const CARE_ON=true;
 const care=CARE_ON?createCareMode({gameFrame,isBlocked:()=>mailOpen}):{install(){},reset(){},isOpen:()=>false,isBusy:()=>false};
 
 const showError=text=>{
