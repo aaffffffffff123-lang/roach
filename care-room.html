@@ -736,8 +736,8 @@ function makeBrush(){
 }
 // 핀셋: 끝이 가늘어지는 스테인리스 판 두 쪽이 마주 보고 서서 뒤에서 붙어 있다. 위에서 보면 끝이 모이는 V자. 원점 = 집게 끝, 뒤쪽이 +z
 function makeTweezer(){
-  const steel=new THREE.MeshStandardMaterial({color:0xd9dde0,metalness:1,roughness:.26,envMapIntensity:1.25});
-  const ribbed=new THREE.MeshStandardMaterial({color:0xb9bec2,metalness:1,roughness:.42,envMapIntensity:1.1});
+  const steel=new THREE.MeshStandardMaterial({color:0xf27aa6,metalness:.12,roughness:.32,envMapIntensity:1});
+  const ribbed=new THREE.MeshStandardMaterial({color:0xd24f86,metalness:.1,roughness:.5,envMapIntensity:1});
   const pivot=new THREE.Group(), LEN=2.55, arms=[];
   // 판 가운데 자리: 끝은 벌어진 만큼, 가운데는 살짝 부풀고, 뒤는 붙는다
   const armX=(side,u,open)=>side*(.0045+open*.075*Math.pow(1-u,1.1)+.026*Math.sin(Math.PI*Math.min(1,u*1.05))*(1-u*.4));
