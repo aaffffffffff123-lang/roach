@@ -495,9 +495,9 @@ function sfxBuilder(){
   // 소리 조각 (한 번 울리는 아주 짧은 소리)
   const GRAIN={
     // 솜 올이 종이·껍질에 걸렸다 풀리는 소리: 부드럽고 가는 사각
-    fiber(){ const n=nOf(rand(2.5,7)), x=DSP.noise(n), tau=n/3.2, at=AFS*.0003; for(let i=0;i<n;i++) x[i]*=Math.min(1,i/at)*Math.exp(-i/tau); DSP.filt(x,'bp',rand(1700,6000),rand(.8,2)); return DSP.peak(x); },
+    fiber(){ const n=nOf(rand(3.5,8)), x=DSP.noise(n), tau=n/2.8, at=AFS*.0008; for(let i=0;i<n;i++) x[i]*=Math.min(1,i/at)*Math.exp(-i/tau); DSP.filt(x,'bp',rand(1200,4200),rand(.65,1.35)); DSP.filt(x,'lp',5200); return DSP.peak(x); },
     // 털 끝이 튀는 소리: 아주 짧고 높은 톡
-    bristle(){ const n=nOf(rand(1,3.5)), x=DSP.noise(n), tau=n/4; for(let i=0;i<n;i++) x[i]*=Math.exp(-i/tau); DSP.filt(x,'bp',rand(3500,9800),rand(1.4,5)); if(Math.random()<.4) DSP.filt(x,'hp',2400); return DSP.peak(x); },
+    bristle(){ const n=nOf(rand(2.5,6)), x=DSP.noise(n), tau=n/2.8, at=AFS*.0008; for(let i=0;i<n;i++) x[i]*=Math.min(1,i/at)*Math.exp(-i/tau); DSP.filt(x,'bp',rand(1800,5200),rand(.7,1.6)); DSP.filt(x,'lp',6000); return DSP.peak(x); },
     // 휴지가 바스락: 짧은 딸깍이 하나 둘
     paper(){ const n=nOf(rand(3,11)), x=DSP.noise(n), tau=AFS*rand(.0006,.0024), s2=Math.random()<.35?nOf(rand(1,4)):-1;
       for(let i=0;i<n;i++){ let e=Math.exp(-i/tau); if(s2>0&&i>=s2) e+=.6*Math.exp(-(i-s2)/tau); x[i]*=e; }
@@ -538,8 +538,8 @@ function sfxBuilder(){
   };
   // 결: 조각을 촘촘히 흩뿌리고 바탕 숨소리를 깐 2초 남짓한 고리. 크기는 도구 움직임에 따라 조절한다
   const TEX={
-    swab:   {sec:2.4, layers:[{bed:[['bp',2600,.55],['lp',6500]],amp:1,mod:.12,modHz:[1,3]},{g:'fiber',rate:240,amp:.35,spread:.5}]},
-    brush:  {sec:2.4, layers:[{bed:[['hp',1600],['bp',5200,.5]],amp:1,mod:.12,modHz:[1,3]},{g:'bristle',rate:420,amp:.3,spread:.5}]},
+    swab:   {sec:2.4, layers:[{bed:[['bp',2000,.48],['lp',4800]],amp:1,mod:.12,modHz:[1,3]},{g:'fiber',rate:130,amp:.22,spread:.45}]},
+    brush:  {sec:2.4, layers:[{bed:[['hp',900],['bp',3200,.48],['lp',5400]],amp:1,mod:.12,modHz:[1,3]},{g:'bristle',rate:200,amp:.2,spread:.45}]},
     smear:  {sec:2.4, layers:[{bed:[['bp',950,.65],['lp',2400]],amp:1,mod:.2,modHz:[1,4]},{g:'squelch',rate:30,amp:.45,spread:.45}]},
     wick:   {sec:2.8, layers:[{bed:[['bp',720,.55],['lp',1700]],amp:.45,mod:.18,modHz:[1,2]},{g:'squelch',rate:18,amp:.22,spread:.35},{g:'fiber',rate:28,amp:.08,spread:.3}]},
   };
@@ -711,9 +711,9 @@ const SND={
   // 면봉이 닿을 때: 솜이 살짝 눌리는 소리
   dab(){ AU.grain('thump',{gain:.05,rate:1.5}); AU.burst('fiber',5,.05,{gain:.06}); },
   // 누르기 · 튜브가 더 접히기 · 손 떼기를 서로 다른 압착 소리로 들려준다.
-  squeeze(){ AU.grain('tube',{gain:.18,rate:rand(.92,1.04)}); },
-  tubeFlex(){ AU.grain('tube',{gain:rand(.065,.085),rate:rand(1.15,1.35)}); },
-  unsqueeze(){ AU.grain('tube',{gain:.11,rate:1.18}); AU.grain('squelch',{t:.035,gain:.025,rate:.9}); },
+  squeeze(){ AU.grain('tube',{gain:.13,rate:rand(.88,1.08)}); },
+  tubeFlex(){ AU.burst('crinkle',1+Math.floor(Math.random()*3),rand(.02,.08),{gain:rand(.025,.045),rate:rand(.82,1.28)}); },
+  unsqueeze(){ AU.burst('crinkle',1+Math.floor(Math.random()*2),rand(.012,.04),{gain:rand(.025,.04),rate:rand(1.05,1.35)}); },
   // 제목 카드의 우표가 붙을 때: 종이에 탁
   stamp(){ AU.grain('thump',{gain:.1,rate:1.25}); AU.burst('paper',3,.05,{gain:.06,t:.005}); },
 };
@@ -870,7 +870,7 @@ function makeTube(){
   // 연고 줄 (노즐에서 바닥까지)
   const rope=new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,16,6,true),new THREE.MeshPhysicalMaterial({color:0xf2eadb,roughness:.2,clearcoat:.85,clearcoatRoughness:.1,envMapIntensity:1.3}));
   rope.visible=false; rope.castShadow=true; scene.add(rope);
-  const tube={root,body,rest,rope,squeeze:0,used:0,len:L,R,_k:-1};
+  const tube={root,body,rest,rope,squeeze:0,used:0,nextFlex:rand(.10,.18),len:L,R,_k:-1};
   shapeTube(tube); return tube;
 }
 /** 튜브 몸통 모양: 끝은 이음매로 납작, 쥔 자리는 눌리고, 많이 짤수록 뒤쪽부터 납작해진다 */
@@ -1013,7 +1013,7 @@ function toolUp(){
 }
 
 // 연고 짜기
-function startSqueeze(p){ SND.squeeze(); squeezeLine={x:p.x,z:p.z,t:0,flow:0,flex:0,nextFlex:rand(.025,.045)}; }
+function startSqueeze(p){ SND.squeeze(); squeezeLine={x:p.x,z:p.z,t:0,flow:0}; }
 function endSqueeze(){ if(!squeezeLine) return; if(squeezeLine.t>.08) SND.unsqueeze(); settle=.8; squeezeLine=null; }
 function updateSqueeze(dt){
   const S=squeezeLine; if(!S) return; const T=TOOLS.ointment;
@@ -1023,9 +1023,9 @@ function updateSqueeze(dt){
   const k=1-Math.exp(-14*dt); const px=S.x, pz=S.z; S.x+=(nx-S.x)*k; S.z+=(nz-S.z)*k;
   const vol=.0075*S.flow*dt;                // 지름 5mm 줄이 1초에 2cm쯤 나오는 양. 몸통이 다 덮이려면 15초 남짓
   deposit(px,pz,S.x,S.z,vol,.062);
+  const prevUsed=T.used;
   T.used=Math.min(1,T.used+vol/.16);
-  S.flex+=vol/.16;
-  if(S.flex>=S.nextFlex){ S.flex-=S.nextFlex; S.nextFlex=rand(.025,.045); SND.tubeFlex(); }   // 실제 짜낸 양에 맞춰 압착 마찰을 낸다. 튜브 모양이 최대로 눌려도 소리 연결은 이어 간다.
+  if(prevUsed<T.nextFlex&&T.used>=T.nextFlex){ T.nextFlex=T.used+rand(.12,.22); SND.tubeFlex(); }   // 실제 튜브가 더 납작해진 때만 작고 불규칙한 구김 소리를 낸다.
   const r=Math.ceil(.3/GC), ci=Math.round(gix(S.x)), cj=Math.round(gix(S.z));
   slump(ci-r,ci+r,cj-r,cj+r,2);
   settleRect=[ci-r,ci+r,cj-r,cj+r];
@@ -1049,8 +1049,8 @@ function updateSwab(dt,speed){
   AU.level('wick',.03*T.absorb); AU.rate('wick',.85+.1*T.absorb);
   // 마른 솜 · 진물에 젖은 솜 · 연고가 묻은 솜은 문지를 때도 결이 달라진다.
   const mv=pen.down?clamp(speed*1.2):0, wet=pen.down?clamp(Math.max(thAt(p.x,p.z)/.012,T.cream*.55,T.soak*.65,T.absorb*.35)):0;
-  AU.level('swab',.065*mv*(1-.65*wet)); AU.rate('swab',.9+.2*mv);
-  AU.level('smear',.07*mv*wet); AU.rate('smear',.9+.15*mv);
+  AU.level('swab',.052*mv*(1-.65*wet)); AU.rate('swab',.9+.2*mv);
+  AU.level('smear',.056*mv*wet); AU.rate('smear',.9+.15*mv);
   // 솜 빛깔: 진물이 밸수록 크림색 → 누런빛, 연고는 하얗고 번들
   const C=T.tip.geometry.attributes.color, P=T.tip.geometry.attributes.position;
   const tintKey=Math.round(T.soak*80)+Math.round(T.cream*80)*100;
@@ -1105,8 +1105,8 @@ function updateBrush(dt,speed){
   }
   // 소리: 털이 쓸리는 조용한 쓱쓱, 쓸어 가는 만큼. 연고를 펴 바르거나 털에 연고가 묻어 있으면 찐득한 소리가 섞인다
   const sw=touching?clamp(Math.pow(speed*.85,.75))*(.55+.45*T.press):0, wet=touching?clamp(Math.max(overCream/.01,T.cream*.55,T.stain*.6)):0;
-  AU.level('brush',sw*.06*(1-.65*wet)); AU.rate('brush',.9+.2*clamp(speed));
-  AU.level('smear',sw*.065*wet); AU.rate('smear',.9+.15*clamp(speed));
+  AU.level('brush',sw*.048*(1-.65*wet)); AU.rate('brush',.9+.2*clamp(speed));
+  AU.level('smear',sw*.052*wet); AU.rate('smear',.9+.15*clamp(speed));
   // 털 빛깔: 진물·연고가 묻은 끝
   const C=T.tuft.geometry.attributes.color;
   const key=Math.round(T.stain*40)+Math.round(T.cream*40)*100;
@@ -1479,7 +1479,7 @@ document.addEventListener('visibilitychange',()=>{ pageHidden=document.hidden; l
 function clearScene(){
   cancelAll(); held=null; squeezeLine=null; settle=0; settleRect=null;
   th.fill(0); clearCorpse(); paintTissue();
-  const sw=TOOLS.swab; sw.soak=sw.cream=sw.absorb=0; sw._s=-1; const br=TOOLS.brush; br.stain=br.cream=0; br._k=-1; br.bend.set(0,0,0); br.bendV.set(0,0,0); TOOLS.ointment.used=0; TOOLS.ointment._k=-1; shapeTube(TOOLS.ointment);
+  const sw=TOOLS.swab; sw.soak=sw.cream=sw.absorb=0; sw._s=-1; const br=TOOLS.brush; br.stain=br.cream=0; br._k=-1; br.bend.set(0,0,0); br.bendV.set(0,0,0); TOOLS.ointment.used=0; TOOLS.ointment.nextFlex=rand(.10,.18); TOOLS.ointment._k=-1; shapeTube(TOOLS.ointment);
   resetTalk();
 }
 /** 시체 하나를 받아 휴지 위에 눕힌다. payload: {corpse, sfx} */
