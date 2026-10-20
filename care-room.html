@@ -731,9 +731,9 @@ function loadVoice(){
   return VO.loading;
 }
 function redecodeVoice(ctx){ if(!VO.raw||VO.redo) return; VO.redo=true; VO.buf=null; decodeWith(ctx,VO.raw.slice(0)).then(b=>{ VO.buf=b; }).catch(err=>{ console.warn(err); VO.loading=null; }).finally(()=>{ VO.redo=false; }); }
-// 42개를 모두 같은 조건으로 섞는다. 들은 말은 한 바퀴가 끝날 때까지 다시 나오지 않고, 새로 열어도 남은 순서부터 이어 간다.
+// 남은 대사 순서는 이어 가되, 새 간병에서는 일반 위로 20개를 들은 뒤부터 ASMR 멘트도 무작위 후보에 넣는다.
 const LINE_BAG_KEY='roach_care_lines_v1';
-let bag=[], lastLine=-1, sayN=0, voiceSide=Math.random()<.5?-1:1;
+let bag=[], lastLine=-1, sayN=0, plainSaid=0, voiceSide=Math.random()<.5?-1:1;
 function loadLineBag(){
   try{
     const saved=JSON.parse(localStorage.getItem(LINE_BAG_KEY)||'null');
@@ -743,11 +743,23 @@ function loadLineBag(){
   }catch(err){}                                           // 저장을 막은 브라우저에서도 현재 화면의 순서는 이어 간다
 }
 function saveLineBag(){ try{ localStorage.setItem(LINE_BAG_KEY,JSON.stringify({size:LINES.length,bag,last:lastLine})); }catch(err){} }
+function shuffleLineBag(){
+  for(let i=bag.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [bag[i],bag[j]]=[bag[j],bag[i]]; }
+  if(bag.length>1&&bag[bag.length-1]===lastLine) bag.unshift(bag.pop());
+}
+function refillPlainLines(){
+  bag=bag.filter(i=>LINES[i].length>3).concat(LINES.map((row,i)=>row.length<=3?i:-1).filter(i=>i>=0&&i!==lastLine));
+  shuffleLineBag();                                        // 보류한 ASMR 멘트는 남기고, 소진된 일반 위로만 보충한다
+}
 function nextLine(){
-  if(!bag.length){ bag=LINES.map((_,i)=>i); for(let i=bag.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [bag[i],bag[j]]=[bag[j],bag[i]]; } if(bag[bag.length-1]===lastLine) bag.unshift(bag.pop()); }
+  if(!bag.length){ bag=LINES.map((_,i)=>i); shuffleLineBag(); }
+  if(plainSaid<20){
+    if(!bag.some(i=>LINES[i].length<=3)) refillPlainLines();
+    for(let i=bag.length-1;i>=0;i--) if(LINES[bag[i]].length<=3&&bag[i]!==lastLine) return LINES[bag[i]];
+  }
   return LINES[bag[bag.length-1]];                         // 실제 음성이 시작된 뒤에만 꺼낸다
 }
-function newSessionLines(){ sayN=0; loadLineBag(); }
+function newSessionLines(){ sayN=0; plainSaid=0; loadLineBag(); }
 const bubble={text:'',t:0,dur:0,speed:1,alpha:0,a:0,box:null,key:0,side:0,sched:null};
 function say(){
   if(!VO.buf){ loadVoice(); return false; }                  // 음성이 준비되기 전에는 말풍선도 순서도 소모하지 않는다
@@ -758,7 +770,12 @@ function say(){
   let played=false;
   try{ played=AU.voice(VO.buf,start,dur,pos); }catch(err){ console.warn(err); }
   if(!played) return false;
-  lastLine=bag.pop(); sayN++; saveLineBag();
+  lastLine=LINES.indexOf(row); bag.splice(bag.indexOf(lastLine),1); sayN++;
+  if(!pans&&++plainSaid===20){
+    if(bag.length&&!bag.some(i=>LINES[i].length<=3)) refillPlainLines();
+    else shuffleLineBag();                                // 20개 뒤에도 잠가 둔 멘트가 꼭 21번째로 나오지는 않는다
+  }
+  saveLineBag();
   if(!pans) voiceSide=nextSide;
   bubble.side=pans?0:voiceSide;
   talkLeft=playDur+(Math.random()<.18?rand(8,12):rand(4,7));   // 말 뒤에 여유를 두고, 가끔은 도구 소리만 더 오래 이어 간다
