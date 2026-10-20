@@ -519,6 +519,14 @@ function sfxBuilder(){
     // 알루미늄 튜브가 구겨지는 바스락: 울림이 있는 딸깍
     crinkle(){ const n=nOf(rand(4,16)), x=DSP.noise(n), tau=AFS*rand(.0015,.005); for(let i=0;i<n;i++) x[i]*=Math.exp(-i/tau);
       const y=Float32Array.from(x); DSP.filt(x,'bp',rand(2500,8500),rand(4,12)); DSP.filt(y,'bp',rand(1500,5000),rand(2,6)); for(let i=0;i<n;i++) x[i]+=.6*y[i]; return DSP.peak(x); },
+    // 튜브 벽이 눌리며 접히는 짧은 사각·뿌득. 물이나 기포 없이 넓은 마찰음 안에 작은 접힘을 묶는다.
+    tube(){ const n=nOf(rand(220,290)), x=DSP.noise(n); DSP.filt(x,'bp',1100,.65); DSP.filt(x,'lp',4300);
+      for(let i=0;i<n;i++) x[i]*=.3*Math.pow(Math.sin(Math.PI*i/n),.8);
+      const count=10+Math.floor(Math.random()*5);
+      for(let k=0;k<count;k++){ const g=GRAIN.crinkle(); DSP.filt(g,'lp',4500,.6); const at=Math.floor(rand(.008,.19)*AFS), gain=rand(.18,.38);
+        for(let i=0;i<g.length&&at+i<n;i++) x[at+i]+=g[i]*gain; }
+      const fade=Math.round(AFS*.008); for(let i=0;i<fade;i++){ const f=i/fade; x[i]*=f; x[n-1-i]*=f; }
+      return DSP.peak(x); },
     // 책상에 나무 손잡이가 닿는 톡
     wood(){ const n=nOf(rand(35,60)), x=new Float32Array(n), f=rand(650,1100), t1=AFS*rand(.008,.012), t2=AFS*.005;
       for(let i=0;i<n;i++) x[i]=.7*Math.sin(2*Math.PI*f*i/AFS)*Math.exp(-i/t1)+.3*Math.sin(2*Math.PI*f*2.3*i/AFS)*Math.exp(-i/t2);
@@ -556,7 +564,7 @@ function sfxBuilder(){
     const k=.2/(DSP.rms(out)||1); for(let i=0;i<n;i++){ const v=out[i]*k; out[i]=Math.abs(v)<.7?v:Math.sign(v)*(.7+.25*Math.tanh((Math.abs(v)-.7)/.25)); }
     return out;
   }
-  const banks={}; for(const k in GRAIN){ banks[k]=[]; for(let i=0;i<(k==='metal'||k==='wood'||k==='thump'?10:40);i++) banks[k].push(GRAIN[k]()); }
+  const banks={}; for(const k in GRAIN){ banks[k]=[]; for(let i=0;i<(k==='tube'?16:k==='metal'||k==='wood'||k==='thump'?10:40);i++) banks[k].push(GRAIN[k]()); }
   const tex={}; for(const k in TEX) tex[k]=buildTexture(TEX[k],banks);
   // 제목 카드 음악 (3.2초): 글자가 톡톡 올라올 때마다 실로폰 한 음씩 「도레미솔라솔 / 미레도」,
   // 우표가 탁 붙을 때 마림바 화음과 종, 끝에 반짝 두 음. 막대 악기는 부분음을 더해 만든다(실제 실로폰·마림바 막대의 배음 비)
@@ -702,10 +710,10 @@ const SND={
   tap(k=1){ AU.grain('paper',{gain:.12*k}); AU.grain('thump',{gain:.05*k,rate:1.9}); },
   // 면봉이 닿을 때: 솜이 살짝 눌리는 소리
   dab(){ AU.grain('thump',{gain:.05,rate:1.5}); AU.burst('fiber',5,.05,{gain:.06}); },
-  // 조금 짜는 튜브는 처음 누를 때만 작게 바스락댄다. 크림 자체에는 흐르는 소리를 붙이지 않는다.
-  squeeze(){ AU.burst('crinkle',3,.12,{gain:.025}); },
-  // 손을 떼어 짧은 연고 줄이 끊길 때만 아주 작게
-  unsqueeze(){ AU.grain('squelch',{gain:.01,rate:.8}); },
+  // 누르기 · 튜브가 더 접히기 · 손 떼기를 서로 다른 압착 소리로 들려준다.
+  squeeze(){ AU.grain('tube',{gain:.18,rate:rand(.92,1.04)}); },
+  tubeFlex(){ AU.grain('tube',{gain:rand(.065,.085),rate:rand(1.15,1.35)}); },
+  unsqueeze(){ AU.grain('tube',{gain:.11,rate:1.18}); AU.grain('squelch',{t:.035,gain:.025,rate:.9}); },
   // 제목 카드의 우표가 붙을 때: 종이에 탁
   stamp(){ AU.grain('thump',{gain:.1,rate:1.25}); AU.burst('paper',3,.05,{gain:.06,t:.005}); },
 };
@@ -723,30 +731,34 @@ function loadVoice(){
   return VO.loading;
 }
 function redecodeVoice(ctx){ if(!VO.raw||VO.redo) return; VO.redo=true; VO.buf=null; decodeWith(ctx,VO.raw.slice(0)).then(b=>{ VO.buf=b; }).catch(err=>{ console.warn(err); VO.loading=null; }).finally(()=>{ VO.redo=false; }); }
-// 위로의 말은 섞은 순서대로 돌리고, 「바퀴벌레… A~ S~ M~ R~」는 간병마다 4~9번째 말 사이에 한 번 끼어든다 (오래 하면 한참 뒤에 또)
-const GAG=LINES.find(r=>r.length>3)||null, PLAIN=LINES.filter(r=>r.length<=3);
-let bag=[], lastLine=-1, sayN=0, gagAt=6, voiceSide=Math.random()<.5?-1:1;
-function nextLine(){
-  if(!bag.length){ bag=PLAIN.map((_,i)=>i); for(let i=bag.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [bag[i],bag[j]]=[bag[j],bag[i]]; } if(bag[bag.length-1]===lastLine) bag.unshift(bag.pop()); }
-  const i=bag.pop(); lastLine=i; return PLAIN[i];
+// 42개를 모두 같은 조건으로 섞는다. 들은 말은 한 바퀴가 끝날 때까지 다시 나오지 않고, 새로 열어도 남은 순서부터 이어 간다.
+const LINE_BAG_KEY='roach_care_lines_v1';
+let bag=[], lastLine=-1, sayN=0, voiceSide=Math.random()<.5?-1:1;
+function loadLineBag(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(LINE_BAG_KEY)||'null');
+    const valid=i=>Number.isInteger(i)&&i>=0&&i<LINES.length;
+    if(saved?.size!==LINES.length||!Array.isArray(saved.bag)||!saved.bag.every(valid)||new Set(saved.bag).size!==saved.bag.length||!valid(saved.last)||saved.bag.includes(saved.last)) return;
+    bag=saved.bag.slice(); lastLine=saved.last;
+  }catch(err){}                                           // 저장을 막은 브라우저에서도 현재 화면의 순서는 이어 간다
 }
-function newSessionLines(){ sayN=0; gagAt=4+Math.floor(Math.random()*6); }
+function saveLineBag(){ try{ localStorage.setItem(LINE_BAG_KEY,JSON.stringify({size:LINES.length,bag,last:lastLine})); }catch(err){} }
+function nextLine(){
+  if(!bag.length){ bag=LINES.map((_,i)=>i); for(let i=bag.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [bag[i],bag[j]]=[bag[j],bag[i]]; } if(bag[bag.length-1]===lastLine) bag.unshift(bag.pop()); }
+  return LINES[bag[bag.length-1]];                         // 실제 음성이 시작된 뒤에만 꺼낸다
+}
+function newSessionLines(){ sayN=0; loadLineBag(); }
 const bubble={text:'',t:0,dur:0,speed:1,alpha:0,a:0,box:null,key:0,side:0,sched:null};
 function say(){
   if(!VO.buf){ loadVoice(); return false; }                  // 음성이 준비되기 전에는 말풍선도 순서도 소모하지 않는다
-  const nextN=sayN+1, isGag=GAG&&nextN>=gagAt, prevLine=lastLine;
-  const row=isGag?GAG:nextLine();
+  const row=nextLine();
   const [text,start,dur,pans]=row, playDur=dur/VOICE_RATE;
   // 귀: 보통 말은 왼쪽·오른쪽 귀를 번갈아 가며, 개그 줄은 글자마다 옮겨 다니며
   const nextSide=-voiceSide, pos=pans||nextSide*rand(.6,.88);
   let played=false;
   try{ played=AU.voice(VO.buf,start,dur,pos); }catch(err){ console.warn(err); }
-  if(!played){
-    if(!isGag){ bag.push(PLAIN.indexOf(row)); lastLine=prevLine; }
-    return false;
-  }
-  sayN=nextN;
-  if(isGag) gagAt=sayN+24+Math.floor(Math.random()*16);
+  if(!played) return false;
+  lastLine=bag.pop(); sayN++; saveLineBag();
   if(!pans) voiceSide=nextSide;
   bubble.side=pans?0:voiceSide;
   talkLeft=playDur+(Math.random()<.18?rand(8,12):rand(4,7));   // 말 뒤에 여유를 두고, 가끔은 도구 소리만 더 오래 이어 간다
@@ -984,7 +996,7 @@ function toolUp(){
 }
 
 // 연고 짜기
-function startSqueeze(p){ SND.squeeze(); squeezeLine={x:p.x,z:p.z,t:0,flow:0}; }
+function startSqueeze(p){ SND.squeeze(); squeezeLine={x:p.x,z:p.z,t:0,flow:0,flex:0,nextFlex:rand(.025,.045)}; }
 function endSqueeze(){ if(!squeezeLine) return; if(squeezeLine.t>.08) SND.unsqueeze(); settle=.8; squeezeLine=null; }
 function updateSqueeze(dt){
   const S=squeezeLine; if(!S) return; const T=TOOLS.ointment;
@@ -995,6 +1007,8 @@ function updateSqueeze(dt){
   const vol=.0075*S.flow*dt;                // 지름 5mm 줄이 1초에 2cm쯤 나오는 양. 몸통이 다 덮이려면 15초 남짓
   deposit(px,pz,S.x,S.z,vol,.062);
   T.used=Math.min(1,T.used+vol/.16);
+  S.flex+=vol/.16;
+  if(S.flex>=S.nextFlex){ S.flex-=S.nextFlex; S.nextFlex=rand(.025,.045); SND.tubeFlex(); }   // 실제 짜낸 양에 맞춰 압착 마찰을 낸다. 튜브 모양이 최대로 눌려도 소리 연결은 이어 간다.
   const r=Math.ceil(.3/GC), ci=Math.round(gix(S.x)), cj=Math.round(gix(S.z));
   slump(ci-r,ci+r,cj-r,cj+r,2);
   settleRect=[ci-r,ci+r,cj-r,cj+r];
