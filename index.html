@@ -202,6 +202,8 @@ let tweezerRig=null;
 let lastPointer=null;
 let closeBusy=false;
 let cap=null;               // 집어 드는 중인 바퀴
+let labFromTank=null;       // 테라리움 족집게로 집어 온 바퀴 {name,size,deco} — 실험실을 닫으면 테라리움으로 돌아간다
+let labPendingTank=false;
 
 const slime=createSlimeMode({
   gameFrame,
@@ -219,6 +221,9 @@ const PET_ON=(()=>{ const v=new URLSearchParams(location.search).get('bamung'); 
 const pet=PET_ON?createPetMode({
   gameFrame,
   isBlocked:()=>mailOpen,
+  onLab:info=>openLabFromTank(info),
+  onLabWarm:()=>{preloadLab();return labState==='ready';},          // 테라리움에서 족집게를 고르면 실험실을 미리 불러 둔다
+  onLabGiveUp:()=>{if(labState!=='ready')labState='none';},         // 끝내 안 뜨면 다음에 처음부터 다시 불러온다
   onEnter:({pause,resume})=>{
     setTimeout(()=>{
       if(!pet.isTankOpen()) return;
@@ -867,9 +872,19 @@ function enterLab(){
       showToolbar:true,
       showActions:true,
       enabledTools:['tweezer','pin','camera'],
-      quality:'auto'
+      quality:'auto',
+      specimen:labFromTank?{deco:labFromTank.deco||{},size:labFromTank.size||1}:null
     });
   }catch(err){console.error(err);}
+}
+
+// 테라리움 족집게로 집어 온 바퀴: 테라리움은 닫혔고, 그 바퀴를 꾸밈 그대로 실험실에 올린다
+function openLabFromTank(info){
+  if(!G||labOpen)return;
+  labFromTank=info||{};
+  preloadLab();
+  if(labState==='ready'){labPendingTank=false;openLab({fromTank:true});}
+  else labPendingTank=true;
 }
 
 function openLab(meta={}){
@@ -897,13 +912,15 @@ function closeLab(){
   labLayer.setAttribute('aria-hidden','true');
   gameFrame.classList.remove('covered');
   labOpen=false;
+  const backToTank=!!labFromTank;labFromTank=null;labPendingTank=false;
   if(G){
     G.sleep=false;
     G.paused=pausedBeforeLab;
     G.r1.touch?.();
-    G.ui.hint?.('족집게로 다른 바퀴벌레도 집을 수 있습니다.',1.6,.1,true);
+    if(!backToTank)G.ui.hint?.('족집게로 다른 바퀴벌레도 집을 수 있습니다.',1.6,.1,true);
   }
   setTimeout(()=>{closeBusy=false;},160);
+  if(backToTank)setTimeout(()=>{try{pet.open?.();}catch(err){console.warn(err);}},40);   // 테라리움에서 왔으면 테라리움으로 돌아간다
 }
 
 labBack.addEventListener('pointerdown',e=>{
@@ -916,7 +933,9 @@ window.addEventListener('message',e=>{
   if(e.source!==labFrame.contentWindow)return;
   if(e.data?.type==='specimen-lab-ready'){
     labState='ready';
-    if(labPendingOpen&&cap&&!slime.isOpen()&&!pet.isOpen()&&!mailOpen){   // 다른 창(바뿌볼 카드·테라리움·편지)이 떠 있으면 그게 닫히고 게임이 다시 돌 때 연다
+    pet.labReady?.();                 // 테라리움 족집게가 바퀴를 든 채 기다리고 있으면 넘겨받는다
+    if(labPendingTank&&labFromTank){labPendingTank=false;openLab({fromTank:true});}
+    else if(labPendingOpen&&cap&&!slime.isOpen()&&!pet.isOpen()&&!mailOpen){   // 다른 창(바뿌볼 카드·테라리움·편지)이 떠 있으면 그게 닫히고 게임이 다시 돌 때 연다
       labPendingOpen=false;
       finishCapture();
     }else if(!labOpen){

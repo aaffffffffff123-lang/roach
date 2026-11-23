@@ -30,7 +30,7 @@ const CUP_SVG=`<svg viewBox="0 0 120 92" aria-hidden="true"><defs><linearGradien
 <path d="M34 10 Q60 16 86 10" fill="none" stroke="#9fc9d6" stroke-width="2"/><path d="M41 20 L33 76" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity=".7"/>
 <path d="M20 84 Q60 90 100 84" fill="none" stroke="#9fc9d6" stroke-width="3" stroke-linecap="round"/></svg>`;
 
-export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
+export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=null,onLabWarm=null,onLabGiveUp=null}){
   let env=null, wrapped=null;
   let cupMesh=null, cap=null, naming=null;
   let tankOpen=false, tankState='none', pendingEnter=false, pendingArrive=null, closeBusy=false, pausedBefore=false, namePaused=false;
@@ -87,8 +87,14 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     if(d.type==='bamung-count') setInfo(d);
     if(d.type==='bamung-ui') layer.classList.toggle('calm',!d.show);
     if(d.type==='bamung-close') closeTank();
+    // 테라리움 족집게: 고르면 실험실을 미리 불러 두고, 이미 다 떠 있는지 바로 알려 준다
+    if(d.type==='bamung-lab-warm'){ let ready=false; try{ ready=!!onLabWarm?.(); }catch(err){ console.warn(err); } tell({type:'bamung-lab',ready}); }
+    if(d.type==='bamung-lab-giveup'){ try{ onLabGiveUp?.(); }catch(err){ console.warn(err); } }
+    // 테라리움 족집게로 집어 올린 바퀴: 테라리움을 닫고 그 바퀴(꾸밈 그대로)를 실험실에 올린다
+    if(d.type==='bamung-to-lab'){ info=readStore(); updateSlot(); if(onLab){ closeTank(true); onLab(d.pet||{}); } }
   });
   function setInfo(d){ info={total:d.total|0,nextNo:Math.max(1,d.nextNo|0)}; updateSlot(); }
+  function tell(msg){ try{ frame.contentWindow?.postMessage(msg,location.origin); }catch(err){} }
 
   const tankApi=()=>{ try{ return frame.contentWindow?.Bamung||null; }catch(err){ return null; } };
   function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1'; }
@@ -112,8 +118,8 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     preloadTank();
     if(tankState==='ready') enterTank(); else layer.classList.add('loading');
   }
-  function closeTank(){
-    if(!tankOpen||closeBusy||isBlocked()) return;
+  function closeTank(force=false){
+    if(!tankOpen||(!force&&(closeBusy||isBlocked()))) return;
     closeBusy=true; pendingEnter=false;
     try{ tankApi()?.sleep?.(); }catch(err){}
     layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered');
@@ -326,6 +332,8 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false}){
     pendingEnter=false; namePaused=false; press=null;
   }
   return {install,reset,select,open:()=>openTank(null),
+    /** 실험실이 다 떴다 (게임 창이 알려 준다) → 테라리움 족집게가 들고 있던 바퀴를 넘길 수 있다 */
+    labReady:()=>tell({type:'bamung-lab',ready:true}),
     isTankOpen:()=>tankOpen,
     isOpen:()=>tankOpen||!!naming,
     isBusy:()=>tankOpen||!!naming||!!cap,

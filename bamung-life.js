@@ -1,11 +1,12 @@
 // bamung-life.js — 테라리움 속 바퀴들의 행동
 // World: 테라리움 벽·소품 자리·바람·불빛을 알고, 바퀴가 쓸 자리를 골라 준다.
 // Pet  : 한 마리. 쉬기·돌아다니기·더듬이 손질·먹고 마시기·숨기·놀이기구 타기·유리 벽 타기·늙어 죽기.
-// 대화 : 둘이 마주치면 가끔 마주 보고 서서 한마디씩 주고받는다 (대사는 bamung-talk.js).
+// 대화 : 둘이 마주치면 가끔 마주 보고 서서 한마디씩 주고받는다 (대사와 흐름은 bamung-talk.js).
+//        새로 온 놈은 먼저 와 있던 놈에게 인사부터 한다. 마음(우울 → 다 나음)에 따라 하는 말이 달라진다.
 // 실제 습성: 대부분 쉬고, 좁은 틈을 좋아하고(벽·틈에 몸을 붙임), 빛과 바람을 피하고, 죽은 동료 근처는 피해 간다.
 import * as THREE from 'three';
 import { PetModel, applyDeco, ROACH_L } from './bamung-roach.js';
-import { TALKS } from './bamung-talk.js';
+import { GREET, BLUE, BRIGHT, DECO_SELF, DECO_OTHER, HEAL_AFTER } from './bamung-talk.js';
 import { typeTime } from './talk-bubble.js';
 import { voiceOf } from './roach-voice.js';
 
@@ -24,6 +25,13 @@ const WALL=0.05;         // 유리 벽에서 몸 가운데까지: 다리가 유�
 const DAY=86400000;
 // 한마디가 떠 있다가 다음 말이 나올 때까지: 글자가 다 찍히는(목소리가 나는) 동안 + 읽을 틈
 const talkLineDur=(t,speed=1)=>{ const n=String(t).replace(/\s/g,'').length; return clamp(typeTime(t,speed)+1.25+0.05*n,2.1,6.5); };
+/** 꾸민 게 하나라도 있나 */
+export function hasDeco(D){ if(!D||typeof D!=='object') return false; return !!((D.polish&&Object.values(D.polish).some(p=>p&&p.c))||D.stickers?.length||D.gems?.length||(D.hat&&D.hat.on!==false)||(D.abow&&D.abow.on!==false)||D.text?.t); }
+/** 마음: 0 우울 · 1 다 나음. 예전 기록(마음이 없는 놈)은 꾸며져 있으면 다 나은 걸로 본다 */
+export function moodOf(p){ const m=p.rec.mood; return m===0||m===1?m:(hasDeco(p.rec.deco)?1:0); }
+const decoUp=p=>moodOf(p)===1&&hasDeco(p.rec.deco);
+const TALK_POOLS={blue:BLUE,bright:BRIGHT,decoSelf:DECO_SELF,decoOther:DECO_OTHER};
+const cleanLines=L=>Array.isArray(L)?L.filter(x=>typeof x==='string'&&x.trim()):[];
 
 const _q=new THREE.Quaternion(), _m=new THREE.Matrix4(), _v=new THREE.Vector3(), _v2=new THREE.Vector3(), _v3=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0);
 function frameQuat(up,fwd,out){
@@ -61,7 +69,7 @@ export class Path{
 export class World{
   constructor({sfx,events}={}){
     this.props=[]; this.pets=[]; this.sfx=sfx||{}; this.events=events||{}; this.time=0;
-    this.talk=null; this.talkSeq=0; this.talkCD=rand(8,14); this.talkOn=true; this.talkBag=[];
+    this.talk=null; this.talkSeq=0; this.talkCD=rand(8,14); this.talkOn=true; this.talkBags={}; this.greetQ=[];
   }
   // 소품 자기 좌표 → 테라리움 좌표
   lp(prop,x,y,z,out=new THREE.Vector3()){ const c=Math.cos(prop.rot), s=Math.sin(prop.rot); return out.set(prop.x+x*c+z*s,y,prop.z-x*s+z*c); }
@@ -130,53 +138,106 @@ export class World{
   corpses(){ return this.pets.filter(p=>p.dead&&!p.buried); }
 
   // ───────── 대화: 둘이 마주 보고 서서 한마디씩 주고받는다 (한 번에 한 쌍만) ─────────
-  /** 말을 걸거나 받을 수 있는 놈: 바닥에서 쉬거나 걷는 중이고, 막 들어온 놈은 아니다 */
-  canTalk(p){
+  /** 말을 걸거나 받을 수 있는 놈: 바닥에서 쉬거나 걷는 중이고, 막 들어온 놈은 아니다 (인사는 들어오고 몇 초 뒤부터) */
+  canTalk(p,greet=false){
     if(p.dead||p.away||p.mode!=='floor'||p.hidden) return false;
     const a=p.act, t=a?.type;
-    if(!(t==='rest'||t==='groom'||t==='investigate'||t==='meet'||(t==='walk'&&!a.slot))) return false;
-    if(p.rec.arrived&&Date.now()-p.rec.arrived<45000) return false;
+    if(!(t==='rest'||t==='groom'||t==='investigate'||t==='meet'||t==='walk'||(t==='flee'&&greet))) return false;   // 소품으로 걸어가던 중이어도 말은 건다
+    const since=p.rec.arrived?Date.now()-p.rec.arrived:1e9;
+    if(greet) return since>3500;
+    if(since<(p.rec.greeted?12000:30000)) return false;
     return true;
   }
-  /** 대화 하나 고르기: 다 한 번씩 나오기 전엔 같은 게 다시 안 나온다 */
-  pickTalk(){ if(!this.talkBag.length) this.talkBag=TALKS.map((_,i)=>i).sort(()=>Math.random()-0.5); const L=TALKS[this.talkBag.pop()]; return Array.isArray(L)?L.filter(x=>typeof x==='string'&&x.trim()):[]; }
-  /** 나중에 들어온 놈이 먼저 묻는다. walk면 묻는 놈이 상대 앞까지 걸어간다 */
-  startTalk(p,q,walk=false){
+  /** 한 묶음에서 하나: 묶음 안의 대화가 다 한 번씩 나오기 전엔 같은 게 다시 안 나온다 */
+  bagPick(pool){
+    const L=TALK_POOLS[pool]||[]; if(!L.length) return [];
+    let bag=this.talkBags[pool]; if(!bag||!bag.length) bag=this.talkBags[pool]=L.map((_,i)=>i).sort(()=>Math.random()-0.5);
+    return cleanLines(L[bag.pop()]);
+  }
+  /** 두 마리 사이에서 할 말과 누가 먼저 말할지: 우울한 놈은 우울한 말, 다 나은 놈은 다 나은 말, 꾸밈 받은 놈은 꾸밈 대사 */
+  pickFor(p,q){
+    const cands=[];
+    for(const [x,y] of [[p,q],[q,p]]){
+      cands.push({pool:moodOf(x)===0?'blue':'bright',a:x,b:y,w:1});
+      if(decoUp(x)){ const fresh=(x.rec.decoFresh|0)>0?4:1; cands.push({pool:'decoSelf',a:x,b:y,w:0.6*fresh}); cands.push({pool:'decoOther',a:y,b:x,w:0.3*fresh}); }   // 막 꾸민 놈은 한동안 꾸밈 얘기를 자주 한다
+    }
+    let sum=0; for(const c of cands) sum+=c.w;
+    let r=Math.random()*sum, c=cands[cands.length-1]; for(const k of cands){ r-=k.w; if(r<=0){ c=k; break; } }
+    const lines=this.bagPick(c.pool); if(!lines.length) return null;
+    return {pool:c.pool,a:c.a,b:c.b,lines};
+  }
+  /** 대화를 건다. 먼저 말하는 놈(a)이 walk면 상대 앞까지 걸어간다. pk를 주면 그 말로 한다 */
+  startTalk(p,q,walk=false,pk=null){
     if(this.talk) this.endTalk();
-    const lines=this.pickTalk(); if(!lines.length) return false;
-    const [a,b]=(p.rec.born||0)>=(q.rec.born||0)?[p,q]:[q,p];
-    const T={id:++this.talkSeq,a,b,lines,i:-1,lineT:0,next:walk?0:0.6,phase:walk?'approach':'talk',fade:0,t:0,over:false};
-    this.talk=T; this.talkCD=rand(28,55); a.stuck=0; b.stuck=0;
+    pk=pk||this.pickFor(p,q); if(!pk||!pk.lines.length) return false;
+    const {a,b,lines,pool}=pk;
+    const T={id:++this.talkSeq,a,b,lines,pool,i:-1,lineT:0,next:walk?0:0.6,phase:walk?'approach':'talk',fade:0,t:0,over:false,done:false,cut:false};
+    this.talk=T; this.talkCD=rand(15,30); a.stuck=0; b.stuck=0;
     a.setAct({type:'talk',talk:T,other:b,role:'a',walk});
     b.setAct({type:'talk',talk:T,other:a,role:'b',walk:false});
     return true;
   }
-  /** 걷다가 마주친 둘: 지난 대화에서 한참 지났으면 가끔 그대로 말을 건다 */
-  meetTalk(p,q){ if(this.talk||!this.talkOn||this.talkCD>14||Math.random()<0.4) return false; if(!this.canTalk(p)||!this.canTalk(q)) return false; return this.startTalk(p,q,false); }
-  endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; this.events.talkStop?.(T); for(const p of [T.a,T.b]) if(p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
+  /** 걷다가 마주친 둘: 지난 대화에서 조금 지났으면 가끔 그대로 말을 건다 */
+  meetTalk(p,q){ if(this.talk||!this.talkOn||this.talkCD>8||Math.random()<0.4) return false; if(!this.canTalk(p)||!this.canTalk(q)) return false; return this.startTalk(p,q,false); }
+  /** 끝까지 다 한 대화의 효과: 인사를 했다, 위로를 들었다, 꾸밈 대사를 한 번 했다 */
+  talkDone(T){
+    const ra=T.a.rec, rb=T.b.rec;
+    if(T.pool==='greet') ra.greeted=1;
+    if(T.pool==='blue'&&T.lines.length>=2&&moodOf(T.a)===0){ ra.mood=0; ra.comfort=(ra.comfort|0)+1; if(ra.comfort>=HEAL_AFTER){ ra.mood=1; ra.comfort=0; } }
+    if(T.pool==='decoSelf'&&ra.decoFresh>0) ra.decoFresh--;
+    if(T.pool==='decoOther'&&rb.decoFresh>0) rb.decoFresh--;
+    this.events.talkDone?.(T);
+  }
+  endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; this.events.talkStop?.(T); if(T.done&&!T.cut) this.talkDone(T); for(const p of [T.a,T.b]) if(p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
+  /** 하던 말을 그 글자에서 끊는다 (한 놈이 족집게에 집혔을 때). 말풍선은 그 자리에 멈춘 채 사라지고, 남은 놈은 끝까지 그쪽을 본다 */
+  cutTalk(p){ const T=this.talk; if(!T||(p&&T.a!==p&&T.b!==p)) return false; T.cut=true; T.cutT=0; T.phase='fade'; T.fade=0; T.cutPos={a:T.a.pos.clone(),b:T.b.pos.clone()}; this.events.talkStop?.(T); return true; }
+  /** 새로 들어온 놈: 먼저 와 있던 놈이 있으면 그 앞까지 가서 인사 둘 중 하나를 혼자 한다 */
+  queueGreet(p){ if(p&&!this.greetQ.some(g=>g.p===p)) this.greetQ.push({p,t:0}); }
+  tryGreet(dt){
+    for(const g of this.greetQ) g.t+=dt;
+    this.greetQ=this.greetQ.filter(g=>{ const p=g.p; if(!this.pets.includes(p)||p.dead||p.rec.greeted) return false; if(!this.pets.some(o=>o!==p&&!o.dead)){ p.rec.greeted=1; return false; } return g.t<45; });
+    if(this.talk||!this.talkOn) return false;
+    for(const g of this.greetQ){
+      const n=g.p; if(!this.canTalk(n,true)) continue;
+      let q=null, d=1e9; for(const o of this.pets){ if(o===n||!this.canTalk(o)) continue; const e=Math.hypot(o.x-n.x,o.z-n.z); if(e<d){ d=e; q=o; } }
+      if(!q) continue;
+      const G=cleanLines(GREET); if(!G.length){ n.rec.greeted=1; continue; }
+      return this.startTalk(n,q,d>0.15,{pool:'greet',a:n,b:q,lines:[pick(G)]});
+    }
+    return false;
+  }
+  /** 말할 차례인데 짝이 없으면: 상자 안에 한참 숨어 있던 놈 하나가 조금 일찍 나온다 */
+  nudgeHider(){ const h=this.pets.find(p=>!p.dead&&p.act?.type==='hide'&&p.act.ph===1&&p.act.t>6); if(h) h.act.dur=Math.min(h.act.dur,h.act.t+rand(0.5,2.5)); }
+  /** 남은 놈들이 다시 우울해진다 (누가 족집게에 집혀 나가거나 늙어 죽었을 때) */
+  relapse(gone=null){ for(const p of this.pets){ if(p===gone||p.dead) continue; p.rec.mood=0; p.rec.comfort=0; p.rec.decoFresh=0; } }
   /** 매 프레임. on=false(꾸미는 중·소품 옮기는 중)면 하던 대화를 끊고 새로 걸지 않는다 */
   updateTalk(dt,on=true){
     this.talkOn=on;
     const T=this.talk;
     if(!T){
       if(!on) return;
+      if(this.greetQ.length&&this.tryGreet(dt)) return;
       this.talkCD-=dt; if(this.talkCD>0) return;
       this.talkCD=rand(2.5,5);  // 짝이 없으면 조금 있다 다시 본다
-      const L=this.pets.filter(p=>this.canTalk(p)); if(L.length<2) return;
-      const p=pick(L); let q=null, d=1e9;
-      for(const o of L){ if(o===p) continue; const e=Math.hypot(o.x-p.x,o.z-p.z); if(e<d){ d=e; q=o; } }
-      if(!q||d>0.75) return;
-      this.startTalk(p,q,d>0.15);
+      const L=this.pets.filter(p=>this.canTalk(p)&&!this.greetQ.some(g=>g.p===p)); if(L.length<2){ this.nudgeHider(); return; }
+      // 가장 가까운 둘 (멀면 말 거는 놈이 걸어간다)
+      let p=null, q=null, d=1e9;
+      for(let i=0;i<L.length;i++) for(let j=i+1;j<L.length;j++){ const e=Math.hypot(L[i].x-L[j].x,L[i].z-L[j].z)*(0.85+Math.random()*0.3); if(e<d){ d=e; p=L[i]; q=L[j]; } }
+      if(!q||d>1.25){ this.nudgeHider(); return; }
+      const pk=this.pickFor(p,q); if(!pk) return;
+      this.startTalk(pk.a,pk.b,d>0.15,pk);
       return;
     }
+    // 끊긴 대화: 말풍선은 멈춘 글자 그대로 잠깐 떠 있다가 사라진다
+    if(T.cut){ T.cutT=(T.cutT||0)+dt; if(T.cutT>1.1){ T.fade=Math.min(1,T.fade+dt/0.6); if(T.fade>=1) this.endTalk(); } return; }
     const live=x=>x.act?.type==='talk'&&x.act.talk===T&&!x.dead&&!x.away;
     if(!on||!live(T.a)||!live(T.b)){ this.endTalk(); return; }
     T.t+=dt;
-    if(T.phase==='approach'){ if(T.a.act.arrived){ T.phase='talk'; T.next=0.45; } else if(T.t>8/Math.max(0.45,T.a.slowK)) this.endTalk(); return; }   // 늙어 느린 놈은 더 기다린다
+    if(T.phase==='approach'){ if(T.a.act.arrived){ T.phase='talk'; T.next=0.45; } else if(T.t>13/Math.max(0.45,T.a.slowK)) this.endTalk(); return; }   // 늙어 느린 놈은 더 기다린다
     T.lineT+=dt; T.next-=dt;
     if(T.phase==='talk'){ if(T.next<=0){
       if(T.i<T.lines.length-1){ T.i++; T.lineT=0; const who=T.i%2===0?T.a:T.b; T.next=talkLineDur(T.lines[T.i],who.voice?.speed||1); this.events.talkLine?.(T,who); }
-      else { T.phase='hold'; T.next=2.6; } } }
+      else { T.phase='hold'; T.next=2.6; T.done=true; } } }
     else if(T.phase==='hold'){ if(T.next<=0){ T.phase='fade'; T.fade=0; } }
     else if(T.phase==='fade'){ T.fade=Math.min(1,T.fade+dt/0.45); if(T.fade>=1) this.endTalk(); }
   }
@@ -388,7 +449,7 @@ export class Pet{
     if(!Tk||Tk.over||!o){ this.chooseNext(); return; }
     if(a.walk&&!a.arrived){
       const dx=this.x-o.x, dz=this.z-o.z, d=Math.hypot(dx,dz)||1;
-      const left=this.stepFloor(dt,o.x+dx/d*0.1,o.z+dz/d*0.1,0.13,T);
+      const left=this.stepFloor(dt,o.x+dx/d*0.1,o.z+dz/d*0.1,0.16,T);
       if(left<0.014||d<0.115||this.stuck>1.2){ a.arrived=true; this.stuck=0; }
       return;
     }
@@ -573,6 +634,8 @@ export class Pet{
     this.tPos.set(this.x,a.y,this.z); this.tQuat.setFromAxisAngle(_up,this.h);
     const r=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.sin(a.t*5)*0.4); this.tQuat.multiply(r);
   }
+  // 족집게에 집혔다: 몸은 족집게가 들고 다니고(bamung.html이 매 프레임 tPos·tQuat를 정해 준다), 여기서는 다리만 미친 듯이 젓는다
+  act_held(dt,a,T){ this.mode='attach'; this.speed=0; T.flail=1; }
   // 늙어 죽는다: 뒤집혀 한동안 다리를 젓다가 천천히 멈춘다
   startDying(){ this.setAct({type:'dying',ph:0}); }
   act_dying(dt,a,T){

@@ -648,3 +648,5 @@ export function worldHitToBody(model,hit){
   return {p:[p.x,p.y,p.z],n:[n.x,n.y,n.z]};
 }
 export { roachGeos, LEG_DEF, HIP_Y, LEG_ELEV, GeoBuilder, ROACH_PAL };
+// 실험실(specimen-deco.js)이 테라리움 꾸밈을 그대로 다시 만들 때 쓴다
+export { gemMesh, textTex, glitterTex };

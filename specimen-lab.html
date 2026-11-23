@@ -67,6 +67,7 @@ button{font:inherit;border:0;color:inherit;-webkit-tap-highlight-color:transpare
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {Tally} from './tally.js';
+import {dressSpecimen} from './specimen-deco.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -1495,7 +1496,10 @@ function mount(container,options={}){
   const host=typeof container==='string'?document.querySelector(container):container;if(!host)throw new Error('SpecimenLab.mount: 대상 컨테이너를 찾지 못했습니다.');if(host!==document.body&&getComputedStyle(host).position==='static')host.style.position='relative';host.appendChild(rootEl);rootEl.classList.toggle('embedded',host!==document.body);applyOptions(options);resize();return api;
 }
 function enter(payload={}){
-  const options=payload.options||payload;applyOptions(options);if(payload.reset||appOptions.resetOnEnter)resetSpecimen({silent:true});started=true;appPaused=false;UI.intro.classList.add('hide');wake();return api;
+  const options=payload.options||payload;applyOptions(options);if(payload.reset||appOptions.resetOnEnter)resetSpecimen({silent:true});
+  // 테라리움에서 데려온 바퀴: 꾸밈을 그대로 입혀 올린다 (그 밖에는 여느 바퀴와 똑같다)
+  if(payload.specimen?.deco){try{dressSpecimen(specimen,payload.specimen.deco)}catch(err){console.warn(err)}}
+  started=true;appPaused=false;UI.intro.classList.add('hide');wake();return api;
 }
 function pause(){appPaused=true;cancelAction();return api}
 function resume(){appPaused=false;started=true;last=now();return api}
