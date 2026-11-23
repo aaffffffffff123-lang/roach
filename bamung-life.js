@@ -7,7 +7,7 @@
 // 실제 습성: 대부분 쉬고, 좁은 틈을 좋아하고(벽·틈에 몸을 붙임), 빛과 바람을 피하고, 죽은 동료 근처는 피해 간다.
 import * as THREE from 'three';
 import { PetModel, applyDeco, ROACH_L } from './bamung-roach.js';
-import { GREET, BLUE, BRIGHT, SOLO_BLUE, SOLO_BRIGHT, FIRST_HELLO, DECO_SELF, DECO_OTHER, MISSING, HEAL_AFTER } from './bamung-talk.js';
+import { ALL_LINES, GREET, BLUE, BRIGHT, DECO_START, DECO_SELF, DECO_OTHER, MISSING, HEAL_AFTER } from './bamung-talk.js';
 import { typeTime } from './talk-bubble.js';
 import { voiceOf } from './roach-voice.js';
 
@@ -31,10 +31,11 @@ export function hasDeco(D){ if(!D||typeof D!=='object') return false; return !!(
 /** 마음: 0 우울 · 1 다 나음. 예전 기록(마음이 없는 놈)은 꾸며져 있으면 다 나은 걸로 본다 */
 export function moodOf(p){ const m=p.rec.mood; return m===0||m===1?m:(hasDeco(p.rec.deco)?1:0); }
 const decoUp=p=>moodOf(p)===1&&hasDeco(p.rec.deco);
-const cleanLines=L=>Array.isArray(L)?L.filter(x=>typeof x==='string'&&x.trim()):[];
+const LINE_COOLDOWN=180000;
+const soloLines=texts=>texts.map(text=>[text]);
 const TALK_POOLS={blue:BLUE,bright:BRIGHT,decoSelf:DECO_SELF,decoOther:DECO_OTHER,
-  soloBlue:SOLO_BLUE.map(t=>[t]),soloBright:SOLO_BRIGHT.map(t=>[t]),missing:MISSING.map(t=>[t])};
-const waitingFor=(p,id)=>p.rec.hello?.peer===id&&!p.rec.hello.kept;
+  soloBlue:soloLines(BLUE.map(lines=>lines[0])),soloBright:soloLines(BRIGHT.map(lines=>lines[0])),
+  greet:soloLines(GREET),decoStart:soloLines(DECO_START),missing:soloLines(MISSING)};
 const MISSING_FOR=DAY;   // 사라진 놈을 찾는 혼잣말은 하루 동안
 const MISSING_MAX=3;     // 한 놈이 한 이름으로 찾는 횟수
 /** 받침에 맞는 조사 ('은/는' 같은 짝에서 고른다) */
@@ -77,9 +78,15 @@ export class Path{
 // 테라리움
 // ══════════════════════════════════════════════════════════════════
 export class World{
-  constructor({sfx,events}={}){
+  constructor({sfx,events,recentLines}={}){
     this.props=[]; this.pets=[]; this.sfx=sfx||{}; this.events=events||{}; this.time=0;
     this.talk=null; this.talkSeq=0; this.talkCD=rand(8,14); this.talkOn=true; this.talkBags={}; this.greetQ=[];
+    this.recentLines=Object.create(null);
+    const now=Date.now();
+    for(const text of ALL_LINES){
+      const at=recentLines?.[text];
+      if(Number.isFinite(at)&&at<=now&&now-at<LINE_COOLDOWN) this.recentLines[text]=at;
+    }
     this.missing=[];   // 사라진 놈들 {name,at,knew:[그때 함께 있던 놈 id],said:{id:찾은 횟수}} (bamung.html이 저장한다)
   }
   // 소품 자기 좌표 → 테라리움 좌표
@@ -161,31 +168,37 @@ export class World{
     if(since<(p.rec.greeted?12000:30000)) return false;
     return true;
   }
-  /** 한 묶음에서 하나: 묶음 안의 대화가 다 한 번씩 나오기 전엔 같은 게 다시 안 나온다 */
-  bagPick(pool){
-    const L=TALK_POOLS[pool]||[]; if(!L.length) return [];
-    let bag=this.talkBags[pool];
-    if(!bag?.length){
-      bag=this.talkBags[pool]=L.map((_,i)=>i);
-      for(let i=bag.length-1;i>0;i--){
-        const j=Math.floor(Math.random()*(i+1));
-        [bag[i],bag[j]]=[bag[j],bag[i]];
-      }
-    }
-    return cleanLines(L[bag.pop()]);
+  canSay(lines,now){
+    return lines.every(text=>{ const at=this.recentLines[text]; return at===undefined||at>now||now-at>=LINE_COOLDOWN; });
+  }
+  /** 말을 고르거나 상대에게 다가갈 때가 아니라 실제로 첫 글자가 뜰 때부터 센다. */
+  rememberLine(text){
+    this.recentLines[text]=Date.now();
+    this.events.lineShown?.();
+  }
+  bagPick(pool,now=Date.now()){
+    const all=TALK_POOLS[pool];
+    const eligible=all.filter(lines=>this.canSay(lines,now));
+    if(!eligible.length) return [];
+    let unseen=this.talkBags[pool];
+    if(!unseen?.size) unseen=this.talkBags[pool]=new Set(all);
+    const fresh=eligible.filter(lines=>unseen.has(lines));
+    const chosen=pick(fresh.length?fresh:eligible);
+    unseen.delete(chosen);
+    return chosen;
   }
   /** 두 마리 사이에서 할 말과 누가 먼저 말할지: 우울한 놈은 우울한 말, 다 나은 놈은 다 나은 말, 꾸밈 받은 놈은 꾸밈 대사 */
   pickFor(p,q){
-    const cands=[];
+    const cands=[], now=Date.now();
     for(const [x,y] of [[p,q],[q,p]]){
-      if(waitingFor(x,y.id)&&x.rec.hello.offered) return {pool:'helloKept',a:x,b:y,lines:FIRST_HELLO.kept};
-      if(moodOf(x)===0&&!x.rec.hello&&!y.rec.hello) cands.push({pool:'helloOffer',a:x,b:y,w:0.38});
       cands.push({pool:moodOf(x)===0?'blue':'bright',a:x,b:y,w:1});
       if(decoUp(x)){ const fresh=(x.rec.decoFresh|0)>0?4:1; cands.push({pool:'decoSelf',a:x,b:y,w:0.6*fresh}); cands.push({pool:'decoOther',a:y,b:x,w:0.3*fresh}); }   // 막 꾸민 놈은 한동안 꾸밈 얘기를 자주 한다
     }
-    let sum=0; for(const c of cands) sum+=c.w;
-    let r=Math.random()*sum, c=cands[cands.length-1]; for(const k of cands){ r-=k.w; if(r<=0){ c=k; break; } }
-    const lines=c.pool==='helloOffer'?FIRST_HELLO.offer:this.bagPick(c.pool); if(!lines.length) return null;
+    const available=cands.filter(c=>TALK_POOLS[c.pool].some(lines=>this.canSay(lines,now)));
+    if(!available.length) return null;
+    let sum=0; for(const c of available) sum+=c.w;
+    let r=Math.random()*sum, c=available[available.length-1]; for(const k of available){ r-=k.w; if(r<=0){ c=k; break; } }
+    const lines=this.bagPick(c.pool,now);
     return {pool:c.pool,a:c.a,b:c.b,lines};
   }
   /** 대화를 건다. 먼저 말하는 놈(a)이 walk면 상대 앞까지 걸어간다. pk를 주면 그 말로 한다 */
@@ -205,26 +218,12 @@ export class World{
   talkDone(T){
     const ra=T.a.rec, rb=T.b?.rec;
     if(T.pool==='greet') ra.greeted=1;
-    if((T.pool==='blue'||T.pool==='helloOffer')&&T.lines.length>=2&&moodOf(T.a)===0){ ra.mood=0; ra.comfort=(ra.comfort|0)+1; if(ra.comfort>=HEAL_AFTER){ ra.mood=1; ra.comfort=0; } }
+    if(T.pool==='blue'&&T.lines.length>=2&&moodOf(T.a)===0){ ra.mood=0; ra.comfort=(ra.comfort|0)+1; if(ra.comfort>=HEAL_AFTER){ ra.mood=1; ra.comfort=0; } }
     if(T.pool==='decoSelf'&&ra.decoFresh>0) ra.decoFresh--;
     if(T.pool==='decoOther'&&rb&&rb.decoFresh>0) rb.decoFresh--;
     this.events.talkDone?.(T);
   }
   endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; this.events.talkStop?.(T); if(T.done&&!T.cut) this.talkDone(T); for(const p of [T.a,T.b]) if(p&&p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
-  /** 약속은 마지막 음절까지 들은 뒤에 생긴다. 다음번에는 먼저 건넨 인사만 다 들려도 지킨 셈이다. */
-  heardLine(T){
-    if(T.pool==='helloOffer'&&T.i===1){
-      T.a.rec.hello={peer:T.b.id,offered:false};
-      T.b.rec.hello={peer:T.a.id,offered:true};
-    } else if(T.pool==='helloKept'&&T.i===0){
-      T.a.rec.hello.kept=true;
-      T.b.rec.hello.kept=true;
-    } else if(T.missing){
-      const said=T.missing.said;
-      said[T.a.id]=(said[T.a.id]||0)+1;
-    } else return;
-    this.events.memoryChanged?.();
-  }
   /** 하던 말을 그 글자에서 끊는다 (한 놈이 족집게에 집혔을 때). 말풍선은 그 자리에 멈춘 채 사라지고, 남은 놈은 끝까지 그쪽을 본다 */
   cutTalk(p){ const T=this.talk; if(!T||(p&&T.a!==p&&T.b!==p)) return false; T.cut=true; T.cutT=0; T.phase='fade'; T.fade=0; T.cutPos={a:T.a.pos.clone(),b:(T.b||T.a).pos.clone()}; this.events.talkStop?.(T); return true; }
   /** 새로 들어온 놈: 먼저 와 있던 놈이 있으면 그 앞까지 가서 인사 둘 중 하나를 혼자 한다 */
@@ -237,8 +236,8 @@ export class World{
       const n=g.p; if(!this.canTalk(n,true)) continue;
       let q=null, d=1e9; for(const o of this.pets){ if(o===n||!this.canTalk(o)) continue; const e=Math.hypot(o.x-n.x,o.z-n.z); if(e<d){ d=e; q=o; } }
       if(!q) continue;
-      const G=cleanLines(GREET); if(!G.length){ n.rec.greeted=1; continue; }
-      return this.startTalk(n,q,d>0.15,{pool:'greet',a:n,b:q,lines:[pick(G)]});
+      const lines=this.bagPick('greet'); if(!lines.length) return false;
+      return this.startTalk(n,q,d>0.15,{pool:'greet',a:n,b:q,lines});
     }
     return false;
   }
@@ -267,8 +266,6 @@ export class World{
     for(const m of this.missing){ m.said=m.said||{}; for(const p of L){ if(!(m.knew||[]).includes(p.id)) continue; const n=m.said[p.id]|0; if(n<MISSING_MAX) cands.push({p,m,n}); } }
     if(!cands.length) return null;
     const fresh=cands.filter(c=>c.n===0);
-    const unfinished=fresh.filter(c=>c.m.id&&waitingFor(c.p,c.m.id));
-    if(unfinished.length) return pick(unfinished);
     if(fresh.length) return pick(fresh);
     return Math.random()<0.3?pick(cands):null;
   }
@@ -289,9 +286,8 @@ export class World{
       // 사라진 놈을 찾는 혼잣말: 옆에 누가 있어도 혼자 한다
       const ms=this.pickMissing(L);
       if(ms){
-        const personal=ms.n===0&&ms.m.id&&waitingFor(ms.p,ms.m.id);
-        const t=personal?(ms.p.rec.hello.offered?FIRST_HELLO.missingSpeaker:FIRST_HELLO.missingListener):this.bagPick('missing')[0];
-        if(t&&this.startSolo(ms.p,fillName(t,ms.m.name),'missing')){ this.talk.missing=ms.m; return; }
+        const t=this.bagPick('missing')[0];
+        if(t&&this.startSolo(ms.p,fillName(t,ms.m.name),'missing')){ this.talk.missing=ms.m; this.talk.missingTemplate=t; return; }
       }
       // 혼자 남았으면 지금 마음에 맞는 혼잣말을 한다.
       const alone=this.pets.filter(p=>!p.dead&&!p.away);
@@ -312,11 +308,17 @@ export class World{
     T.t+=dt;
     if(T.phase==='approach'){ if(T.a.act.arrived){ T.phase='talk'; T.next=0.45; } else if(T.t>13/Math.max(0.45,T.a.slowK)) this.endTalk(); return; }   // 늙어 느린 놈은 더 기다린다
     T.lineT+=dt; T.next-=dt;
-    if(T.i>=0&&!T.heard&&T.lineT>=T.typeEnd){ T.heard=true; this.heardLine(T); }
+    if(T.missing&&T.i>=0&&!T.heard&&T.lineT>=T.typeEnd){
+      T.heard=true;
+      const said=T.missing.said;
+      said[T.a.id]=(said[T.a.id]||0)+1;
+      this.events.memoryChanged?.();
+    }
     if(T.phase==='talk'){ if(T.next<=0){
       if(T.i<T.lines.length-1){
         T.i++; T.lineT=0; T.heard=false;
         const who=T.i%2===0?T.a:T.b, line=T.lines[T.i];
+        this.rememberLine(T.missingTemplate||line);
         T.typeEnd=typeTime(line,who.voice?.speed||1);
         T.next=T.typeEnd+readingPause(line);
         this.events.talkLine?.(T,who);
@@ -348,7 +350,7 @@ export class Pet{
     if(this.dead){ this.startDeadPose(); }
     else this.setAct({type:'rest',dur:rand(2,10)});
   }
-  get name(){ return this.rec.name||`${this.rec.no}호`; }
+  get name(){ return this.rec.name; }
   /** 숨는 곳 안에 들어가 안 보이는 중 */
   get hidden(){ const a=this.act; return !!a&&((a.type==='hide'&&a.ph===1)||(a.type==='path'&&a.kind==='tuck'&&a.ph===1)); }
   get days(){ const end=this.dead?(this.rec.diedAt||Date.now()):Date.now(); return Math.max(0,Math.floor((end-this.rec.born)/DAY)); }

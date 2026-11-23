@@ -134,8 +134,8 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     const {G}=env; naming={};
     namePaused=true; pausedBefore=!!G.paused; G.paused=true; G.r1.cancel?.(); G.input.reset?.();
     info=readStore();
-    nameIn.value=''; nameIn.placeholder=`${info.nextNo}호`;
-    nameEl.querySelector('#petNameSub').textContent=`비워 두면 「${info.nextNo}호」라고 불러요.`;
+    nameIn.value=''; nameIn.placeholder='이름 (선택)';
+    nameEl.querySelector('#petNameSub').textContent='비워 두면 이름을 하나 골라 줘요.';
     nameEl.classList.add('show'); nameEl.setAttribute('aria-hidden','false');
     sfx.card();
     setTimeout(()=>{ if(naming) try{ nameIn.focus({preventScroll:true}); }catch(err){} },420);

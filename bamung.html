@@ -200,7 +200,7 @@ import { applyDeco, worldHitToBody, ROACH_L, POLISH_COLORS, POLISH_STYLES, STICK
 import { PROPS, PROP_CATS, makePoke, animatePoke } from './bamung-props.js';
 import { World, Pet, TANK, hasDeco } from './bamung-life.js';
 import { BubbleView, layoutBubbles, drawBubbles, typeTime } from './talk-bubble.js';
-import { ALL_LINES, DECO_START } from './bamung-talk.js';
+import { ALL_LINES } from './bamung-talk.js';
 import { speak } from './roach-voice.js';
 
 // ══════════════════════════════════════════════════════════════════
@@ -226,6 +226,18 @@ if(!EMBED) document.body.classList.add('solo');
 /** 받침: 이름 끝 글자에 받침이 있으면 앞, 없으면 뒤 ('을/를', '이/가', '와/과', '은/는') */
 function jo(word,pair){ const [a,b]=pair.split('/'); const ch=String(word).trim().slice(-1); const c=ch.charCodeAt(0); if(c>=0xAC00&&c<=0xD7A3) return ((c-0xAC00)%28)?a:b; if(/[0-9]/.test(ch)) return '013678'.includes(ch)?a:b; return b; }
 function cleanName(s){ const t=Array.from(String(s||'').replace(/\s+/g,' ').trim()); return t.slice(0,NAME_MAX).join(''); }
+const PET_NAMES=[
+  '콩이','깨알이','쫑긋이','꼬물이','토리','알밤이','땅콩이','보리',
+  '단추','밤톨','도토리','마루','솜이','두부','모찌','호두',
+  '후추','참깨','팥알이','좁쌀이','먼지','뭉치','오디','자두',
+  '꼬미','송이','방울이','몽실이','구름이','달콩이','쪼리','포동이',
+  '소보로','고물이','까망이','밤비','반디','쑥이','찹쌀이','조약돌',
+];
+function pickPetName(pets){
+  const used=new Set(pets.map(p=>p.name));
+  const free=PET_NAMES.filter(name=>!used.has(name));
+  return free[Math.floor(Math.random()*free.length)];
+}
 const showError=t=>{ const e=$('err'); e.textContent=t; e.classList.add('show'); };
 
 // ══════════════════════════════════════════════════════════════════
@@ -234,7 +246,7 @@ const showError=t=>{ const e=$('err'); e.textContent=t; e.classList.add('show');
 function loadStore(){
   let d=null; try{ d=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
   if(!d||typeof d!=='object') d={};
-  const S={v:1,nextNo:Math.max(1,d.nextNo|0),pets:[],graves:[],props:null,fallen:[],missing:[]};
+  const S={v:1,nextNo:Math.max(1,d.nextNo|0),pets:[],graves:[],props:null,fallen:[],missing:[],recentLines:d.recentLines};
   for(const p of Array.isArray(d.pets)?d.pets:[]){ if(!p||!p.id||!(p.born>0)) continue; if(!p.deco||typeof p.deco!=='object') p.deco={}; p.life=+p.life||30; if(!(p.no>0)) p.no=S.nextNo++; S.pets.push(p); }
   for(const g of Array.isArray(d.graves)?d.graves:[]) if(g&&g.name) S.graves.push(g);
   if(Array.isArray(d.props)) S.props=d.props.filter(p=>p&&PROPS[p.k]&&isFinite(p.x)&&isFinite(p.z));
@@ -242,6 +254,11 @@ function loadStore(){
   for(const m of Array.isArray(d.missing)?d.missing:[]) if(m&&m.name&&m.at>0) S.missing.push({id:m.id,name:String(m.name),at:+m.at,knew:Array.isArray(m.knew)?m.knew:[],said:m.said&&typeof m.said==='object'?m.said:{}});
   for(const p of S.pets) S.nextNo=Math.max(S.nextNo,(p.no|0)+1);
   for(const g of S.graves) S.nextNo=Math.max(S.nextNo,(g.no|0)+1);
+  const unnamed=S.pets.filter(p=>!cleanName(p.name));
+  if(unnamed.length){
+    for(const p of unnamed) p.name=pickPetName(S.pets);
+    try{ localStorage.setItem(KEY,JSON.stringify({...d,pets:S.pets})); }catch(e){}
+  }
   return S;
 }
 let store=loadStore();
@@ -251,6 +268,7 @@ function saveSoon(s=0.7){ saveIn=saveIn?Math.min(saveIn,s):s; }
 function syncStore(){
   for(const p of world.pets){ if(p.away) continue; const r=p.rec; r.x=r4(p.x); r.z=r4(p.z); r.h=r4(wrapA(p.h)); }
   store.missing=world.missing;
+  store.recentLines=world.recentLines;
   store.props=world.props.map(i=>{ const o=(edit.inst===i&&edit.orig)?edit.orig:i; return {k:i.k,x:r4(o.x),z:r4(o.z),rot:r4(o.rot),on:!!i.on}; });
 }
 
@@ -531,9 +549,10 @@ function updateLoops(dt){
 // 테라리움 속 세계
 // ══════════════════════════════════════════════════════════════════
 const EV={};
-const world=new World({sfx:S,events:EV});
+const world=new World({sfx:S,events:EV,recentLines:store.recentLines});
 world.missing=store.missing;   // 사라진 놈을 찾는 혼잣말 기록 (하루 동안)
 EV.memoryChanged=save;
+EV.lineShown=()=>saveSoon(0.3);
 const PCTX={sfx:S};
 
 // ───────── 물결·물방울 ─────────
@@ -758,7 +777,7 @@ function loadPets(){
 /** 새 식구: 위에서 떨어뜨려 넣는다 */
 function arrive(opts={}){
   if(store.pets.length>=CAP){ toast('테라리움이 꽉 찼어요.'); return null; }
-  const rec={id:'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),no:store.nextNo++,name:cleanName(opts.name),born:Date.now(),arrived:Date.now(),life:r4(rand(27,33)),size:r4(rand(0.95,1.06)),deco:{}};
+  const rec={id:'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),no:store.nextNo++,name:cleanName(opts.name)||pickPetName(store.pets),born:Date.now(),arrived:Date.now(),life:r4(rand(27,33)),size:r4(rand(0.95,1.06)),deco:{}};
   const spot=world.randomFree(40,false); rec.x=spot.x; rec.z=spot.z; rec.h=rand(TAU);
   store.pets.push(rec);
   const p=spawnPet(rec);
@@ -1320,9 +1339,9 @@ function openCard(p,view='info'){
   const row=document.createElement('div'); row.className='row';
   const btn=(t,f,cls='')=>{ const b=document.createElement('button'); b.type='button'; b.className='act'+(cls?' '+cls:''); b.textContent=t; b.addEventListener('click',e=>{ e.stopPropagation(); S.ui(); f(); }); row.appendChild(b); return b; };
   if(view==='rename'){
-    const inp=document.createElement('input'); inp.className='field'; inp.maxLength=NAME_MAX*2; inp.placeholder=`${r.no}호`; inp.value=r.name||''; inp.setAttribute('enterkeyhint','done'); inp.autocomplete='off';
+    const inp=document.createElement('input'); inp.className='field'; inp.maxLength=NAME_MAX*2; inp.placeholder='비우면 자동 작명'; inp.value=r.name; inp.setAttribute('enterkeyhint','done'); inp.autocomplete='off';
     cardEl.appendChild(inp);
-    const done=()=>{ const v=cleanName(inp.value); r.name=v; save(); p.labelT=3; openCard(p); };
+    const done=()=>{ r.name=cleanName(inp.value)||pickPetName(store.pets); save(); p.labelT=3; openCard(p); };
     inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); done(); } });
     btn('바꾸기',done,'main'); btn('취소',()=>openCard(p));
     cardEl.appendChild(row); cardEl.classList.add('open'); cardEl.setAttribute('aria-hidden','false');
@@ -1447,14 +1466,20 @@ $('deco').querySelector('[data-a="undo"]').addEventListener('click',e=>{ e.stopP
 $('deco').querySelector('[data-a="decoDone"]').addEventListener('click',e=>{ e.stopPropagation(); S.ui(); finishDeco(); });
 // ───────── 꾸미기를 시작하면 꾸며지는 놈이 혼자 한마디 한다 (bamung-talk.js의 DECO_START) ─────────
 const decoLine={p:null,text:'',t:0,wait:0,phase:'none',fade:0,id:0,voice:null};
-let decoLineBag=[];
-function nextDecoLine(){ const L=DECO_START.filter(x=>typeof x==='string'&&x.trim()); if(!L.length) return ''; if(!decoLineBag.length) decoLineBag=L.map((_,i)=>i).sort(()=>Math.random()-0.5); return L[decoLineBag.pop()]||L[0]; }
-function startDecoLine(p){ stopDecoLine(); const text=nextDecoLine(); if(!text) return; Object.assign(decoLine,{p,text,t:0,wait:0.8,phase:'wait',fade:0,id:decoLine.id+1}); }
+function startDecoLine(p){ stopDecoLine(); Object.assign(decoLine,{p,text:'',t:0,wait:0.8,phase:'wait',fade:0,id:decoLine.id+1}); }
 function stopDecoLine(){ decoLine.voice?.stop(); decoLine.voice=null; decoLine.phase='none'; decoLine.p=null; }
 function updateDecoLine(dt){
   const L=decoLine; if(L.phase==='none') return;
   if(!deco.pet||deco.pet!==L.p){ stopDecoLine(); return; }
-  if(L.phase==='wait'){ L.wait-=dt; if(L.wait<=0){ L.phase='talk'; L.t=0; if(SFX.ok()) L.voice=speak(SFX.ctx,SFX.out,L.text,L.p.voice,{gain:0.13}); } return; }
+  if(L.phase==='wait'){
+    L.wait-=dt; if(L.wait>0) return;
+    const [text]=world.bagPick('decoStart');
+    if(!text){ stopDecoLine(); return; }
+    L.text=text; L.phase='talk'; L.t=0;
+    world.rememberLine(text);
+    if(SFX.ok()) L.voice=speak(SFX.ctx,SFX.out,text,L.p.voice,{gain:0.13});
+    return;
+  }
   L.t+=dt;
   if(L.phase==='talk'&&L.t>typeTime(L.text,L.p.voice?.speed||1)+2.6){ L.phase='fade'; L.fade=0; }
   if(L.phase==='fade'){ L.fade=Math.min(1,L.fade+dt/0.5); if(L.fade>=1){ L.phase='none'; L.p=null; L.voice=null; } }
@@ -1710,7 +1735,7 @@ function wake(){
   resize(true); if(!camAway()) goHome(true);
   checkAges(); refreshHud(); SFX.resume(); holdScreen();
   if(!raf) raf=requestAnimationFrame(frame);
-  if(toldGone&&toldGone.length){ const L=toldGone; toldGone=null; const nm=L[0].name||`${L[0].no}호`; setTimeout(()=>toast(L.length>1?`${nm} 외 ${L.length-1}마리가 천수를 누렸어요.`:`${nm}${jo(nm,'이/가')} 천수를 누렸어요.`,3.4),700); for(const r of L) r.toldDead=1; save(); }
+  if(toldGone&&toldGone.length){ const L=toldGone; toldGone=null; const nm=L[0].name; setTimeout(()=>toast(L.length>1?`${nm} 외 ${L.length-1}마리가 천수를 누렸어요.`:`${nm}${jo(nm,'이/가')} 천수를 누렸어요.`,3.4),700); for(const r of L) r.toldDead=1; save(); }
   return api;
 }
 function sleep(){
