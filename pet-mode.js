@@ -82,8 +82,8 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     if(e.source!==frame.contentWindow) return;
     const d=e.data||{};
     if(d.type==='bamung-ready'){ tankState='ready'; layer.classList.remove('loading'); if(typeof d.total==='number') setInfo(d);
-      if(tankOpen) enterTank();
-      else { const L=tankApi(); if(pendingArrive&&L){ const a=pendingArrive; pendingArrive=null; try{ L.enter({arrive:a}); }catch(err){ console.error(err); } } try{ L?.sleep?.(); }catch(err){} info=readStore(); updateSlot(); } }
+      if(tankOpen){ if(pendingEnter) enterTank(); }
+      else { const L=tankApi(); if(pendingArrive&&L){ const a=pendingArrive; pendingArrive=null; try{ L.enter({arrive:a,background:true}); }catch(err){ console.error(err); } } try{ L?.sleep?.(); }catch(err){} info=readStore(); updateSlot(); } }
     if(d.type==='bamung-count') setInfo(d);
     if(d.type==='bamung-ui') layer.classList.toggle('calm',!d.show);
     if(d.type==='bamung-close') closeTank();
@@ -101,9 +101,10 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   function enterTank(){
     const L=tankApi(); if(!L) return;
     const a=pendingArrive; pendingArrive=null; pendingEnter=false;
-    let added=null; try{ added=L.enter(a?{arrive:a}:{}); }catch(err){ console.error(err); }
-    if(added&&letterDue){   // 처음 데려온 날: 바퀴에게서 편지가 온다 (편지가 실제로 떠야 다 본 걸로 친다)
-      onEnter?.({pause:()=>{ letterDue=false; try{ (L.pause||L.sleep)(); }catch(err){} },resume:()=>{ if(tankOpen) try{ (L.resume||L.wake)(); }catch(err){} }}); }
+    const onView=added=>{
+      if(added&&letterDue) onEnter?.({pause:()=>{ letterDue=false; try{ (L.pause||L.sleep)(); }catch(err){} },resume:()=>{ if(tankOpen) try{ (L.resume||L.wake)(); }catch(err){} }});
+    };
+    try{ L.enter({arrive:a,onView}); }catch(err){ console.error(err); }
     info=readStore(); updateSlot();
   }
   function openTank(arrive=null){

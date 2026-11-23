@@ -24,6 +24,12 @@ button:disabled{opacity:.42;cursor:default}
 #err{position:fixed;z-index:30;inset:auto 16px calc(18px + var(--sb));display:none;padding:12px 15px;border-radius:14px;background:rgba(83,25,18,.94);color:#f8f0dc;font:700 13px/1.5 var(--kr);text-align:center}
 #err.show{display:block}
 
+#entrySign{width:min(64rem,calc(100% - 24px - var(--sl) - var(--sr)));max-width:none;margin:auto;padding:0;border:1px solid #992023;border-radius:0;overflow:visible;background:#be101f;box-shadow:0 3px 0 #781720,0 10px 28px #21120d55}
+#entrySign::backdrop{background:rgba(29,21,15,.64)}
+#entrySign button{display:block;width:100%;padding:clamp(24px,5vw,60px) 5px;background:#be101f;color:#ffe164;box-shadow:inset 0 2px 0 #e33d43,inset 0 -2px 0 #a41923;font:800 clamp(12px,4.3vw,42px)/1.55 var(--kr);letter-spacing:-.045em;text-align:center;text-shadow:.045em .075em .015em #762216}
+#entrySign button:focus-visible{outline:2px solid #ffe164;outline-offset:-6px}
+#entrySign span{display:block;word-break:keep-all}
+
 /* 위쪽 */
 #hud{position:fixed;z-index:4;left:72px;right:72px;top:calc(16px + var(--st));display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;transition:opacity .4s}
 .pill{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:999px;background:var(--iv);box-shadow:var(--sh);font:900 12px/1 system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:var(--ink);white-space:nowrap}
@@ -155,6 +161,9 @@ body.deco #empty,body.edit #empty{display:none}
 </div>
 <div id="empty"></div>
 <a id="homeLink" href="./">게임으로</a>
+<dialog id="entrySign" aria-label="테라리움 입장">
+  <button type="button" aria-label="테라리움 들어가기" aria-describedby="entryWords" autofocus><span id="entryWords"><span>누구나 바퀴벌레의 삶을 감당할 수 있다면</span><span>나는 결코 바퀴벌레를 선택하지 않았을 것이다.</span></span></button>
+</dialog>
 
 <div id="bar" class="dock">
   <button type="button" data-a="props"><svg viewBox="0 0 24 24"><path d="M3.5 8 12 4l8.5 4v8.5L12 20.5 3.5 16.5z"/><path d="m3.5 8 8.5 4 8.5-4M12 12v8.5"/></svg>소품</button>
@@ -1607,7 +1616,7 @@ function endPtr(e,cancel){
 canvas.addEventListener('pointerup',e=>endPtr(e,false));
 canvas.addEventListener('pointercancel',e=>endPtr(e,true));
 canvas.addEventListener('wheel',e=>{ e.preventDefault(); wakeUi(); zoomBy(Math.exp(clamp(e.deltaY,-120,120)*0.0016)); },{passive:false});
-window.addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(e.target?.tagName==='INPUT'){ e.target.blur(); return; } if($('photo').classList.contains('show')) $('photo').classList.remove('show'); else if(anySheet()) closeSheets(); else if(mode==='edit') finishEdit(true); else if(mode==='pick'||mode==='tweezer'){ if(!grab) setMode('watch'); } else if(mode==='deco') finishDeco(); else if(EMBED) try{ parent.postMessage({type:'bamung-close'},location.origin); }catch(err){} } });
+window.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!entrySign.open){ if(e.target?.tagName==='INPUT'){ e.target.blur(); return; } if($('photo').classList.contains('show')) $('photo').classList.remove('show'); else if(anySheet()) closeSheets(); else if(mode==='edit') finishEdit(true); else if(mode==='pick'||mode==='tweezer'){ if(!grab) setMode('watch'); } else if(mode==='deco') finishDeco(); else if(EMBED) try{ parent.postMessage({type:'bamung-close'},location.origin); }catch(err){} } });
 
 function startPick(){ closeSheets(); const L=alive(); if(!L.length){ toast(world.pets.length?'꾸밀 수 있는 바퀴가 없어요.':'아직 꾸밀 바퀴가 없어요.'); return; } if(L.length===1){ startDeco(L[0]); return; } setMode('pick'); toast('꾸밀 바퀴를 눌러 주세요.'); S.ui(); }
 function tap(x,y,mouse){
@@ -1728,6 +1737,16 @@ window.addEventListener('pagehide',()=>save());
 // ══════════════════════════════════════════════════════════════════
 function countInfo(){ const n=alive().length; return {alive:n,total:store.pets.length,cap:CAP,nextNo:store.nextNo}; }
 function postCount(){ if(EMBED) try{ parent.postMessage({type:'bamung-count',...countInfo()},location.origin); }catch(e){} }
+const entrySign=$('entrySign');
+let signRead=false, afterSign=null, unseenArrival=null;
+function dismissSign(){
+  if(!entrySign.open) return;
+  signRead=true;
+  entrySign.close();
+  const start=afterSign; afterSign=null; start?.();
+}
+entrySign.addEventListener('click',dismissSign);
+entrySign.addEventListener('cancel',e=>{ e.preventDefault(); dismissSign(); });
 let toldGone=null;
 function wake(){
   paused=false;
@@ -1739,6 +1758,8 @@ function wake(){
   return api;
 }
 function sleep(){
+  afterSign=null;
+  if(entrySign.open) entrySign.close();
   if(deco.pet) finishDeco();
   if(edit.inst) finishEdit(true);
   cancelGrab();
@@ -1755,8 +1776,18 @@ function pause(){ if(!awake||paused) return api; paused=true; if(raf){ cancelAni
 function resume(){ if(!paused) return api; paused=false; if(awake){ last=0; SFX.resume(); if(!raf) raf=requestAnimationFrame(frame); } return api; }
 /** o.arrive={name}: 새로 데려온 놈을 넣는다 */
 function enter(o={}){
-  wake(); let added=null;
+  let added=null;
   if(o.arrive){ const p=arrive(o.arrive); if(p){ added={id:p.id,no:p.rec.no,name:p.name}; stopFollow(); } }
+  if(!signRead&&added) unseenArrival=added;
+  if(o.background) return added;
+  const start=()=>{
+    wake();
+    const arrival=added||unseenArrival;
+    unseenArrival=null;
+    o.onView?.(arrival);
+  };
+  if(signRead) start();
+  else { afterSign=start; if(!entrySign.open) entrySign.showModal(); }
   return added;
 }
 function reset(){ if(deco.pet) finishDeco(); if(edit.inst) finishEdit(true); cancelGrab(); if(mode==='pick'||mode==='tweezer') setMode('watch'); closeSheets(); stopFollow(); goHome(true); return api; }
@@ -1791,7 +1822,7 @@ try{
   try{ renderer.compile(scene,camera); }catch(e){}
   draw(0.016);
   if(EMBED){ parent.postMessage({type:'bamung-ready',...countInfo()},location.origin); }
-  else wake();
+  else enter();
 }catch(e){ console.error(e); showError('테라리움을 여는 중에 문제가 생겼어요. 새로고침해 주세요.'); }
 </script>
 </body>
