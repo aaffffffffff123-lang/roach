@@ -54,6 +54,15 @@ iframe{display:block;width:100%;height:100%;border:0;background:#efe8dc}
 #introGo.on{opacity:1}
 #introGo:active{transform:translateY(3px);box-shadow:0 0 0 #0a5646}
 
+#petPlaque{width:min(61rem,calc(100% - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)));max-width:none;margin:auto;border:1px solid #84101b;padding:0;background:#ae1422;color:#ffda54;box-shadow:0 3px 0 #70141a,0 8px 24px #29171366}
+#petPlaque::backdrop{background:rgba(28,18,16,.64)}
+#petPlaque button{width:100%;display:block;position:relative;padding:clamp(24px,5.2vw,54px) 3.4%;border:0;border-radius:0;background:linear-gradient(#bc1724,#ad1020);color:inherit;cursor:pointer;touch-action:manipulation;box-shadow:inset 0 2px #d54942,inset 0 -2px #891221}
+#petPlaque button:focus-visible{outline:2px solid #e7b94f;outline-offset:-6px}
+#petPlaque .motto{display:block;position:relative;font:700 clamp(12px,4vw,40px)/1.5 Gungsuh,"궁서",serif;text-align:center;letter-spacing:-.04em}
+#petPlaque img{display:none;width:100%;height:auto}
+#petPlaque.ink img{display:block}
+#petPlaque.ink .words{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
 #mail{position:fixed;inset:0;z-index:60;display:none;place-items:center;padding:20px;background:rgba(255,236,190,.5);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
 #mail.show{display:grid}
 #mail.closing{animation:mailOut .28s ease-in forwards}
@@ -115,6 +124,12 @@ html #intro .box,html #mail .card,html #slimeDone .card,html #petName .card{marg
   </div>
 </div>
 
+<dialog id="petPlaque" aria-label="테라리움 표어">
+  <button type="button" aria-label="표어 닫기" aria-describedby="petMotto"><span class="motto">
+    <span class="words" id="petMotto">누구나 바퀴벌레의 삶을 감당할 수 있다면<br>나는 결코 바퀴벌레를 선택하지 않았을 것이다.</span>
+    <img width="2188" height="283" alt="">
+  </span></button>
+</dialog>
 <div id="mail" aria-hidden="true">
   <div class="env"></div>
   <div class="card" role="dialog" aria-label="바퀴벌레에게서 온 편지">
@@ -218,18 +233,19 @@ const slime=createSlimeMode({
 
 // 바멍(어항): 아직 공개 전이라 주소 끝에 ?bamung=1 을 붙여 들어올 때만 「컵」이 생긴다
 const PET_ON=(()=>{ const v=new URLSearchParams(location.search).get('bamung'); return v!==null&&v!=='0'; })();
+const petPlaque=document.getElementById('petPlaque');
+if(PET_ON){
+  const ink=petPlaque.querySelector('img');
+  ink.addEventListener('load',()=>petPlaque.classList.add('ink'),{once:true});
+  ink.src='pet-plaque.webp';
+}
 const pet=PET_ON?createPetMode({
   gameFrame,
-  isBlocked:()=>mailOpen,
+  isBlocked:()=>mailOpen||petPlaque.open,
   onLab:info=>openLabFromTank(info),
   onLabWarm:()=>{preloadLab();return labState==='ready';},          // 테라리움에서 족집게를 고르면 실험실을 미리 불러 둔다
   onLabGiveUp:()=>{if(labState!=='ready')labState='none';},         // 끝내 안 뜨면 다음에 처음부터 다시 불러온다
-  onEnter:({pause,resume})=>{
-    setTimeout(()=>{
-      if(!pet.isTankOpen()) return;
-      if(showLetter('pet',()=>setTimeout(resume,280))) pause();
-    },2400);
-  }
+  onEnter:showPetPlaque
 }):{install(){},reset(){},isOpen:()=>false,isBusy:()=>false,isTankOpen:()=>false};
 // 죽일 때 가끔: 「사랑이 이긴다」 편지 대신 바퀴 두 마리가 대화하는 창
 const cut=createCutscene({getG:()=>G,getSfx:()=>GSFX,onClose:()=>{lastLetterAt=performance.now()/1000;}});
@@ -281,11 +297,12 @@ gameFrame.addEventListener('load',()=>{
   installed=false;
   cap=null;
   slime.reset(); pet.reset(); care.reset();
+  if(petPlaque.open) petPlaque.close();
   waitForGame();
 });
 
 // ───────── 인트로 · 바퀴벌레에게서 온 편지 ─────────
-const LETTER={ pet:{color:'#f3b971',lines:['간택해 주셔서','감사합니다']},
+const LETTER={
   slime:{
     color:'#9fdccd',
     lines:['촉감 놀이를 통해','바퀴벌레와 친해져요~']
@@ -373,6 +390,38 @@ function sfxMailOut(){
   mTone(1175,.05,.25,.1);mTone(1568,.12,.35,.1);
 }
 
+// 짧은 작은북 두 타 뒤에 큰북으로 끊는다. 팻말을 닫으면 남은 울림도 멎는다.
+function playPetDrums(){
+  const c=mailAudio(); if(!c) return null;
+  const rate=c.sampleRate, buf=c.createBuffer(1,Math.ceil(rate*.68),rate);
+  const out=buf.getChannelData(0), tau=2*Math.PI;
+  for(const [onset,strength,bass] of [[0,.7,false],[.105,.52,false],[.30,1,true]]){
+    const offset=Math.round(onset*rate), n=Math.floor(rate*(bass ? .37 : .13));
+    let previous=0;
+    for(let i=0;i<n;i++){
+      const t=i/rate, noise=Math.random()*2-1;
+      const wire=(noise-previous)*.25*Math.exp(-t*(bass?45:38)); previous=noise;
+      const skin=.28*Math.sin(tau*186*t+1.5*(1-Math.exp(-52*t)))*Math.exp(-32*t);
+      const low=bass ? .52*Math.sin(tau*83*t+3*(1-Math.exp(-34*t)))*Math.exp(-16*t) : 0;
+      out[offset+i]+=.70*strength*Math.min(1,t*1500)*(skin+wire+low);
+    }
+  }
+  const src=c.createBufferSource(); src.buffer=buf; src.connect(c.destination);
+  src.onended=()=>src.disconnect(); src.start(); return src;
+}
+function showPetPlaque(resume){
+  if(mailOpen||petPlaque.open) return false;
+  petPlaque.showModal();
+  lastLetterAt=performance.now()/1000;
+  let drums=null;
+  petPlaque.addEventListener('close',()=>{
+    drums?.stop(); lastLetterAt=performance.now()/1000; resume();
+  },{once:true});
+  try{ drums=playPetDrums(); }catch(e){ console.warn(e); }
+  return true;
+}
+petPlaque.addEventListener('click',()=>{ if(petPlaque.open) petPlaque.close(); });
+
 // 상식은 한 바퀴 다 보여 줄 때까지 겹치지 않게 뽑는다
 let factBag=[];
 function pickFact(list){
@@ -382,7 +431,7 @@ function pickFact(list){
 
 function showLetter(kind,onDone){
   const L=LETTER[kind];
-  if(!L||mailOpen)return false;
+  if(!L||mailOpen||petPlaque.open)return false;
   mailOpen=true;mailDone=onDone||null;mailEl._at=performance.now();
   const tok=++mailTok;
   lastLetterAt=performance.now()/1000;

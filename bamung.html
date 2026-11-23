@@ -24,12 +24,6 @@ button:disabled{opacity:.42;cursor:default}
 #err{position:fixed;z-index:30;inset:auto 16px calc(18px + var(--sb));display:none;padding:12px 15px;border-radius:14px;background:rgba(83,25,18,.94);color:#f8f0dc;font:700 13px/1.5 var(--kr);text-align:center}
 #err.show{display:block}
 
-#entrySign{width:min(64rem,calc(100% - 24px - var(--sl) - var(--sr)));max-width:none;margin:auto;padding:0;border:1px solid #992023;border-radius:0;overflow:visible;background:#be101f;box-shadow:0 3px 0 #781720,0 10px 28px #21120d55}
-#entrySign::backdrop{background:rgba(29,21,15,.64)}
-#entrySign button{display:block;width:100%;padding:clamp(24px,5vw,60px) 5px;background:#be101f;color:#ffe164;box-shadow:inset 0 2px 0 #e33d43,inset 0 -2px 0 #a41923;font:800 clamp(12px,4.3vw,42px)/1.55 var(--kr);letter-spacing:-.045em;text-align:center;text-shadow:.045em .075em .015em #762216}
-#entrySign button:focus-visible{outline:2px solid #ffe164;outline-offset:-6px}
-#entrySign span{display:block;word-break:keep-all}
-
 /* 위쪽 */
 #hud{position:fixed;z-index:4;left:72px;right:72px;top:calc(16px + var(--st));display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;transition:opacity .4s}
 .pill{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:999px;background:var(--iv);box-shadow:var(--sh);font:900 12px/1 system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:var(--ink);white-space:nowrap}
@@ -161,9 +155,6 @@ body.deco #empty,body.edit #empty{display:none}
 </div>
 <div id="empty"></div>
 <a id="homeLink" href="./">게임으로</a>
-<dialog id="entrySign" aria-label="테라리움 입장">
-  <button type="button" aria-label="테라리움 들어가기" aria-describedby="entryWords" autofocus><span id="entryWords"><span>누구나 바퀴벌레의 삶을 감당할 수 있다면</span><span>나는 결코 바퀴벌레를 선택하지 않았을 것이다.</span></span></button>
-</dialog>
 
 <div id="bar" class="dock">
   <button type="button" data-a="props"><svg viewBox="0 0 24 24"><path d="M3.5 8 12 4l8.5 4v8.5L12 20.5 3.5 16.5z"/><path d="m3.5 8 8.5 4 8.5-4M12 12v8.5"/></svg>소품</button>
@@ -456,21 +447,21 @@ const SALON=new THREE.Vector3(0,0,1.2);
 const salon=new THREE.Group(); salon.position.set(SALON.x,0,SALON.z); scene.add(salon);
 let SALON_TOP=0;
 function buildSalon(){
-  const tray=mesh(new THREE.CylinderGeometry(0.17,0.172,0.008,56),phys('#ffffff',{roughness:0.22,clearcoat:0.9}),0,DESK_Y+0.004,0,salon);
-  const prof=[]; prof.push(new THREE.Vector2(0,0)); for(let i=0;i<=12;i++){ const a=-PI/2+i/12*PI; prof.push(new THREE.Vector2(0.128+0.017*Math.cos(a),0.017+0.017*Math.sin(a))); } prof.push(new THREE.Vector2(0,0.035));
+  const tray=mesh(new THREE.CylinderGeometry(0.235,0.237,0.008,56),phys('#ffffff',{roughness:0.22,clearcoat:0.9}),0,DESK_Y+0.004,0,salon);
+  const prof=[]; prof.push(new THREE.Vector2(0,0)); for(let i=0;i<=12;i++){ const a=-PI/2+i/12*PI; prof.push(new THREE.Vector2(0.205+0.017*Math.cos(a),0.017+0.017*Math.sin(a))); } prof.push(new THREE.Vector2(0,0.034));
   const velvet=new THREE.MeshPhysicalMaterial({color:'#ffb6cb',roughness:0.85,sheen:1,sheenColor:new THREE.Color('#fff0f5'),sheenRoughness:0.45});
   mesh(new THREE.LatheGeometry(prof,48),velvet,0,DESK_Y+0.008,0,salon);
-  for(let i=0;i<4;i++){ const a=i/4*TAU+PI/4; const b=mesh(new THREE.SphereGeometry(0.004,8,6),phys('#ff8fb0'),Math.cos(a)*0.065,DESK_Y+0.008+0.034,Math.sin(a)*0.065,salon); b.scale.y=0.5; }
-  SALON_TOP=DESK_Y+0.008+0.035;
+  SALON_TOP=DESK_Y+0.008+0.034;
+  for(let i=0;i<4;i++){ const a=i/4*TAU+PI/4; const b=mesh(new THREE.SphereGeometry(0.004,8,6),phys('#ff8fb0'),Math.cos(a)*0.065,SALON_TOP-0.0018,Math.sin(a)*0.065,salon); b.scale.y=0.5; }
   // 매니큐어 병
-  const bottle=new THREE.Group(); bottle.position.set(0.23,DESK_Y,-0.06); bottle.rotation.y=0.4; salon.add(bottle);
+  const bottle=new THREE.Group(); bottle.position.set(0.26,DESK_Y,-0.06); bottle.rotation.y=0.4; salon.add(bottle);
   const glass=new THREE.MeshPhysicalMaterial({color:'#ffffff',roughness:0.05,transparent:true,opacity:0.45,clearcoat:1,depthWrite:false});
   const bodyG=new THREE.CylinderGeometry(0.022,0.024,0.04,24); mesh(bodyG,phys('#ff5f8f',{roughness:0.15}),0,0.019,0,bottle).scale.set(0.86,0.9,0.86);
   mesh(bodyG,glass,0,0.02,0,bottle,false);
   mesh(new THREE.CylinderGeometry(0.009,0.009,0.034,16),phys('#1f1b1d',{roughness:0.3}),0,0.057,0,bottle);
   // 스티커 한 장
   const sheetTex=ctex(256,320,(g,w,h)=>{ g.fillStyle='#ffffff'; g.fillRect(0,0,w,h); g.strokeStyle='#e7dcc8'; g.lineWidth=4; g.strokeRect(6,6,w-12,h-12); const ks=['heart','star','flower','cherry','bear','sparkle']; ks.forEach((k,i)=>{ g.drawImage(stickerCanvas(k),24+(i%2)*110,20+Math.floor(i/2)*98,96,96); }); });
-  const st=mesh(new THREE.BoxGeometry(0.12,0.002,0.15),[std('#fff'),std('#fff'),std('#ffffff',{map:sheetTex,roughness:0.5}),std('#fff'),std('#fff'),std('#fff')],-0.25,DESK_Y+0.001,0.03,salon,false);
+  const st=mesh(new THREE.BoxGeometry(0.12,0.002,0.15),[std('#fff'),std('#fff'),std('#ffffff',{map:sheetTex,roughness:0.5}),std('#fff'),std('#fff'),std('#fff')],-0.315,DESK_Y+0.001,0.03,salon,false);
   st.rotation.y=-0.35;
 }
 buildSalon();
@@ -1094,7 +1085,7 @@ function computeHome(){
 }
 function goHome(instant=false){ const H=cam.home, G=cam.g; G.yaw=cam.yaw+wrapA(H.yaw-cam.yaw); G.pitch=H.pitch; G.dist=H.dist; G.tgt.copy(H.tgt); if(instant){ cam.yaw=G.yaw; cam.pitch=G.pitch; cam.dist=G.dist; cam.tgt.copy(G.tgt); } }
 function camAway(){ if(cam.mode!=='tank'||cam.follow) return false; const H=cam.home, G=cam.g; return Math.abs(wrapA(G.yaw-H.yaw))>0.12||Math.abs(G.pitch-H.pitch)>0.1||Math.abs(G.dist/H.dist-1)>0.12||G.tgt.distanceTo(H.tgt)>0.06; }
-function salonFit(){ const h=innerHeight, w=innerWidth, side=decoSide(), panel=side?0:Math.max(decoPanelH(),Math.min(340,h*0.45)), top=side?20:MARGIN.top, pw=side?Math.min(400,w*0.5):0; const a=clamp((h-panel-top)/h,0.25,1); const t=Math.tan(camera.fov*PI/360); const v=Math.atan(t*a), hz=Math.atan(t*(w-pw)/h); return 0.13/Math.sin(Math.min(v,hz)); }
+function salonFit(){ const h=innerHeight, w=innerWidth, side=decoSide(), panel=side?0:Math.max(decoPanelH(),Math.min(340,h*0.45)), top=side?20:MARGIN.top, pw=side?Math.min(400,w*0.5):0; const a=clamp((h-panel-top)/h,0.25,1); const t=Math.tan(camera.fov*PI/360); const v=Math.atan(t*a), hz=Math.atan(t*(w-pw)/h); return 0.15*(deco.pet?.m.size||1)/Math.sin(Math.min(v,hz)); }
 function limits(){ return cam.mode==='salon'?{dmin:cam.sfit*0.35,dmax:cam.sfit*1.8,pmin:0.12,pmax:1.4}:{dmin:cam.fit*0.24,dmax:cam.fit*1.45,pmin:0.3,pmax:1.48}; }
 function clampGoals(){ const L=limits(), G=cam.g; G.pitch=clamp(G.pitch,L.pmin,L.pmax); G.dist=clamp(G.dist,L.dmin,L.dmax); if(cam.mode==='tank'){ G.tgt.x=clamp(G.tgt.x,-TANK.hw-0.1,TANK.hw+0.1); G.tgt.z=clamp(G.tgt.z,-TANK.hd-0.15,TANK.hd+0.15); G.tgt.y=clamp(G.tgt.y,0.02,0.45); } }
 function orbit(dx,dy){ cam.g.yaw-=dx*0.0062; cam.g.pitch+=dy*0.0052; clampGoals(); }
@@ -1102,7 +1093,7 @@ function zoomBy(f){ cam.g.dist*=f; clampGoals(); }
 function panBy(dx,dy){ if(cam.mode!=='tank') return; stopFollow(); const k=cam.dist*0.0011, y=cam.yaw; const rx=Math.cos(y), rz=-Math.sin(y), fx=-Math.sin(y), fz=-Math.cos(y); cam.g.tgt.x+=(-dx*rx+dy*fx*0.9)*k; cam.g.tgt.z+=(-dx*rz+dy*fz*0.9)*k; clampGoals(); }
 function startFollow(p){ cam.follow=p; cam.g.dist=Math.min(cam.g.dist,cam.fit*0.5); clampGoals(); refreshHud(); }
 function stopFollow(){ if(!cam.follow) return; cam.follow=null; refreshHud(); }
-function enterSalonView(){ cam.saved={yaw:cam.g.yaw,pitch:cam.g.pitch,dist:cam.g.dist,tgt:cam.g.tgt.clone()}; cam.mode='salon'; cam.sfit=salonFit(); cam.g.yaw=cam.yaw+wrapA(0.55-cam.yaw); cam.g.pitch=0.8; cam.g.dist=cam.sfit; cam.g.tgt.set(SALON.x,SALON_TOP+0.018,SALON.z); }
+function enterSalonView(){ cam.saved={yaw:cam.g.yaw,pitch:cam.g.pitch,dist:cam.g.dist,tgt:cam.g.tgt.clone()}; cam.mode='salon'; cam.sfit=salonFit(); cam.g.yaw=cam.yaw+wrapA(0.55-cam.yaw); cam.g.pitch=0.8; cam.g.dist=cam.sfit; deco.pet.m.g.localToWorld(cam.g.tgt.set(0,0.07,-0.22)); }
 function leaveSalonView(){ cam.mode='tank'; const s=cam.saved; if(s){ cam.g.yaw=s.yaw; cam.g.pitch=s.pitch; cam.g.dist=s.dist; cam.g.tgt.copy(s.tgt); } cam.saved=null; }
 const _ft=new THREE.Vector3();
 const CAM_GOOD={yaw:0,pitch:0.62,dist:1.6,tgt:new THREE.Vector3(0,0.14,0)};   // 마지막으로 멀쩡했던 시점
@@ -1408,6 +1399,8 @@ function startDeco(p){
   p.away=true; p.mode='away'; p.m.g.visible=true; clipToTank(p,false);   // 방석은 테라리움 밖이라 유리 자르기를 끈다
   p.m.g.position.set(SALON.x,SALON_TOP,SALON.z); p.m.g.quaternion.setFromAxisAngle(UP,PI/2+0.25);
   deco.pet=p; deco.undo.length=0; deco.groomAt=rand(5,9); deco.lookAt=0;
+  Object.assign(p.m.w,{walk:0,groom:0,legGroom:0,eat:0,flail:0,swim:0,curl:0,crouch:1,tuck:0});
+  p.m.spd=0; animateSalon(0);
   enterSalonView(); setMode('deco');
   $('decoWho').textContent=`${p.name} 꾸미는 중`;
   renderDeco(); S.ui();
@@ -1493,6 +1486,32 @@ function updateDecoLine(dt){
   if(L.phase==='talk'&&L.t>typeTime(L.text,L.p.voice?.speed||1)+2.6){ L.phase='fade'; L.fade=0; }
   if(L.phase==='fade'){ L.fade=Math.min(1,L.fade+dt/0.5); if(L.fade>=1){ L.phase='none'; L.p=null; L.voice=null; } }
 }
+// 발톱·종아리 가시의 가장 낮은 점을 방석에 맞춘다. 더듬이를 손질하는 발은 들어 올릴 수 있다.
+const salonContact=new THREE.Vector3(), salonAxis=new THREE.Vector3();
+function settleSalonFeet(model,groomSide){
+  for(const leg of model.legs){
+    const shin=leg.knee.children[0], vertices=shin.geometry.attributes.position;
+    const lift=leg.i===0&&leg.s===groomSide&&model.w.groom>.015?model.w.groom*.012:0;
+    const target=SALON_TOP+.00022+lift;
+    leg.hip.updateWorldMatrix(true,false);
+    salonAxis.setFromMatrixColumn(leg.hip.matrixWorld,2).normalize();
+    const pivot=leg.hip.matrixWorld.elements;
+    for(let pass=0;pass<4;pass++){
+      leg.fem.updateWorldMatrix(false,true);
+      const m=shin.matrixWorld.elements;
+      let lowest=Infinity, at=0;
+      for(let i=0;i<vertices.count;i++){
+        const y=m[1]*vertices.getX(i)+m[5]*vertices.getY(i)+m[9]*vertices.getZ(i)+m[13];
+        if(y<lowest){ lowest=y; at=i; }
+      }
+      const gap=target-lowest;
+      if(Math.abs(gap)<.00002||(lift>0&&gap<0)) break;
+      salonContact.fromBufferAttribute(vertices,at).applyMatrix4(shin.matrixWorld);
+      const rise=salonAxis.z*(salonContact.x-pivot[12])-salonAxis.x*(salonContact.z-pivot[14]);
+      leg.fem.rotation.z+=clamp(gap/Math.max(.01,rise),-.35,.35);
+    }
+  }
+}
 /** 방석 위에서: 가만히 앉아 더듬이를 움직이고, 가끔 손질하고, 뭘 붙이면 그쪽을 더듬는다 */
 function animateSalon(dt){
   const p=deco.pet; if(!p) return; const T=deco.T; for(const k in T) T[k]=0;
@@ -1502,7 +1521,8 @@ function animateSalon(dt){
   // 혼잣말하는 동안: 고개를 살짝 들고 글자 박자에 맞춰 더듬이를 까딱인다
   if(decoLine.p===p&&decoLine.phase==='talk'){ const e=decoLine.t, tt=Math.max(0.9,typeTime(decoLine.text,p.voice?.speed||1)); if(e<tt){ const u=e/tt; T.groom=0; T.aim=1; T.pitch=-0.06*Math.sin(PI*Math.min(1,u*1.6))-0.012*Math.sin(e*TAU*6.5); p.m.aimDir.set(0,0.35+0.2*Math.sin(e*TAU*6.5),1).normalize(); } }
   p.m.animate(dt,T);
-  p.m.g.position.set(SALON.x,SALON_TOP,SALON.z);
+  p.m.g.position.set(SALON.x,SALON_TOP+.009*p.m.size,SALON.z);
+  settleSalonFeet(p.m,T.groomSide);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1616,7 +1636,7 @@ function endPtr(e,cancel){
 canvas.addEventListener('pointerup',e=>endPtr(e,false));
 canvas.addEventListener('pointercancel',e=>endPtr(e,true));
 canvas.addEventListener('wheel',e=>{ e.preventDefault(); wakeUi(); zoomBy(Math.exp(clamp(e.deltaY,-120,120)*0.0016)); },{passive:false});
-window.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!entrySign.open){ if(e.target?.tagName==='INPUT'){ e.target.blur(); return; } if($('photo').classList.contains('show')) $('photo').classList.remove('show'); else if(anySheet()) closeSheets(); else if(mode==='edit') finishEdit(true); else if(mode==='pick'||mode==='tweezer'){ if(!grab) setMode('watch'); } else if(mode==='deco') finishDeco(); else if(EMBED) try{ parent.postMessage({type:'bamung-close'},location.origin); }catch(err){} } });
+window.addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(e.target?.tagName==='INPUT'){ e.target.blur(); return; } if($('photo').classList.contains('show')) $('photo').classList.remove('show'); else if(anySheet()) closeSheets(); else if(mode==='edit') finishEdit(true); else if(mode==='pick'||mode==='tweezer'){ if(!grab) setMode('watch'); } else if(mode==='deco') finishDeco(); else if(EMBED) try{ parent.postMessage({type:'bamung-close'},location.origin); }catch(err){} } });
 
 function startPick(){ closeSheets(); const L=alive(); if(!L.length){ toast(world.pets.length?'꾸밀 수 있는 바퀴가 없어요.':'아직 꾸밀 바퀴가 없어요.'); return; } if(L.length===1){ startDeco(L[0]); return; } setMode('pick'); toast('꾸밀 바퀴를 눌러 주세요.'); S.ui(); }
 function tap(x,y,mouse){
@@ -1737,16 +1757,6 @@ window.addEventListener('pagehide',()=>save());
 // ══════════════════════════════════════════════════════════════════
 function countInfo(){ const n=alive().length; return {alive:n,total:store.pets.length,cap:CAP,nextNo:store.nextNo}; }
 function postCount(){ if(EMBED) try{ parent.postMessage({type:'bamung-count',...countInfo()},location.origin); }catch(e){} }
-const entrySign=$('entrySign');
-let signRead=false, afterSign=null, unseenArrival=null;
-function dismissSign(){
-  if(!entrySign.open) return;
-  signRead=true;
-  entrySign.close();
-  const start=afterSign; afterSign=null; start?.();
-}
-entrySign.addEventListener('click',dismissSign);
-entrySign.addEventListener('cancel',e=>{ e.preventDefault(); dismissSign(); });
 let toldGone=null;
 function wake(){
   paused=false;
@@ -1758,8 +1768,6 @@ function wake(){
   return api;
 }
 function sleep(){
-  afterSign=null;
-  if(entrySign.open) entrySign.close();
   if(deco.pet) finishDeco();
   if(edit.inst) finishEdit(true);
   cancelGrab();
@@ -1776,18 +1784,8 @@ function pause(){ if(!awake||paused) return api; paused=true; if(raf){ cancelAni
 function resume(){ if(!paused) return api; paused=false; if(awake){ last=0; SFX.resume(); if(!raf) raf=requestAnimationFrame(frame); } return api; }
 /** o.arrive={name}: 새로 데려온 놈을 넣는다 */
 function enter(o={}){
-  let added=null;
+  wake(); let added=null;
   if(o.arrive){ const p=arrive(o.arrive); if(p){ added={id:p.id,no:p.rec.no,name:p.name}; stopFollow(); } }
-  if(!signRead&&added) unseenArrival=added;
-  if(o.background) return added;
-  const start=()=>{
-    wake();
-    const arrival=added||unseenArrival;
-    unseenArrival=null;
-    o.onView?.(arrival);
-  };
-  if(signRead) start();
-  else { afterSign=start; if(!entrySign.open) entrySign.showModal(); }
   return added;
 }
 function reset(){ if(deco.pet) finishDeco(); if(edit.inst) finishEdit(true); cancelGrab(); if(mode==='pick'||mode==='tweezer') setMode('watch'); closeSheets(); stopFollow(); goHome(true); return api; }
@@ -1822,7 +1820,7 @@ try{
   try{ renderer.compile(scene,camera); }catch(e){}
   draw(0.016);
   if(EMBED){ parent.postMessage({type:'bamung-ready',...countInfo()},location.origin); }
-  else enter();
+  else wake();
 }catch(e){ console.error(e); showError('테라리움을 여는 중에 문제가 생겼어요. 새로고침해 주세요.'); }
 </script>
 </body>

@@ -34,7 +34,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   let env=null, wrapped=null;
   let cupMesh=null, cap=null, naming=null;
   let tankOpen=false, tankState='none', pendingEnter=false, pendingArrive=null, closeBusy=false, pausedBefore=false, namePaused=false;
-  let info=readStore(), hintShown=false, letterDue=true, lastPointer=null, press=null;
+  let info=readStore(), hintShown=false, signDue=true, signTimer=0, lastPointer=null, press=null;
   const TMP={};
 
   // ───────── 겉면: 테라리움 레이어 · 돌아가기 · 이름 카드 ─────────
@@ -77,13 +77,13 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   back.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); closeTank(); });
   goBtn.addEventListener('click',e=>{ e.preventDefault(); confirmName(); });
   nameIn.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); confirmName(); } });
-  window.addEventListener('keydown',e=>{ if(e.code==='Escape'&&tankOpen&&!naming){ e.preventDefault(); closeTank(); } });
+  window.addEventListener('keydown',e=>{ if(e.code==='Escape'&&tankOpen&&!naming&&!isBlocked()){ e.preventDefault(); closeTank(); } });
   window.addEventListener('message',e=>{
     if(e.source!==frame.contentWindow) return;
     const d=e.data||{};
     if(d.type==='bamung-ready'){ tankState='ready'; layer.classList.remove('loading'); if(typeof d.total==='number') setInfo(d);
       if(tankOpen){ if(pendingEnter) enterTank(); }
-      else { const L=tankApi(); if(pendingArrive&&L){ const a=pendingArrive; pendingArrive=null; try{ L.enter({arrive:a,background:true}); }catch(err){ console.error(err); } } try{ L?.sleep?.(); }catch(err){} info=readStore(); updateSlot(); } }
+      else { const L=tankApi(); if(pendingArrive&&L){ const a=pendingArrive; pendingArrive=null; try{ L.enter({arrive:a}); }catch(err){ console.error(err); } } try{ L?.sleep?.(); }catch(err){} info=readStore(); updateSlot(); } }
     if(d.type==='bamung-count') setInfo(d);
     if(d.type==='bamung-ui') layer.classList.toggle('calm',!d.show);
     if(d.type==='bamung-close') closeTank();
@@ -101,10 +101,16 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   function enterTank(){
     const L=tankApi(); if(!L) return;
     const a=pendingArrive; pendingArrive=null; pendingEnter=false;
-    const onView=added=>{
-      if(added&&letterDue) onEnter?.({pause:()=>{ letterDue=false; try{ (L.pause||L.sleep)(); }catch(err){} },resume:()=>{ if(tankOpen) try{ (L.resume||L.wake)(); }catch(err){} }});
-    };
-    try{ L.enter({arrive:a,onView}); }catch(err){ console.error(err); }
+    let added=null;
+    try{ added=L.enter(a?{arrive:a}:{}); }catch(err){ console.error(err); }
+    if(added&&signDue){
+      clearTimeout(signTimer);
+      signTimer=setTimeout(()=>{
+        signTimer=0;
+        if(!tankOpen||!signDue) return;
+        if(onEnter?.(()=>{ if(tankOpen) L.resume(); })){ signDue=false; L.pause(); }
+      },2400);
+    }
     info=readStore(); updateSlot();
   }
   function openTank(arrive=null){
@@ -121,6 +127,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   }
   function closeTank(force=false){
     if(!tankOpen||(!force&&(closeBusy||isBlocked()))) return;
+    clearTimeout(signTimer);
     closeBusy=true; pendingEnter=false;
     try{ tankApi()?.sleep?.(); }catch(err){}
     layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered');
@@ -327,6 +334,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   }
   /** 게임을 새로 시작할 때 (gameFrame이 다시 로드될 때) */
   function reset(){
+    clearTimeout(signTimer);
     cap=null; cupMesh=null; wrapped=null; hintShown=false; tankBtn=null;
     if(naming){ naming=null; nameEl.classList.remove('show'); nameEl.setAttribute('aria-hidden','true'); }
     if(tankOpen){ try{ tankApi()?.sleep?.(); }catch(err){} layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered'); tankOpen=false; closeBusy=false; }
