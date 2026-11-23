@@ -46,7 +46,7 @@ body.solo #homeLink{display:inline-flex}
 .dock button[data-a="tweezer"]{display:none}
 body.lab .dock button[data-a="tweezer"]{display:flex}
 @media (max-width:380px){ body.lab #bar{gap:4px;padding:5px} body.lab #bar button{width:56px} }
-@media (pointer:fine){ body.tweezer #gl{cursor:none} }
+@media (pointer:fine){ body.tweezer:not(.twout) #gl{cursor:none} }
 #editBar{display:none}
 body.edit #bar{display:none}
 body.edit #editBar{display:flex}
@@ -234,11 +234,12 @@ const showError=t=>{ const e=$('err'); e.textContent=t; e.classList.add('show');
 function loadStore(){
   let d=null; try{ d=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
   if(!d||typeof d!=='object') d={};
-  const S={v:1,nextNo:Math.max(1,d.nextNo|0),pets:[],graves:[],props:null,fallen:[]};
+  const S={v:1,nextNo:Math.max(1,d.nextNo|0),pets:[],graves:[],props:null,fallen:[],missing:[]};
   for(const p of Array.isArray(d.pets)?d.pets:[]){ if(!p||!p.id||!(p.born>0)) continue; if(!p.deco||typeof p.deco!=='object') p.deco={}; p.life=+p.life||30; if(!(p.no>0)) p.no=S.nextNo++; S.pets.push(p); }
   for(const g of Array.isArray(d.graves)?d.graves:[]) if(g&&g.name) S.graves.push(g);
   if(Array.isArray(d.props)) S.props=d.props.filter(p=>p&&PROPS[p.k]&&isFinite(p.x)&&isFinite(p.z));
   for(const f of Array.isArray(d.fallen)?d.fallen:[]) if(f&&f.petId) S.fallen.push(f);
+  for(const m of Array.isArray(d.missing)?d.missing:[]) if(m&&m.name&&m.at>0) S.missing.push({name:String(m.name),at:+m.at,knew:Array.isArray(m.knew)?m.knew:[],said:m.said&&typeof m.said==='object'?m.said:{}});
   for(const p of S.pets) S.nextNo=Math.max(S.nextNo,(p.no|0)+1);
   for(const g of S.graves) S.nextNo=Math.max(S.nextNo,(g.no|0)+1);
   return S;
@@ -249,6 +250,7 @@ function save(){ saveIn=0; try{ syncStore(); localStorage.setItem(KEY,JSON.strin
 function saveSoon(s=0.7){ saveIn=saveIn?Math.min(saveIn,s):s; }
 function syncStore(){
   for(const p of world.pets){ if(p.away) continue; const r=p.rec; r.x=r4(p.x); r.z=r4(p.z); r.h=r4(wrapA(p.h)); }
+  store.missing=world.missing;
   store.props=world.props.map(i=>{ const o=(edit.inst===i&&edit.orig)?edit.orig:i; return {k:i.k,x:r4(o.x),z:r4(o.z),rot:r4(o.rot),on:!!i.on}; });
 }
 
@@ -262,10 +264,15 @@ catch(e){ showError('이 기기에서는 3D 화면을 열 수 없어요.'); thro
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.04;
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.localClippingEnabled=true;   // 유리 벽 너머로 삐져나간 다리·더듬이는 자른다 (clipToTank)
 const MAX_ANISO=Math.min(8,renderer.capabilities.getMaxAnisotropy());
 const scene=new THREE.Scene();
 const BG=new THREE.Color('#e8dbc4'); scene.background=BG; scene.fog=new THREE.Fog(BG,5.2,10.5);
-{ const pm=new THREE.PMREMGenerator(renderer); scene.environment=pm.fromScene(new RoomEnvironment(),0.04).texture; scene.environmentIntensity=0.55; pm.dispose(); }
+// 방 반사광(환경 맵)은 그래픽 카드 안에만 있어서, 창을 내렸다 올릴 때 그래픽 문맥을 잃으면 까맣게 비어 버린다. 되찾으면 다시 만든다
+let envRT=null;
+function buildEnv(){ try{ const pm=new THREE.PMREMGenerator(renderer); const old=envRT; envRT=pm.fromScene(new RoomEnvironment(),0.04); scene.environment=envRT.texture; pm.dispose(); old?.dispose(); }catch(e){ console.warn(e); } }
+buildEnv(); scene.environmentIntensity=0.55;
+canvas.addEventListener('webglcontextrestored',()=>buildEnv());
 const camera=new THREE.PerspectiveCamera(40,1,0.02,40);
 
 const hemi=new THREE.HemisphereLight(0xfff3df,0xc69a64,0.82); scene.add(hemi);
@@ -274,7 +281,7 @@ sun.castShadow=true; sun.shadow.mapSize.set(2048,2048); Object.assign(sun.shadow
 sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.003; scene.add(sun,sun.target);
 const fill=new THREE.DirectionalLight(0xe2ecff,0.42); fill.position.set(2,1.6,-1.6); scene.add(fill);
 
-function ctex(w,h,draw,{repeat=null,srgb=true}={}){ const c=document.createElement('canvas'); c.width=w; c.height=h; const g=c.getContext('2d'); draw(g,w,h); const t=new THREE.CanvasTexture(c); if(srgb) t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=MAX_ANISO; if(repeat){ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(repeat[0],repeat[1]); } return t; }
+function ctex(w,h,draw,{repeat=null,srgb=true}={}){ const c=document.createElement('canvas'); c.width=w; c.height=h; const g=c.getContext('2d',{willReadFrequently:true}); draw(g,w,h); const t=new THREE.CanvasTexture(c); if(srgb) t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=MAX_ANISO; if(repeat){ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(repeat[0],repeat[1]); } return t; }
 function grain(g,w,h,amt){ const id=g.getImageData(0,0,w,h),d=id.data; for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*amt; d[i]+=n; d[i+1]+=n; d[i+2]+=n; } g.putImageData(id,0,0); }
 const std=(c,o={})=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:0.6},o));
 const phys=(c,o={})=>new THREE.MeshPhysicalMaterial(Object.assign({color:c,roughness:0.3,clearcoat:0.7,clearcoatRoughness:0.25},o));
@@ -299,7 +306,7 @@ desk.rotation.x=-PI/2;
 
 function roomTex(){
   // 흐릿한 방 풍경: 작게 그려 크게 늘려서 초점이 나간 것처럼
-  const sw=320, sh=160, small=document.createElement('canvas'); small.width=sw; small.height=sh; const g=small.getContext('2d');
+  const sw=320, sh=160, small=document.createElement('canvas'); small.width=sw; small.height=sh; const g=small.getContext('2d',{willReadFrequently:true});
   const wg=g.createLinearGradient(0,0,0,sh); wg.addColorStop(0,'#efe2cc'); wg.addColorStop(0.62,'#f4e8d4'); wg.addColorStop(0.8,'#e8dbc4'); wg.addColorStop(1,'#cdb796'); g.fillStyle=wg; g.fillRect(0,0,sw,sh);
   const win=(cx)=>{ const x=cx-26,y=30,w=52,h=56; const sk=g.createLinearGradient(0,y,0,y+h); sk.addColorStop(0,'#cfe9fb'); sk.addColorStop(1,'#f6f2e3'); g.fillStyle=sk; g.fillRect(x,y,w,h);
     g.fillStyle='rgba(120,170,110,.75)'; for(let i=0;i<7;i++){ g.beginPath(); g.arc(x+6+Math.random()*w*0.8,y+h*0.62+Math.random()*h*0.3,6+Math.random()*9,0,TAU); g.fill(); }
@@ -315,7 +322,7 @@ function roomTex(){
   { const x=sw*0.27; g.fillStyle='#fff8ec'; g.fillRect(x-14,40,28,34); g.fillStyle='#9ccfe0'; g.fillRect(x-11,43,22,28); g.fillStyle='#f7c96a'; g.beginPath(); g.arc(x+4,52,4,0,TAU); g.fill(); g.fillStyle='#7fb07a'; g.beginPath(); g.moveTo(x-11,71); g.lineTo(x-2,58); g.lineTo(x+11,71); g.fill(); }
   // 문
   { for(const x of [sw*0.04,sw*1.04]){ g.fillStyle='#f6eee0'; g.fillRect(x-18,20,36,112); g.fillStyle='#dccfb9'; g.fillRect(x+10,74,4,4); } }
-  const big=document.createElement('canvas'); big.width=2048; big.height=1024; const G=big.getContext('2d'); G.imageSmoothingEnabled=true; G.imageSmoothingQuality='high';
+  const big=document.createElement('canvas'); big.width=2048; big.height=1024; const G=big.getContext('2d',{willReadFrequently:true}); G.imageSmoothingEnabled=true; G.imageSmoothingQuality='high';
   G.drawImage(small,0,0,2048,1024); G.globalAlpha=0.5; G.drawImage(small,-6,-4,2060,1032); G.globalAlpha=1; grain(G,2048,1024,6);
   const t=new THREE.CanvasTexture(big); t.colorSpace=THREE.SRGBColorSpace; return t;
 }
@@ -525,6 +532,8 @@ function updateLoops(dt){
 // ══════════════════════════════════════════════════════════════════
 const EV={};
 const world=new World({sfx:S,events:EV});
+world.missing=store.missing;   // 사라진 놈을 찾는 혼잣말 기록 (하루 동안)
+EV.missingSaid=()=>saveSoon(2);
 const PCTX={sfx:S};
 
 // ───────── 물결·물방울 ─────────
@@ -724,8 +733,14 @@ const petName=p=>p.name;
 function daysWith(r){ const end=r.dead?(r.diedAt||Date.now()):Date.now(); return Math.max(1,Math.floor((end-r.born)/DAY)+1); }
 let limbShadows=true;
 function updateShadowBudget(){ const on=world.pets.length<=12; if(on===limbShadows) return; limbShadows=on; for(const p of world.pets) for(const lg of p.m.legs){ lg.fem.children[0].castShadow=on; lg.knee.children[0].castShadow=on; } }
+// 유리 벽: 벽에 붙어 쉬거나 벽 쪽을 보면 다리·더듬이·머리가 유리를 뚫고 밖으로 나와 보였다.
+// 유리 면에서 잘라서, 유리에 닿은 것처럼 보이게 한다 (몸·다리·꾸밈 재질은 바퀴마다 따로라 바퀴마다 켜고 끈다. 꾸밈을 다시 붙이면 다시 건다)
+const GLASS_CLIP=(()=>{ const e=0.0035;   // 유리 판 두께의 가운데
+  return [new THREE.Plane(new THREE.Vector3(-1,0,0),TANK.hw+e),new THREE.Plane(new THREE.Vector3(1,0,0),TANK.hw+e),new THREE.Plane(new THREE.Vector3(0,0,-1),TANK.hd+e),new THREE.Plane(new THREE.Vector3(0,0,1),TANK.hd+e)]; })();
+function clipToTank(p,on){ const want=on?GLASS_CLIP:null;
+  p.m.g.traverse(o=>{ if(!o.isMesh) return; for(const m of Array.isArray(o.material)?o.material:[o.material]){ if(!m||m.clippingPlanes===want) continue; m.clippingPlanes=want; m.clipShadows=!!on; m.needsUpdate=true; } }); }
 function spawnPet(rec){
-  const p=new Pet(rec,world);
+  const p=new Pet(rec,world); clipToTank(p,true);
   const r=world.resolve(p.x,p.z,null); p.x=r.x; p.z=r.z;
   if(!p.dead) p.floorPose();
   p.snap=true; p.labelT=0; p.away=false;
@@ -767,6 +782,7 @@ function checkAges(){
 EV.died=(p)=>{ world.relapse(p); p.rec.toldDead=1; toast(`${p.name}${jo(p.name,'이/가')} 천수를 누렸어요.`,3.2); if(cam.follow===p) stopFollow(); save(); refreshHud(); if(card.pet===p) openCard(p); };
 function bury(p){
   const r=p.rec;
+  world.noteMissing(p);   // 시체가 테라리움에서 치워진 뒤부터 남은 놈들이 하루 동안 찾는다 (누워 있는 동안엔 안 찾는다)
   store.graves.push({no:r.no,name:p.name,born:r.born,diedAt:r.diedAt||Date.now(),days:daysWith(r),flower:Math.floor(rand(FLOWERS.length))});
   removeFallenOf(p.id);
   store.pets=store.pets.filter(x=>x!==r);
@@ -786,15 +802,27 @@ function warmLab(){ if(LAB_OK) try{ parent.postMessage({type:'bamung-lab-warm'},
 window.addEventListener('message',e=>{ if(e.source!==window.parent) return; const d=e.data||{}; if(d.type==='bamung-lab') labReady=!!d.ready; });
 function makeTweezerRig(){
   const root=new THREE.Group(); root.name='tweezer'; root.rotation.order='YXZ';
-  // 테라리움 불빛이 1라운드보다 밝아서 같은 쇠 색이 하얗게 날아간다: 더 쇠답게 (금속성 높이고 바탕색은 조금 어둡게)
-  const steel=new THREE.MeshStandardMaterial({color:0x9aa1a7,roughness:0.3,metalness:0.9});
-  const dark=new THREE.MeshStandardMaterial({color:0x4d5359,roughness:0.38,metalness:0.85});
+  // 테라리움 불빛이 밝아서 매끈한 쇠는 어떤 각도에선 하얀 막대처럼 날아간다: 길이 방향으로 결이 난 쇠(헤어라인)로.
+  // 결이 빛을 길게 끌어서 하얗게 비쳐도 쇠로 보인다. 상자 면마다 결 방향이 달라서 위·아래 면과 옆면 재질을 따로 둔다
+  const brush=(along)=>ctex(64,256,(g,w,h)=>{ g.fillStyle='#8a8a8a'; g.fillRect(0,0,w,h);
+    for(let i=0;i<150;i++){ const v=95+Math.random()*120|0; g.fillStyle=`rgb(${v},${v},${v})`; const x=Math.random()*w; g.globalAlpha=0.25+Math.random()*0.5; g.fillRect(x,0,0.6+Math.random()*1.4,h); }
+    g.globalAlpha=1; },{srgb:false});
+  const rLong=brush(), rCross=rLong.clone(); rCross.center.set(0.5,0.5); rCross.rotation=Math.PI/2; rCross.needsUpdate=true;
+  const mk=(color,rough,map)=>new THREE.MeshStandardMaterial({color,roughness:rough,metalness:0.92,roughnessMap:map,envMapIntensity:0.85});
+  // 상자 면 순서: +x, -x, +y, -y, +z, -z. 위·아래 면은 결이 v(길이) 방향, 옆면은 u(길이) 방향
+  const steelTop=mk(0x9299a0,0.42,rLong), steelSide=mk(0x878e95,0.42,rCross);
+  const steel=[steelSide,steelSide,steelTop,steelTop,steelSide,steelSide];
+  const dark=new THREE.MeshStandardMaterial({color:0x4d5359,roughness:0.45,metalness:0.85,envMapIntensity:0.85});
+  const ridgeM=new THREE.MeshStandardMaterial({color:0x2f3438,roughness:0.6,metalness:0.7});
+  const ridgeG=new THREE.BoxGeometry(0.021,0.0026,0.0032);
   const arms=[];
   for(const side of [-1,1]){
     const jaw=new THREE.Group(); jaw.position.x=side*0.024;
     const arm=new THREE.Mesh(new THREE.BoxGeometry(0.018,0.012,0.36),steel); arm.position.z=0.05; arm.rotation.y=-side*0.035; jaw.add(arm);
     const tip=new THREE.Mesh(new THREE.BoxGeometry(0.01,0.011,0.105),dark); tip.position.set(-side*0.006,-0.002,-0.176); tip.rotation.y=side*0.08; jaw.add(tip);
     const grip=new THREE.Mesh(new THREE.BoxGeometry(0.02,0.014,0.09),dark); grip.position.set(side*0.001,0.001,0.12); jaw.add(grip);
+    // 손잡이 미끄럼 방지 홈 (손가락이 닿는 자리)
+    for(let i=0;i<7;i++){ const r=new THREE.Mesh(ridgeG,ridgeM); r.position.set(side*0.001,0.0085,0.09+i*0.01); jaw.add(r); }
     root.add(jaw); arms.push(jaw);
   }
   const bridge=new THREE.Mesh(new THREE.BoxGeometry(0.078,0.022,0.07),dark); bridge.position.z=0.245; root.add(bridge);
@@ -815,8 +843,43 @@ const ease=t=>t*t*(3-2*t);
 /** 손잡이가 화면 위쪽(먼 쪽)으로 가되, 오른손으로 든 것처럼 오른쪽으로 조금 비스듬히 */
 let twTilt=-0.45;
 function twYaw(){ return cam.yaw+PI+twTilt; }
-/** 족집게 끝(두 집게 끝)이 (x,y,z)에 오도록 족집게 전체를 놓는다 */
-function placeTip(x,y,z,pitch,yaw=twYaw()){ tw.rotation.set(pitch,yaw,0); tw.updateMatrix(); const off=_to.copy(tw.userData.tipLocal).multiplyScalar(tw.scale.x).applyQuaternion(tw.quaternion); tw.position.set(x-off.x,y-off.y,z-off.z); }
+// 유리를 뚫지 않게: 족집게는 열린 윗면으로 들어온다. 손잡이가 유리 쪽으로 뻗으면 테두리 위로 넘어가게 세우고,
+// 너무 세워야 하면(유리 바로 앞) 손잡이를 유리 반대쪽으로 돌린다
+const TW_REACH=0.508*1.25;   // 집게 끝에서 손잡이 끝까지
+const TW_GLASS=[TANK.hw+0.0035,TANK.hd+0.0035], TW_RIM=TANK.h+0.006;   // 유리 면, 테두리 윗면
+const TW_W=0.05, TW_WTIP=0.042, TW_TH=0.016;   // 손잡이 반폭(끝 쪽 다리 포함), 집게 쪽 반폭, 반두께
+/** yaw 쪽으로 손잡이를 뻗을 때 유리를 안 뚫으려면 몇 도는 세워야 하나 (라디안). 이 방향으로는 아예 안 되면 Infinity */
+function twNeedUp(x,y,z,yaw,pad=0){
+  const sx=Math.sin(yaw), sz=Math.cos(yaw), top=TW_RIM+TW_TH;
+  if(y-TW_TH>=TW_RIM) return 0;   // 테두리보다 높이 있으면 어느 쪽으로 뻗어도 괜찮다
+  let need=0;
+  // 손잡이 옆 폭(옆으로 누운 축: cos yaw, -sin yaw)과 두께만큼 유리를 안쪽으로 당겨서 본다
+  for(const [s,p,lim,side] of [[sx,x,TW_GLASS[0]-pad,Math.abs(sz)],[sz,z,TW_GLASS[1]-pad,Math.abs(sx)]]){
+    if(Math.abs(p)+TW_WTIP*side>lim) return Infinity;   // 집게 끝 옆구리가 벌써 유리에 걸린다: 방향을 바꿔야 한다
+    if(Math.abs(s)<1e-4) continue;
+    const L=lim-TW_W*side-TW_TH*Math.abs(s);
+    const t=(Math.sign(s)*L-p)/s; if(t<=0) return Infinity;   // 손잡이가 그 유리 면에 닿는 수평 거리
+    if(t>=TW_REACH) continue;
+    const short=Math.acos(clamp(t/TW_REACH));     // 손잡이 끝이 유리 앞에서 끝나게
+    const over=Math.atan2(top-y,t);               // 테두리 위로 넘어가게
+    need=Math.max(need,Math.min(short,over));
+  }
+  return need;
+}
+const TW_YAW_TRY=[0,-0.4,0.4,-0.8,0.8,-1.2,1.2,-1.6,1.6,-2.1,2.1,-2.6,2.6,PI];
+/** 손잡이 방향: 기본은 화면 먼 쪽. 60도 넘게 세워야 하면 그만큼 안 세워도 되는 쪽으로 조금씩 돌린다
+ *  (들어 올릴 때 족집게가 흔들리는 만큼(1.2cm) 유리를 더 가깝게 잡고 고른다. 구석이라 그걸로 안 되면 흔들림은 빼고) */
+function twPickYaw(x,y,z){
+  const base=twYaw();
+  for(const pad of [0.013,0]){
+    let best=null, bn=Infinity;
+    for(const o of TW_YAW_TRY){ const n=twNeedUp(x,y,z,base+o,pad); if(n<=1.05) return base+o; if(n<bn){ bn=n; best=base+o; } }
+    if(best!==null) return best;
+  }
+  return base;
+}
+/** 족집게 끝(두 집게 끝)이 (x,y,z)에 오도록 족집게 전체를 놓는다 (유리를 안 뚫게 필요하면 더 세운다) */
+function placeTip(x,y,z,pitch,yaw=twYaw()){ pitch=Math.min(pitch,-Math.min(1.5,twNeedUp(x,y,z,yaw))); tw.rotation.set(pitch,yaw,0); tw.updateMatrix(); const off=_to.copy(tw.userData.tipLocal).multiplyScalar(tw.scale.x).applyQuaternion(tw.quaternion); tw.position.set(x-off.x,y-off.y,z-off.z); }
 function tipWorld(out){ tw.updateMatrixWorld(true); return tw.localToWorld(out.copy(tw.userData.tipLocal)); }
 function grabPoint(p,out){ return out.copy(GRAB_AT).multiplyScalar(ROACH_L*(p.rec.size||1)).applyQuaternion(p.quat).add(p.pos); }
 const grabbable=q=>!!q&&!q.dead&&!q.away&&!q.buried&&!q.hidden&&q.m.g.visible&&!['dying','held','drop'].includes(q.act?.type);
@@ -829,10 +892,23 @@ function startTweezer(){
   if(twMouse) hoverTweezer(twMouse.x,twMouse.y);
 }
 /** 마우스: 족집게가 손끝처럼 따라다닌다 (손가락으로 할 땐 누를 때만 나타난다) */
+let twHoverYaw=null, twHoverAt=0;
+const twInside=(x,z)=>Math.abs(x)<TANK.hw-0.012&&Math.abs(z)<TANK.hd-0.012;   // 테라리움 바닥 위 (유리 안쪽)
+/** 허공을 가리킬 땐 집게 끝을 유리에서 3.3cm 넘게 띄운다 (구석에서도 집게 옆구리가 유리에 안 걸리게) */
+const twKeepIn=f=>{ f.x=clamp(f.x,-TANK.hw+0.033,TANK.hw-0.033); f.z=clamp(f.z,-TANK.hd+0.033,TANK.hd-0.033); return f; };
 function hoverTweezer(sx,sy){
   if(!tw||mode!=='tweezer'||grab||twSnapT>0) return;
-  const f=floorHit(sx,sy,0); if(!f){ tw.visible=false; return; }
-  tw.visible=true; tw.userData.setGrip(0); placeTip(f.x,0.05,f.z,-0.32);
+  // 테라리움 밖(책상 위)에선 족집게를 감추고 보통 화살표를 보여 준다
+  const f=floorHit(sx,sy,0), inside=!!f&&twInside(f.x,f.z); document.body.classList.toggle('twout',!inside);
+  if(!inside){ tw.visible=false; twHoverYaw=null; return; }
+  twKeepIn(f);
+  // 유리 가까이 가면 손잡이가 스르륵 돌아간다 (휙 돌지 않게)
+  const want=twPickYaw(f.x,0.05,f.z), now=performance.now();
+  if(twHoverYaw===null||!tw.visible) twHoverYaw=want;
+  else { const k=1-Math.exp(-Math.min(0.1,(now-twHoverAt)/1000)*9); twHoverYaw+=Math.atan2(Math.sin(want-twHoverYaw),Math.cos(want-twHoverYaw))*k;
+    if(!(twNeedUp(f.x,0.05,f.z,twHoverYaw)<=1.5)) twHoverYaw=want; }   // 휙 옮겨서 돌던 방향으로는 유리에 걸리면 바로 맞춘다
+  twHoverAt=now;
+  tw.visible=true; tw.userData.setGrip(0); placeTip(f.x,0.05,f.z,-0.32,twHoverYaw);
 }
 function tweezerTap(x,y,mouse){
   if(grab||!tw) return;
@@ -843,14 +919,15 @@ function tweezerTap(x,y,mouse){
 }
 /** 빗나갔다: 누른 자리에서 허공을 딸깍 집는다 */
 function missSnap(x,y,msg){
-  const f=floorHit(x,y,0); if(f){ tw.visible=true; placeTip(f.x,0.012,f.z,-0.42); }
-  tw.userData.setGrip(1); twSnapT=0.14; S.snap();
+  const f=floorHit(x,y,0);
+  if(f&&twInside(f.x,f.z)){ twKeepIn(f); const yaw=tw.visible&&twHoverYaw!==null?twHoverYaw:twPickYaw(f.x,0.012,f.z); tw.visible=true; placeTip(f.x,0.012,f.z,-0.42,yaw); tw.userData.setGrip(1); twSnapT=0.14; S.snap(); }
   toast(msg,1.6);
 }
 function startGrab(p){
-  grab={p,t:0,gripped:false,lifted:false,asked:false,scratch:0.05,yaw:twYaw(),at:null,q0:null,off:null,h:p.h};
-  twSnapT=0; tw.visible=true; tw.userData.setGrip(0);
-  grabPoint(p,_tg); placeTip(_tg.x,_tg.y+0.2,_tg.z,-0.55,grab.yaw);
+  grabPoint(p,_tg);
+  grab={p,t:0,gripped:false,lifted:false,asked:false,scratch:0.05,yaw:twPickYaw(_tg.x,_tg.y,_tg.z),at:null,q0:null,off:null,h:p.h};
+  twSnapT=0; tw.visible=true; tw.userData.setGrip(0); twHoverYaw=null;
+  placeTip(_tg.x,_tg.y+0.2,_tg.z,-0.55,grab.yaw);
   p.labelT=0;
   warmLab();
 }
@@ -872,6 +949,7 @@ function hang(g,lift){
   const q=p.tQuat.copy(g.q0).slerp(_tq,clamp(lift*3));
   tipWorld(_tt); _to.copy(g.off).applyQuaternion(q);
   p.tPos.set(_tt.x-_to.x,_tt.y-_to.y,_tt.z-_to.z); p.x=p.tPos.x; p.z=p.tPos.z;
+  clipToTank(p,p.tPos.y<TANK.h+0.04);   // 테라리움 위로 올라오면 유리가 없으니 더는 안 자른다
 }
 /** 매 프레임, 바퀴들이 움직이기 전에 */
 function updateTweezer(dt){
@@ -912,6 +990,7 @@ function finishGrab(){
   const p=g.p, r=p.rec;
   tw.visible=false; tw.userData.setGrip(0);
   if(world.pets.includes(p)){
+    world.noteMissing(p);   // 그때 함께 있던 놈들이 하루 동안 찾는다
     removeFallenOf(p.id);
     store.pets=store.pets.filter(x=>x!==r);
     world.pets.splice(world.pets.indexOf(p),1);
@@ -929,7 +1008,7 @@ function cancelGrab(){
   const g=grab; if(!g) return; grab=null;
   if(tw){ tw.visible=false; tw.userData.setGrip(0); }
   const p=g.p;
-  if(g.gripped&&world.pets.includes(p)&&!p.dead&&p.act?.type==='held') p.evict();
+  if(g.gripped&&world.pets.includes(p)&&!p.dead&&p.act?.type==='held'){ p.evict(); clipToTank(p,true); }
 }
 
 // ───────── 떨어진 모자·리본 (눌러서 다시 씌워 준다) ─────────
@@ -949,13 +1028,13 @@ function disposeTree(o){ o.traverse(m=>{ if(!m.isMesh) return; m.geometry?.dispo
 function removeFallen(e){ scene.remove(e.obj); disposeTree(e.obj); const i=fallen.indexOf(e); if(i>=0) fallen.splice(i,1); store.fallen=fallen.map(x=>x.f); }
 function removeFallenOf(id){ for(const e of fallen.filter(x=>x.f.petId===id)) removeFallen(e); }
 function updateFallen(dt){ for(const e of fallen){ if(e.t>=0.6) continue; e.t+=dt; const k=Math.min(1,e.t/0.6); const b=e.obj.userData.baseY; e.obj.position.y=b+Math.max(0,(e.y0??b)-b)*(1-k*k)+Math.sin(k*PI)*0.012*(1-k); } }
-EV.hatFall=(p)=>{ const D=p.rec.deco; if(!D?.hat||D.hat.on===false||p.away) return; D.hat.on=false; applyDeco(p.m,D);
+EV.hatFall=(p)=>{ const D=p.rec.deco; if(!D?.hat||D.hat.on===false||p.away) return; D.hat.on=false; applyDeco(p.m,D); clipToTank(p,true);
   const a=p.h+PI+rand(-0.6,0.6); spawnFallen({type:'hat',petId:p.id,c:D.hat.c,x:clamp(p.x+Math.sin(a)*0.05,-TANK.hw+0.02,TANK.hw-0.02),z:clamp(p.z+Math.cos(a)*0.05,-TANK.hd+0.02,TANK.hd-0.02),r:rand(TAU)},p.pos.y+0.03); S.pop(); };
-EV.bowFall=(p)=>{ const D=p.rec.deco; if(!D?.abow||D.abow.on===false||p.away) return; D.abow.on=false; applyDeco(p.m,D);
+EV.bowFall=(p)=>{ const D=p.rec.deco; if(!D?.abow||D.abow.on===false||p.away) return; D.abow.on=false; applyDeco(p.m,D); clipToTank(p,true);
   const a=p.h+rand(-0.8,0.8); spawnFallen({type:'bow',petId:p.id,c:D.abow.c,x:clamp(p.x+Math.sin(a)*0.07,-TANK.hw+0.02,TANK.hw-0.02),z:clamp(p.z+Math.cos(a)*0.07,-TANK.hd+0.02,TANK.hd-0.02),r:rand(TAU)},p.pos.y+0.02); S.pop(); };
 function restoreFallen(e){
   const p=world.pets.find(q=>q.id===e.f.petId); removeFallen(e);
-  if(p&&!p.dead){ const D=p.rec.deco||(p.rec.deco={}); if(e.f.type==='hat'&&D.hat) D.hat.on=true; if(e.f.type==='bow'&&D.abow) D.abow.on=true; applyDeco(p.m,D); p.inspectT=Math.max(p.inspectT,5); p.labelT=Math.max(p.labelT,2.5);
+  if(p&&!p.dead){ p.hatGrace=Math.max(p.hatGrace||0,20); const D=p.rec.deco||(p.rec.deco={}); if(e.f.type==='hat'&&D.hat) D.hat.on=true; if(e.f.type==='bow'&&D.abow) D.abow.on=true; applyDeco(p.m,D); clipToTank(p,!p.away); p.inspectT=Math.max(p.inspectT,5); p.labelT=Math.max(p.labelT,2.5);
     toast(e.f.type==='hat'?`${p.name}에게 모자를 다시 씌워 줬어요.`:`${p.name}에게 리본을 다시 달아 줬어요.`); }
   S.restore(); saveSoon();
 }
@@ -998,8 +1077,9 @@ function stopFollow(){ if(!cam.follow) return; cam.follow=null; refreshHud(); }
 function enterSalonView(){ cam.saved={yaw:cam.g.yaw,pitch:cam.g.pitch,dist:cam.g.dist,tgt:cam.g.tgt.clone()}; cam.mode='salon'; cam.sfit=salonFit(); cam.g.yaw=cam.yaw+wrapA(0.55-cam.yaw); cam.g.pitch=0.8; cam.g.dist=cam.sfit; cam.g.tgt.set(SALON.x,SALON_TOP+0.018,SALON.z); }
 function leaveSalonView(){ cam.mode='tank'; const s=cam.saved; if(s){ cam.g.yaw=s.yaw; cam.g.pitch=s.pitch; cam.g.dist=s.dist; cam.g.tgt.copy(s.tgt); } cam.saved=null; }
 const _ft=new THREE.Vector3();
+const CAM_GOOD={yaw:0,pitch:0.62,dist:1.6,tgt:new THREE.Vector3(0,0.14,0)};   // 마지막으로 멀쩡했던 시점
 function updateCamera(dt){
-  if(cam.follow){ const p=cam.follow; if(!world.pets.includes(p)||p.away){ stopFollow(); } else { if(p.hidden&&p.act?.slot?.prop) propTop(p.act.slot.prop,_ft); else _ft.copy(p.pos).setY(Math.max(0.02,p.pos.y)+0.02); cam.g.tgt.lerp(_ft,1-Math.exp(-3.5*dt)); } }
+  if(cam.follow){ const p=cam.follow; if(!world.pets.includes(p)||p.away){ stopFollow(); } else { if(p.hidden&&p.act?.slot?.prop) propTop(p.act.slot.prop,_ft); else _ft.copy(p.pos).setY(Math.max(0.02,p.pos.y)+0.02); if(Number.isFinite(_ft.x+_ft.y+_ft.z)) cam.g.tgt.lerp(_ft,1-Math.exp(-3.5*dt)); } }
   cam.idle+=dt;
   const swayOn=cam.mode==='tank'&&cam.idle>14&&!edit.inst;
   cam.sway=damp(cam.sway,swayOn?1:0,swayOn?0.25:3,dt);
@@ -1010,6 +1090,11 @@ function updateCamera(dt){
   cam.offGoal=salonMode?(side?0:(decoPanelH()-MARGIN.top)/2):(MARGIN.bottom-MARGIN.top)/2;
   cam.offXGoal=side?decoPanelW()/2:salonMode?0:(MARGIN.right-MARGIN.left)/2;
   const o=damp(cam.offY,cam.offGoal,8,dt), ox=damp(cam.offX,cam.offXGoal,8,dt); if(Math.abs(o-cam.offY)>0.05||Math.abs(ox-cam.offX)>0.05){ cam.offY=o; cam.offX=ox; applyOffset(); }
+  // 값이 한 번 망가지면(NaN) 화면이 통째로 멈춘다: 마지막 멀쩡한 시점으로 되돌린다
+  const okNow=[cam.yaw,cam.pitch,cam.dist,cam.tgt.x,cam.tgt.y,cam.tgt.z,cam.g.yaw,cam.g.pitch,cam.g.dist,cam.g.tgt.x,cam.g.tgt.y,cam.g.tgt.z].every(Number.isFinite);
+  const G=CAM_GOOD;
+  if(okNow){ G.yaw=cam.yaw; G.pitch=cam.pitch; G.dist=cam.dist; G.tgt.copy(cam.tgt); }
+  else { if(cam.follow) stopFollow(); cam.yaw=cam.g.yaw=G.yaw; cam.pitch=cam.g.pitch=G.pitch; cam.dist=cam.g.dist=G.dist; cam.tgt.copy(G.tgt); cam.g.tgt.copy(G.tgt); }
   placeCam(cam.yaw+sy,clamp(cam.pitch+sp,0.12,1.5),cam.dist,cam.tgt);
 }
 function decoSide(){ return innerWidth>innerHeight&&innerHeight<=520; }
@@ -1050,7 +1135,7 @@ function pickGrave(x,y){ ray.setFromCamera(ndc(x,y),camera); const h=ray.interse
 // ══════════════════════════════════════════════════════════════════
 let mode='watch';          // watch · pick(꾸밀 놈 고르기) · edit(소품 옮기기) · deco(꾸미는 중) · tweezer(족집게를 든 채 구경)
 let namesAll=false, uiIdle=0, calm=false;
-function setMode(m){ mode=m; const b=document.body.classList; b.toggle('edit',m==='edit'); b.toggle('deco',m==='deco'); b.toggle('pick',m==='pick'); b.toggle('tweezer',m==='tweezer');
+function setMode(m){ mode=m; const b=document.body.classList; b.toggle('edit',m==='edit'); b.toggle('deco',m==='deco'); b.toggle('pick',m==='pick'); b.toggle('tweezer',m==='tweezer'); b.remove('twout');
   if(m!=='tweezer'&&tw&&!grab){ tw.visible=false; tw.userData.setGrip(0); twSnapT=0; }
   setCalm(false); refreshHud(); }
 /** 바퀴들이 대화를 이어 가는 화면 (족집게를 들고 있어도 대화는 계속된다) */
@@ -1107,6 +1192,7 @@ function updateLabels(dt){
 }
 // ───────── 대화 말풍선: 이름표 밑에 까는 2D 캔버스 (사진에도 같은 모양으로 찍힌다) ─────────
 const talkCv=$('talk'), talkG=talkCv.getContext('2d'), talkView=new BubbleView(); let talkDrawn=false;
+talkCv.addEventListener('contextrestored',()=>{ talkDrawn=true; });
 function sizeTalk(){ const d=Math.min(devicePixelRatio||1,2); talkCv.width=Math.round(innerWidth*d); talkCv.height=Math.round(innerHeight*d); talkG.setTransform(d,0,0,d,0,0); talkDrawn=true; }
 const _th=new THREE.Vector3(), _tp={x:0,y:0,ok:false};
 /** 대화하는 두 마리 머리 위 점. proj: 월드 좌표 → 화면 좌표(못 보이면 null) */
@@ -1114,7 +1200,7 @@ function talkAnchors(T,proj){
   // 끊긴 대화는 끊긴 자리에 말이 남는다 (집혀 올라가는 놈을 따라가지 않는다)
   const head=p=>{ _th.copy(T.cutPos?(p===T.a?T.cutPos.a:T.cutPos.b):p.pos); _th.y=Math.max(_th.y,0)+0.03*(p.rec.size||1)+(p.m.hat?0.025:0); return proj(_th); };
   const A=head(T.a); if(!A) return null; const Ax=A.x, Ay=A.y;
-  const B=head(T.b); if(!B) return null;
+  const B=T.b?head(T.b):{x:Ax,y:Ay}; if(!B) return null;   // 혼잣말은 말하는 놈 하나
   const aLeft=Ax<=B.x; const a={x:Ax,y:Ay};
   return {aLeft,anchors:{L:aLeft?a:B,R:aLeft?B:a}};
 }
@@ -1124,7 +1210,7 @@ const talkPx=(w,h)=>clamp(Math.min(w,h)*0.037,12.5,17);
 function drawTalk(dt){
   const T=world.talk; let items=null, an=null, key=T?.id, fade=T?.phase==='fade'?T.fade:0;
   const px=talkPx(innerWidth,innerHeight);
-  let named=!!T&&[T.a,T.b].some(p=>namesAll||p.labelT>0||cam.follow===p), bottom=innerHeight-MARGIN.bottom;
+  let named=!!T&&[T.a,T.b].some(p=>p&&(namesAll||p.labelT>0||cam.follow===p)), bottom=innerHeight-MARGIN.bottom;
   if(mode==='deco'){
     // 꾸미는 중: 방석 위의 놈이 혼자 하는 말
     const L=decoLine; named=false; key='deco'+L.id; fade=L.phase==='fade'?L.fade:0;
@@ -1141,6 +1227,8 @@ function drawTalk(dt){
   talkView.update(dt,talkG,items,an,{key,fade,px,maxW:clamp(innerWidth*0.34,120,230),lift:px*(named?2.3:0.9),
     bounds:{l:8,t:Math.max(8,MARGIN.top*0.7),r:innerWidth-8,b:bottom}});
   if(!talkView.visible&&!talkDrawn) return;   // 아무것도 안 떠 있으면 지우지도 않는다
+  // 창을 내렸다 올리면 그림판이 처음 상태(배율 1)로 돌아갈 수 있다: 그릴 때마다 배율을 다시 맞춘다 (안 그러면 말풍선이 엉뚱한 자리에 작게 뜬다)
+  talkG.setTransform(talkCv.width/Math.max(1,innerWidth),0,0,talkCv.height/Math.max(1,innerHeight),0,0);
   talkG.clearRect(0,0,innerWidth,innerHeight);
   talkView.draw(talkG); talkDrawn=talkView.visible;
 }
@@ -1196,7 +1284,7 @@ function statusOf(p){
   const L=PROPS[a.slot?.prop?.k]?.label||'';
   switch(a.type){
     case 'rest': return '쉬는 중';
-    case 'talk': return a.other?`${a.other.name}${jo(a.other.name,'과/와')} 이야기하는 중`:'이야기하는 중';
+    case 'talk': return a.other?`${a.other.name}${jo(a.other.name,'과/와')} 이야기하는 중`:a.talk?.solo?'혼잣말하는 중':'이야기하는 중';
     case 'groom': return a.leg?'다리 손질 중':'더듬이 손질 중';
     case 'walk': return a.slot?`${L} 쪽으로 가는 중`:'어슬렁거리는 중';
     case 'feed': return a.kind==='eat'?'먹는 중':'물 마시는 중';
@@ -1289,7 +1377,7 @@ function startDeco(p){
   if(edit.inst) finishEdit(true);
   closeSheets(); stopFollow();
   if(p.act) p.setAct({type:'rest',dur:999});
-  p.away=true; p.mode='away'; p.m.g.visible=true;
+  p.away=true; p.mode='away'; p.m.g.visible=true; clipToTank(p,false);   // 방석은 테라리움 밖이라 유리 자르기를 끈다
   p.m.g.position.set(SALON.x,SALON_TOP,SALON.z); p.m.g.quaternion.setFromAxisAngle(UP,PI/2+0.25);
   deco.pet=p; deco.undo.length=0; deco.groomAt=rand(5,9); deco.lookAt=0;
   enterSalonView(); setMode('deco');
@@ -1303,7 +1391,9 @@ function finishDeco(){
   // 꾸밈을 받으면 자존감이 바로 오른다 (다 나은 놈이 되고, 한동안 꾸밈 대사를 자주 한다)
   if(hasDeco(p.rec.deco)){ p.rec.mood=1; p.rec.comfort=0; p.rec.decoFresh=2; }
   const s=world.randomFree(40,false); p.x=s.x; p.z=s.z; p.away=false; p.mode='slot';
-  p.setAct({type:'drop',y0:0.9}); p.tPos.set(p.x,0.9,p.z); p.snap=true; p.inspectT=12; p.labelT=3.5;
+  clipToTank(p,true);
+  // 놀라 내달리지 않고 살포시 내려앉아 새 단장을 더듬어 본다 (예전엔 떨어지자마자 뛰어서 모자가 바로 벗겨졌다)
+  p.setAct({type:'drop',y0:0.9,calm:true}); p.tPos.set(p.x,0.9,p.z); p.snap=true; p.inspectT=12; p.labelT=3.5; p.hatGrace=40;
   save(); toast(`${p.name}${jo(p.name,'이/가')} 새 단장을 했어요.`);
 }
 /** 몸 좌표의 한 점이 어느 판인지: 앞가슴 등판(P) · 왼쪽 날개(L) · 오른쪽 날개(R) */
@@ -1532,7 +1622,7 @@ $('bar').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b
 });
 // 마우스로 볼 때: 족집게가 커서 자리를 따라다닌다
 canvas.addEventListener('pointermove',e=>{ if(e.pointerType!=='mouse') return; twMouse={x:e.clientX,y:e.clientY}; hoverTweezer(e.clientX,e.clientY); });
-canvas.addEventListener('pointerleave',()=>{ twMouse=null; if(tw&&!grab&&twSnapT<=0) tw.visible=false; });
+canvas.addEventListener('pointerleave',()=>{ twMouse=null; document.body.classList.remove('twout'); if(tw&&!grab&&twSnapT<=0) tw.visible=false; });
 $('editBar').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b||!edit.inst) return; e.stopPropagation(); wakeUi();
   const a=b.dataset.a, inst=edit.inst;
   if(a==='rotate'){ setPropPos(inst,inst.x,inst.z,inst.rot+PI/4); S.ui(); }
@@ -1646,17 +1736,19 @@ function enter(o={}){
 }
 function reset(){ if(deco.pet) finishDeco(); if(edit.inst) finishEdit(true); cancelGrab(); if(mode==='pick'||mode==='tweezer') setMode('watch'); closeSheets(); stopFollow(); goHome(true); return api; }
 const api={enter,sleep,wake,reset,pause,resume,count:countInfo,
-  _debug:{world,cam,VIEW,resize,get store(){return store;},get decoLine(){return decoLine;},
-    tweezer:{start:startTweezer,tap:tweezerTap,grab:startGrab,get state(){ return grab?{name:grab.p.name,t:grab.t,gripped:grab.gripped,lifted:grab.lifted}:null; },get rig(){ return tw?{visible:tw.visible,x:tw.position.x,y:tw.position.y,z:tw.position.z}:null; },obj:()=>tw,hover:(x,y)=>{ twMouse={x,y}; hoverTweezer(x,y); },set tilt(v){ twTilt=v; },get labReady(){ return labReady; },set labReady(v){ labReady=!!v; }},step(sec=1,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++){ step(dt); updateCamera(dt); } draw(dt); return n; },draw:()=>draw(1/60),arrive,startDeco,finishDeco,openCard,openProps,takePhoto,startEdit,finishEdit,
+  _debug:{world,cam,VIEW,resize,scene,get store(){return store;},get decoLine(){return decoLine;},
+    tweezer:{start:startTweezer,tap:tweezerTap,grab:startGrab,cancel:cancelGrab,get state(){ return grab?{name:grab.p.name,t:grab.t,gripped:grab.gripped,lifted:grab.lifted}:null; },get rig(){ return tw?{visible:tw.visible,x:tw.position.x,y:tw.position.y,z:tw.position.z}:null; },obj:()=>tw,hover:(x,y)=>{ twMouse={x,y}; hoverTweezer(x,y); },set tilt(v){ twTilt=v; },get labReady(){ return labReady; },set labReady(v){ labReady=!!v; }},step(sec=1,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++){ step(dt); updateCamera(dt); } draw(dt); return n; },tick(sec=1,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++){ step(dt); updateCamera(dt); } return n; },draw:()=>draw(1/60),arrive,startDeco,finishDeco,openCard,openProps,takePhoto,startEdit,finishEdit,
     addProp(k){ const inst=makeProp(k); if(!inst) return null; const s=findSpot(inst); if(!s) return null; inst.x=s.x; inst.z=s.z; inst.rot=s.r; addProp(inst); saveSoon(); return inst; },
     removeProp, info:()=>({calls:renderer.info.render.calls,tris:renderer.info.render.triangles,geos:renderer.info.memory.geometries,tex:renderer.info.memory.textures}),
     age(id,days){ const p=world.pets.find(q=>q.id===id)||world.pets[0]; if(!p) return; p.rec.born-=days*DAY; p.updateAge(Date.now()); return p.age01; },
     pets:()=>world.pets.map(p=>({id:p.id,name:p.name,act:p.act?.type,kind:p.act?.kind||p.act?.slot?.type,x:+p.x.toFixed(3),z:+p.z.toFixed(3),y:+p.pos.y.toFixed(3),hidden:p.hidden,dead:p.dead,mode:p.mode})),
     setMode, toast, setCam(yaw,pitch,dist,tx=0,ty=0.14,tz=0){ cam.g.yaw=cam.yaw=yaw; cam.g.pitch=cam.pitch=pitch; cam.g.dist=cam.dist=dist; cam.g.tgt.set(tx,ty,tz); cam.tgt.set(tx,ty,tz); },
     get mode(){return mode;}, get deco(){return deco;}, get edit(){return edit;},
-    talk:()=>{ const T=world.talk; return T?{a:T.a.name,b:T.b.name,i:T.i,phase:T.phase,lines:T.lines,shown:talkView.list.length}:null; },
+    talk:()=>{ const T=world.talk; return T?{a:T.a.name,b:T.b?.name||null,solo:!!T.solo,pool:T.pool,i:T.i,phase:T.phase,lines:T.lines,shown:talkView.list.length}:null; },
     startTalk(i=0,j=1,walk=false){ const L=alive(); if(!L[i]||!L[j]) return false; return world.startTalk(L[i],L[j],walk); },
     screenOf(id){ const p=world.pets.find(q=>q.id===id); if(!p) return null; const o=toScreen(p.pos,{}); return {x:o.x,y:o.y,ok:o.ok}; },
+    bury, follow:p=>startFollow(p), camInfo:()=>({yaw:cam.yaw,pitch:cam.pitch,dist:cam.dist,tgt:cam.tgt.toArray(),pos:camera.position.toArray(),follow:cam.follow?.name||null}),
+    screenAt(x,y,z){ const o=toScreen(new THREE.Vector3(x,y,z),{}); return {x:o.x,y:o.y,ok:o.ok}; },
     screenOfProp(k){ const p=world.props.find(q=>q.k===k); if(!p) return null; const o=toScreen(new THREE.Vector3(p.x,0.03,p.z),{}); return {x:o.x,y:o.y,ok:o.ok}; }, labels:()=>[...labelBox.children].filter(e=>e.classList.contains('show')).map(e=>e.textContent)}};
 window.Bamung=api;
 
@@ -1669,7 +1761,7 @@ try{
   loadFallen();
   rebuildGraves();
   resize(); goHome(true); refreshHud();
-  document.fonts?.load?.('700 60px Gaegu').then(()=>{ for(const p of world.pets) if(p.rec.deco?.text) applyDeco(p.m,p.rec.deco); }).catch(()=>{});
+  document.fonts?.load?.('700 60px Gaegu').then(()=>{ for(const p of world.pets) if(p.rec.deco?.text){ applyDeco(p.m,p.rec.deco); clipToTank(p,!p.away); } }).catch(()=>{});
   document.fonts?.load?.('700 16px Gaegu',ALL_LINES.join('')).catch(()=>{});   // 말풍선 글자 묶음을 미리 받아 둔다
   try{ renderer.compile(scene,camera); }catch(e){}
   draw(0.016);

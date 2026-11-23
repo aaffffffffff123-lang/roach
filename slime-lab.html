@@ -367,7 +367,7 @@ const fill=new THREE.DirectionalLight(0xd9e8ff,0.75); fill.position.set(4.5,3.2,
 const rim=new THREE.PointLight(0xffffff,14,14,2); rim.position.set(2.6,4.4,3.2); scene.add(rim);
 
 function makeWoodTexture(){
-  const size=512,c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
+  const size=512,c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d',{willReadFrequently:true});
   const gr=g.createLinearGradient(0,0,size,0); gr.addColorStop(0,'#6b4730'); gr.addColorStop(0.5,'#95643c'); gr.addColorStop(1,'#5e3d2a'); g.fillStyle=gr; g.fillRect(0,0,size,size);
   for(let i=0;i<120;i++){ const y=rand(size); g.strokeStyle=`rgba(${rand(40,90)|0},${rand(18,48)|0},${rand(8,28)|0},${rand(0.04,0.14)})`; g.lineWidth=rand(0.5,2.2); g.beginPath(); g.moveTo(0,y); for(let x=0;x<=size;x+=40)g.lineTo(x,y+Math.sin(x*0.015+i)*rand(2,12)+rand(-3,3)); g.stroke(); }
   const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(3,2.4); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; return t;
@@ -390,13 +390,13 @@ function makeBall(){
 // 얼룩은 공을 버리고 새로 만들어도 남는다. 「바닥 닦기」로만 지워진다.
 const BOARD_W=5.6, BOARD_D=4.6, STAIN_W=1024, STAIN_H=Math.round(1024*BOARD_D/BOARD_W);
 const stainCanvas=document.createElement('canvas'); stainCanvas.width=STAIN_W; stainCanvas.height=STAIN_H;
-const sg=stainCanvas.getContext('2d');
+const sg=stainCanvas.getContext('2d',{willReadFrequently:true});
 const stainTex=new THREE.CanvasTexture(stainCanvas); stainTex.colorSpace=THREE.SRGBColorSpace; stainTex.anisotropy=4;
 const stainPlane=new THREE.Mesh(new THREE.PlaneGeometry(BOARD_W,BOARD_D),new THREE.MeshPhysicalMaterial({map:stainTex,transparent:true,roughness:0.26,metalness:0,clearcoat:0.8,clearcoatRoughness:0.18,depthWrite:false}));
 stainPlane.rotation.x=-Math.PI/2; stainPlane.position.y=BOARD_TOP+0.0015; stainPlane.receiveShadow=true; scene.add(stainPlane);
 let stainCount=0, stainDirty=false, wiping=null, wipeShown=false, wetShown=0;
 // 공 둘레가 전체적으로 젖어 어두워지는 판 (얼룩이 쌓일수록 짙어진다)
-const wetTex=(()=>{ const c=document.createElement('canvas'); c.width=c.height=256; const x=c.getContext('2d'); const g=x.createRadialGradient(128,128,20,128,128,128); g.addColorStop(0,'rgba(120,92,58,1)'); g.addColorStop(0.45,'rgba(120,92,58,0.75)'); g.addColorStop(1,'rgba(120,92,58,0)'); x.fillStyle=g; x.fillRect(0,0,256,256); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t; })();
+const wetTex=(()=>{ const c=document.createElement('canvas'); c.width=c.height=256; const x=c.getContext('2d',{willReadFrequently:true}); const g=x.createRadialGradient(128,128,20,128,128,128); g.addColorStop(0,'rgba(120,92,58,1)'); g.addColorStop(0.45,'rgba(120,92,58,0.75)'); g.addColorStop(1,'rgba(120,92,58,0)'); x.fillStyle=g; x.fillRect(0,0,256,256); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t; })();
 const wetPlane=new THREE.Mesh(new THREE.PlaneGeometry(4.4,4.4),new THREE.MeshPhysicalMaterial({map:wetTex,transparent:true,opacity:0,roughness:0.2,metalness:0,clearcoat:0.9,clearcoatRoughness:0.15,depthWrite:false}));
 wetPlane.rotation.x=-Math.PI/2; wetPlane.position.y=BOARD_TOP+0.0008; wetPlane.visible=false; scene.add(wetPlane);
 const DROP_CAP=220;

@@ -459,7 +459,7 @@ class FloorPaint{
   constructor(){
     this.W=768; this.H=1152; this.ppm=192;
     this.c=document.createElement('canvas'); this.c.width=this.W; this.c.height=this.H;
-    this.g=this.c.getContext('2d');
+    this.g=this.c.getContext('2d',{willReadFrequently:true});
     this.tex=new THREE.CanvasTexture(this.c); this.tex.colorSpace=THREE.SRGBColorSpace; this.tex.anisotropy=4;
     this.dirty=false; this.lastFlush=0;
   }
@@ -521,7 +521,7 @@ class FloorPaint{
 }
 // ───────── 텍스처 ─────────
 function texFloor(){
-  const c=document.createElement('canvas'); c.width=c.height=1024; const g=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=c.height=1024; const g=c.getContext('2d',{willReadFrequently:true});
   g.fillStyle='#E2AC46'; g.fillRect(0,0,1024,1024);
   const plank=1024/4;
   for(let p=0;p<4;p++){
@@ -533,14 +533,14 @@ function texFloor(){
   const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(4/1.2,6/1.2); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8; return t;
 }
 function texWall(){
-  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d',{willReadFrequently:true});
   g.fillStyle='#F4EBD6'; g.fillRect(0,0,256,256);
   g.fillStyle='rgba(200,170,120,0.35)'; for(let y=0;y<256;y+=32) for(let x=0;x<256;x+=32){ g.beginPath(); g.arc(x+16+((y/32)%2)*8,y+16,2,0,TAU); g.fill(); }
   const id=g.getImageData(0,0,256,256), d=id.data; for(let i=0;i<d.length;i+=4){ const n=rand(-6,6); d[i]+=n; d[i+1]+=n; d[i+2]+=n; } g.putImageData(id,0,0);
   const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,4); t.colorSpace=THREE.SRGBColorSpace; return t;
 }
 function texTile(){
-  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d',{willReadFrequently:true});
   g.fillStyle='#B9B4A8'; g.fillRect(0,0,256,256); g.fillStyle='#CFCABD'; for(let y=0;y<2;y++) for(let x=0;x<2;x++){ g.fillRect(x*128+4,y*128+4,120,120); }
   const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(4,2); t.colorSpace=THREE.SRGBColorSpace; return t;
 }
@@ -1146,7 +1146,7 @@ function corpseFloorDepth(){
 // 그래서 시체가 쌓여도 쌀알이 보이고, 다 먹히면 그릇과 함께 없어진다. 쌀알 모양·크기는 예전 바닥 그림과 같다.
 function riceBait(){
   const g=makeItem('rice'), S=0.25, P=192, N=Math.round(S*P);
-  const c=document.createElement('canvas'); c.width=c.height=N; const x=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=c.height=N; const x=c.getContext('2d',{willReadFrequently:true});
   x.translate(N/2,N/2); x.fillStyle='#FBF7EC'; x.strokeStyle='#D9CDB1'; x.lineWidth=1;
   for(let i=0;i<26;i++){ const a=rand(TAU), r=rand(P*0.09); x.beginPath(); x.ellipse(Math.cos(a)*r,Math.sin(a)*r,P*0.012,P*0.007,rand(TAU),0,TAU); x.fill(); x.stroke(); }
   const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4;
@@ -3408,7 +3408,7 @@ clearTraps(){
 
 
 
-  drawRing(k){ const g=this.ringC.getContext('2d'); g.clearRect(0,0,96,96); g.lineWidth=7; g.strokeStyle='rgba(251,244,228,0.55)'; g.beginPath(); g.arc(48,48,36,0,TAU); g.stroke(); g.strokeStyle=k>=1?'#3A2412':'#FBF4E4'; g.lineCap='round'; g.beginPath(); g.arc(48,48,36,-Math.PI/2,-Math.PI/2+TAU*Math.min(1,k)); g.stroke(); this.ringTex.needsUpdate=true; }
+  drawRing(k){ const g=this.ringC.getContext('2d',{willReadFrequently:true}); g.clearRect(0,0,96,96); g.lineWidth=7; g.strokeStyle='rgba(251,244,228,0.55)'; g.beginPath(); g.arc(48,48,36,0,TAU); g.stroke(); g.strokeStyle=k>=1?'#3A2412':'#FBF4E4'; g.lineCap='round'; g.beginPath(); g.arc(48,48,36,-Math.PI/2,-Math.PI/2+TAU*Math.min(1,k)); g.stroke(); this.ringTex.needsUpdate=true; }
  
  
  

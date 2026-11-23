@@ -408,7 +408,7 @@ export const POLISH_STYLES=[['solid','단색'],['grad','그라데이션'],['fren
 let _glitterTex=null;
 function glitterTex(){
   if(_glitterTex) return _glitterTex;
-  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d',{willReadFrequently:true});
   g.fillStyle='#fff'; g.fillRect(0,0,256,256);
   for(let i=0;i<900;i++){ const x=Math.random()*256,y=Math.random()*256,r=Math.random()*1.6+0.5, l=Math.random();
     g.fillStyle=l<0.5?`rgba(255,255,255,${0.7+Math.random()*0.3})`:l<0.8?`rgba(${200+Math.random()*55|0},${170+Math.random()*85|0},255,0.9)`:`rgba(150,120,90,0.55)`;
@@ -453,7 +453,7 @@ function stickerPath(k){
 function drawGloss(g,x,y,rx,ry,rot=-0.5,a=0.85){ g.save(); g.translate(x,y); g.rotate(rot); const gr=g.createRadialGradient(0,0,0,0,0,rx); gr.addColorStop(0,`rgba(255,255,255,${a})`); gr.addColorStop(1,'rgba(255,255,255,0)'); g.fillStyle=gr; g.scale(1,ry/rx); g.beginPath(); g.arc(0,0,rx,0,TAU); g.fill(); g.restore(); }
 /** 그림 한 장을 그린다. 바깥 흰 테두리(따낸 자리)는 그림 윤곽을 굵은 흰 선으로 한 번 더 그어 만든다 */
 function drawSticker(k){
-  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d',{willReadFrequently:true});
   const shapes=[]; // [path, fill, stroke]
   const lin=(x0,y0,x1,y1,a,b)=>{ const gr=g.createLinearGradient(x0,y0,x1,y1); gr.addColorStop(0,a); gr.addColorStop(1,b); return gr; };
   const rad=(x,y,r,a,b)=>{ const gr=g.createRadialGradient(x,y,r*0.1,x,y,r); gr.addColorStop(0,a); gr.addColorStop(1,b); return gr; };
@@ -525,7 +525,7 @@ function stickerTex(k){
 
 // ───────── 이름 글씨 (등에 마커로 쓴 이름) ─────────
 function textTex(text,color){
-  const c=document.createElement('canvas'); c.width=512; c.height=256; const g=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=512; c.height=256; const g=c.getContext('2d',{willReadFrequently:true});
   let size=150; g.font=`700 ${size}px Gaegu, "Apple SD Gothic Neo", sans-serif`;
   while(g.measureText(text).width>470&&size>40){ size-=6; g.font=`700 ${size}px Gaegu, "Apple SD Gothic Neo", sans-serif`; }
   g.textAlign='center'; g.textBaseline='middle'; g.lineJoin='round';
@@ -573,7 +573,7 @@ export const HAT_COLORS=['#ff6f6f','#ffb347','#ffe066','#7bd389','#6fb7ff','#b48
 let _knitTex=null;
 function knitTex(){
   if(_knitTex) return _knitTex;
-  const c=document.createElement('canvas'); c.width=c.height=128; const g=c.getContext('2d');
+  const c=document.createElement('canvas'); c.width=c.height=128; const g=c.getContext('2d',{willReadFrequently:true});
   g.fillStyle='#d8d8d8'; g.fillRect(0,0,128,128);
   for(let x=0;x<128;x+=16){ for(let y=0;y<128;y+=12){ for(const s of [-1,1]){ g.save(); g.translate(x+8+s*3.5,y+6); g.rotate(s*0.5); const gr=g.createLinearGradient(-4,0,4,0); gr.addColorStop(0,'#bdbdbd'); gr.addColorStop(0.5,'#ffffff'); gr.addColorStop(1,'#bdbdbd'); g.fillStyle=gr; g.beginPath(); g.ellipse(0,0,3.6,6.5,0,0,TAU); g.fill(); g.restore(); } } }
   _knitTex=new THREE.CanvasTexture(c); _knitTex.wrapS=_knitTex.wrapT=THREE.RepeatWrapping; _knitTex.repeat.set(6,2); _knitTex.colorSpace=THREE.SRGBColorSpace; return _knitTex;

@@ -326,7 +326,7 @@ export class BappuBall{
     const attr=new T.Float32BufferAttribute(new Array(this.crumbCap*3).fill(0),3); this.crumbPos=attr.array;
     const g=new T.BufferGeometry(); g.setAttribute('position',attr); g.setDrawRange(0,0);
     // 알갱이는 둥근 점 (그냥 점은 네모로 그려진다)
-    const c=document.createElement('canvas'); c.width=c.height=32; const x=c.getContext('2d');
+    const c=document.createElement('canvas'); c.width=c.height=32; const x=c.getContext('2d',{willReadFrequently:true});
     const gr=x.createRadialGradient(16,16,0,16,16,16); gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(0.55,'rgba(255,255,255,0.9)'); gr.addColorStop(1,'rgba(255,255,255,0)');
     x.fillStyle=gr; x.fillRect(0,0,32,32);
     this.crumbTex=new T.CanvasTexture(c);
@@ -344,7 +344,7 @@ export class BappuBall{
     this.group.add(this.beads);
   }
   buildShadow(){
-    const T=this.T, c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d');
+    const T=this.T, c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d',{willReadFrequently:true});
     const gr=x.createRadialGradient(64,64,10,64,64,64); gr.addColorStop(0,'rgba(40,24,12,0.55)'); gr.addColorStop(0.5,'rgba(40,24,12,0.3)'); gr.addColorStop(1,'rgba(40,24,12,0)');
     x.fillStyle=gr; x.fillRect(0,0,128,128);
     const tex=new T.CanvasTexture(c);
@@ -1059,7 +1059,7 @@ function slimeFresnel(T,mat,aMin,aMax,rim,rimK){
 
 // 작은 환경맵: 밝은 천장 + 창문 두 개 + 따뜻한 바닥. 투명 덩어리 광택과 등껍질 윤기용.
 function makeEnvMap(T){
-  const w=128,h=64,c=document.createElement('canvas'); c.width=w; c.height=h; const x=c.getContext('2d');
+  const w=128,h=64,c=document.createElement('canvas'); c.width=w; c.height=h; const x=c.getContext('2d',{willReadFrequently:true});
   const g=x.createLinearGradient(0,0,0,h); g.addColorStop(0,'#fffdf7'); g.addColorStop(0.38,'#efe9dc'); g.addColorStop(0.52,'#cdbca3'); g.addColorStop(1,'#5a3d2a');
   x.fillStyle=g; x.fillRect(0,0,w,h);
   // 창문 두 개: 투명 덩어리 위에 맺히는 밝은 반사점

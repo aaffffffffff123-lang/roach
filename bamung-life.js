@@ -3,10 +3,11 @@
 // Pet  : 한 마리. 쉬기·돌아다니기·더듬이 손질·먹고 마시기·숨기·놀이기구 타기·유리 벽 타기·늙어 죽기.
 // 대화 : 둘이 마주치면 가끔 마주 보고 서서 한마디씩 주고받는다 (대사와 흐름은 bamung-talk.js).
 //        새로 온 놈은 먼저 와 있던 놈에게 인사부터 한다. 마음(우울 → 다 나음)에 따라 하는 말이 달라진다.
+//        혼자 남은 놈은 혼잣말을 하고, 누가 사라지면 남은 놈들이 한동안 그놈을 찾는다.
 // 실제 습성: 대부분 쉬고, 좁은 틈을 좋아하고(벽·틈에 몸을 붙임), 빛과 바람을 피하고, 죽은 동료 근처는 피해 간다.
 import * as THREE from 'three';
 import { PetModel, applyDeco, ROACH_L } from './bamung-roach.js';
-import { GREET, BLUE, BRIGHT, DECO_SELF, DECO_OTHER, HEAL_AFTER } from './bamung-talk.js';
+import { GREET, BLUE, BRIGHT, DECO_SELF, DECO_OTHER, MISSING, HEAL_AFTER } from './bamung-talk.js';
 import { typeTime } from './talk-bubble.js';
 import { voiceOf } from './roach-voice.js';
 
@@ -30,8 +31,17 @@ export function hasDeco(D){ if(!D||typeof D!=='object') return false; return !!(
 /** 마음: 0 우울 · 1 다 나음. 예전 기록(마음이 없는 놈)은 꾸며져 있으면 다 나은 걸로 본다 */
 export function moodOf(p){ const m=p.rec.mood; return m===0||m===1?m:(hasDeco(p.rec.deco)?1:0); }
 const decoUp=p=>moodOf(p)===1&&hasDeco(p.rec.deco);
-const TALK_POOLS={blue:BLUE,bright:BRIGHT,decoSelf:DECO_SELF,decoOther:DECO_OTHER};
 const cleanLines=L=>Array.isArray(L)?L.filter(x=>typeof x==='string'&&x.trim()):[];
+const firstLines=P=>P.map(L=>cleanLines(L).slice(0,1)).filter(L=>L.length);   // 대화마다 첫마디만 (혼잣말)
+const TALK_POOLS={blue:BLUE,bright:BRIGHT,decoSelf:DECO_SELF,decoOther:DECO_OTHER,
+  soloBlue:firstLines(BLUE),soloBright:firstLines(BRIGHT),missing:cleanLines(MISSING).map(t=>[t])};
+const MISSING_FOR=DAY;   // 사라진 놈을 찾는 혼잣말은 하루 동안
+const MISSING_MAX=3;     // 한 놈이 한 이름으로 찾는 횟수
+/** 받침에 맞는 조사 ('은/는' 같은 짝에서 고른다) */
+function josa(word,pair){ const [a,b]=pair.split('/'); const ch=String(word).trim().slice(-1); const c=ch.charCodeAt(0); if(c>=0xAC00&&c<=0xD7A3) return ((c-0xAC00)%28)?a:b; if(/[0-9]/.test(ch)) return '013678'.includes(ch)?a:b; return b; }
+const JOSA={은:'은/는',는:'은/는',이:'이/가',가:'이/가',을:'을/를',를:'을/를',과:'과/와',와:'과/와'};
+/** ○○ 자리에 이름을 넣고, 바로 뒤 조사를 받침에 맞춘다 */
+export function fillName(t,name){ return String(t).replace(/○○(은|는|이|가|을|를|과|와)?/g,(m,j)=>name+(j?josa(name,JOSA[j]):'')); }
 
 const _q=new THREE.Quaternion(), _m=new THREE.Matrix4(), _v=new THREE.Vector3(), _v2=new THREE.Vector3(), _v3=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0);
 function frameQuat(up,fwd,out){
@@ -70,6 +80,7 @@ export class World{
   constructor({sfx,events}={}){
     this.props=[]; this.pets=[]; this.sfx=sfx||{}; this.events=events||{}; this.time=0;
     this.talk=null; this.talkSeq=0; this.talkCD=rand(8,14); this.talkOn=true; this.talkBags={}; this.greetQ=[];
+    this.missing=[];   // 사라진 놈들 {name,at,knew:[그때 함께 있던 놈 id],said:{id:찾은 횟수}} (bamung.html이 저장한다)
   }
   // 소품 자기 좌표 → 테라리움 좌표
   lp(prop,x,y,z,out=new THREE.Vector3()){ const c=Math.cos(prop.rot), s=Math.sin(prop.rot); return out.set(prop.x+x*c+z*s,y,prop.z-x*s+z*c); }
@@ -95,7 +106,9 @@ export class World{
     for(let it=0;it<2;it++) for(const p of this.props){ if(pet&&pet.ignore===p) continue; const o=this.inFoot(p,x,z,PR*0.6); if(o){ x+=o.nx*o.pen; z+=o.nz*o.pen; hit=o; } }
     return {x,z,hit};
   }
-  freeAt(x,z,r=PR){ const wm=Math.max(r,WALL); if(Math.abs(x)>TANK.hw-wm||Math.abs(z)>TANK.hd-wm) return false; for(const p of this.props) if(this.inFoot(p,x,z,r)) return false; return true; }
+  freeAt(x,z,r=PR){ const wm=Math.max(r,WALL); if(Math.abs(x)>TANK.hw-wm||Math.abs(z)>TANK.hd-wm) return false; return this.propFree(x,z,r); }
+  /** 소품만 본다 (유리 벽 바로 앞 자리를 볼 때) */
+  propFree(x,z,r=PR){ for(const p of this.props) if(this.inFoot(p,x,z,r)) return false; return true; }
   randomFree(tries=30,nearWall=false){
     for(let i=0;i<tries;i++){ let x,z; if(nearWall){ const side=Math.floor(rand(4)); const t=rand(-1,1); const m=WALL+0.004; x=side<2?(side?TANK.hw-m:-TANK.hw+m):t*(TANK.hw-m); z=side<2?t*(TANK.hd-m):(side===2?TANK.hd-m:-TANK.hd+m); } else { x=rand(-TANK.hw+0.06,TANK.hw-0.06); z=rand(-TANK.hd+0.06,TANK.hd-0.06); }
       if(this.freeAt(x,z,PR+0.01)) return {x,z}; }
@@ -181,16 +194,16 @@ export class World{
   meetTalk(p,q){ if(this.talk||!this.talkOn||this.talkCD>8||Math.random()<0.4) return false; if(!this.canTalk(p)||!this.canTalk(q)) return false; return this.startTalk(p,q,false); }
   /** 끝까지 다 한 대화의 효과: 인사를 했다, 위로를 들었다, 꾸밈 대사를 한 번 했다 */
   talkDone(T){
-    const ra=T.a.rec, rb=T.b.rec;
+    const ra=T.a.rec, rb=T.b?.rec;
     if(T.pool==='greet') ra.greeted=1;
     if(T.pool==='blue'&&T.lines.length>=2&&moodOf(T.a)===0){ ra.mood=0; ra.comfort=(ra.comfort|0)+1; if(ra.comfort>=HEAL_AFTER){ ra.mood=1; ra.comfort=0; } }
     if(T.pool==='decoSelf'&&ra.decoFresh>0) ra.decoFresh--;
-    if(T.pool==='decoOther'&&rb.decoFresh>0) rb.decoFresh--;
+    if(T.pool==='decoOther'&&rb&&rb.decoFresh>0) rb.decoFresh--;
     this.events.talkDone?.(T);
   }
-  endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; this.events.talkStop?.(T); if(T.done&&!T.cut) this.talkDone(T); for(const p of [T.a,T.b]) if(p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
+  endTalk(){ const T=this.talk; if(!T) return; this.talk=null; T.over=true; this.events.talkStop?.(T); if(T.done&&!T.cut) this.talkDone(T); for(const p of [T.a,T.b]) if(p&&p.act?.type==='talk'&&p.act.talk===T&&!p.dead) p.chooseNext(); }
   /** 하던 말을 그 글자에서 끊는다 (한 놈이 족집게에 집혔을 때). 말풍선은 그 자리에 멈춘 채 사라지고, 남은 놈은 끝까지 그쪽을 본다 */
-  cutTalk(p){ const T=this.talk; if(!T||(p&&T.a!==p&&T.b!==p)) return false; T.cut=true; T.cutT=0; T.phase='fade'; T.fade=0; T.cutPos={a:T.a.pos.clone(),b:T.b.pos.clone()}; this.events.talkStop?.(T); return true; }
+  cutTalk(p){ const T=this.talk; if(!T||(p&&T.a!==p&&T.b!==p)) return false; T.cut=true; T.cutT=0; T.phase='fade'; T.fade=0; T.cutPos={a:T.a.pos.clone(),b:(T.b||T.a).pos.clone()}; this.events.talkStop?.(T); return true; }
   /** 새로 들어온 놈: 먼저 와 있던 놈이 있으면 그 앞까지 가서 인사 둘 중 하나를 혼자 한다 */
   queueGreet(p){ if(p&&!this.greetQ.some(g=>g.p===p)) this.greetQ.push({p,t:0}); }
   tryGreet(dt){
@@ -206,6 +219,34 @@ export class World{
     }
     return false;
   }
+  /** 혼잣말: 한 놈이 혼자 한마디 한다 (대답하는 놈 없음) */
+  startSolo(p,line,pool){
+    if(this.talk) this.endTalk();
+    if(!line) return false;
+    const T={id:++this.talkSeq,a:p,b:null,solo:true,lines:[line],pool,i:-1,lineT:0,next:0.5,phase:'talk',fade:0,t:0,over:false,done:false,cut:false};
+    this.talk=T; this.talkCD=rand(15,30); p.stuck=0;
+    p.setAct({type:'talk',talk:T,other:null,role:'a',walk:false});
+    return true;
+  }
+  /** 누가 사라졌다 (늙어 죽어 묻혔거나 족집게에 집혀 나갔다): 그때 함께 있던 놈들이 하루 동안 그놈을 찾는다 */
+  noteMissing(gone){
+    const knew=this.pets.filter(p=>p!==gone&&!p.dead&&!p.buried).map(p=>p.id);
+    if(!knew.length) return false;
+    this.missing.push({name:gone.name,at:Date.now(),knew,said:{}});
+    if(this.missing.length>4) this.missing.splice(0,this.missing.length-4);
+    return true;
+  }
+  /** 사라진 놈을 찾을 차례인 놈: 그놈을 알던 놈 중 아직 한 번도 안 찾은 놈이 먼저, 그 뒤로는 가끔 */
+  pickMissing(L){
+    const now=Date.now(); this.missing=this.missing.filter(m=>m&&now-m.at<MISSING_FOR);
+    if(!this.missing.length||!L.length) return null;
+    const cands=[];
+    for(const m of this.missing){ m.said=m.said||{}; for(const p of L){ if(!(m.knew||[]).includes(p.id)) continue; const n=m.said[p.id]|0; if(n<MISSING_MAX) cands.push({p,m,n}); } }
+    if(!cands.length) return null;
+    const fresh=cands.filter(c=>c.n===0);
+    if(fresh.length) return pick(fresh);
+    return Math.random()<0.3?pick(cands):null;
+  }
   /** 말할 차례인데 짝이 없으면: 상자 안에 한참 숨어 있던 놈 하나가 조금 일찍 나온다 */
   nudgeHider(){ const h=this.pets.find(p=>!p.dead&&p.act?.type==='hide'&&p.act.ph===1&&p.act.t>6); if(h) h.act.dur=Math.min(h.act.dur,h.act.t+rand(0.5,2.5)); }
   /** 남은 놈들이 다시 우울해진다 (누가 족집게에 집혀 나가거나 늙어 죽었을 때) */
@@ -219,7 +260,14 @@ export class World{
       if(this.greetQ.length&&this.tryGreet(dt)) return;
       this.talkCD-=dt; if(this.talkCD>0) return;
       this.talkCD=rand(2.5,5);  // 짝이 없으면 조금 있다 다시 본다
-      const L=this.pets.filter(p=>this.canTalk(p)&&!this.greetQ.some(g=>g.p===p)); if(L.length<2){ this.nudgeHider(); return; }
+      const L=this.pets.filter(p=>this.canTalk(p)&&!this.greetQ.some(g=>g.p===p));
+      // 사라진 놈을 찾는 혼잣말: 옆에 누가 있어도 혼자 한다
+      const ms=this.pickMissing(L);
+      if(ms){ const t=this.bagPick('missing')[0]; if(t){ ms.m.said[ms.p.id]=(ms.m.said[ms.p.id]|0)+1; this.startSolo(ms.p,fillName(t,ms.m.name),'missing'); this.events.missingSaid?.(ms.m); return; } }
+      // 혼자 남았으면: 지금 마음의 대화 첫마디를 혼자 한다 (대답해 줄 놈이 없다)
+      const alone=this.pets.filter(p=>!p.dead&&!p.away);
+      if(alone.length===1){ const p=alone[0]; if(L.includes(p)) this.startSolo(p,this.bagPick(moodOf(p)===0?'soloBlue':'soloBright')[0],'solo'); else this.nudgeHider(); return; }
+      if(L.length<2){ this.nudgeHider(); return; }
       // 가장 가까운 둘 (멀면 말 거는 놈이 걸어간다)
       let p=null, q=null, d=1e9;
       for(let i=0;i<L.length;i++) for(let j=i+1;j<L.length;j++){ const e=Math.hypot(L[i].x-L[j].x,L[i].z-L[j].z)*(0.85+Math.random()*0.3); if(e<d){ d=e; p=L[i]; q=L[j]; } }
@@ -231,7 +279,7 @@ export class World{
     // 끊긴 대화: 말풍선은 멈춘 글자 그대로 잠깐 떠 있다가 사라진다
     if(T.cut){ T.cutT=(T.cutT||0)+dt; if(T.cutT>1.1){ T.fade=Math.min(1,T.fade+dt/0.6); if(T.fade>=1) this.endTalk(); } return; }
     const live=x=>x.act?.type==='talk'&&x.act.talk===T&&!x.dead&&!x.away;
-    if(!on||!live(T.a)||!live(T.b)){ this.endTalk(); return; }
+    if(!on||!live(T.a)||(T.b&&!live(T.b))){ this.endTalk(); return; }
     T.t+=dt;
     if(T.phase==='approach'){ if(T.a.act.arrived){ T.phase='talk'; T.next=0.45; } else if(T.t>13/Math.max(0.45,T.a.slowK)) this.endTalk(); return; }   // 늙어 느린 놈은 더 기다린다
     T.lineT+=dt; T.next-=dt;
@@ -341,7 +389,7 @@ export class Pet{
       const side=Math.floor(rand(4)); const t=rand(-0.8,0.8);
       const m=0.004; let wx,wz,nx,nz;
       if(side===0){ wx=-TANK.hw+m; wz=t*TANK.hd; nx=1; nz=0; } else if(side===1){ wx=TANK.hw-m; wz=t*TANK.hd; nx=-1; nz=0; } else if(side===2){ wx=t*TANK.hw; wz=-TANK.hd+m; nx=0; nz=1; } else { wx=t*TANK.hw; wz=TANK.hd-m; nx=0; nz=-1; }
-      const fx=wx+nx*0.12, fz=wz+nz*0.12; if(!W.freeAt(fx,fz,PR+0.02)||!W.freeAt(wx+nx*0.04,wz+nz*0.04,PR)) continue;
+      const fx=wx+nx*0.12, fz=wz+nz*0.12; if(!W.freeAt(fx,fz,PR+0.02)||!W.propFree(wx+nx*0.04,wz+nz*0.04,PR)) continue;
       const top=rand(0.24,TANK.band-0.08);
       const pts=[V(fx,0,fz),V(wx+nx*0.03,0,wz+nz*0.03),V(wx+nx*0.004,0.012,wz+nz*0.004),V(wx,0.04,wz),V(wx,top,wz)];
       const nrm=[V(0,1,0),V(0,1,0),V(nx,0.6,nz),V(nx,0,nz),V(nx,0,nz)];
@@ -370,8 +418,9 @@ export class Pet{
     // 바람: 더듬이가 날리고, 세면 도망간다
     if(this.mode==='floor'&&!this.dead){ const w=W.windAt(this.x,this.z); if(w.k>0.05){ T.stream=1; const inv=_q.copy(this.quat).invert(); this.m.streamDir.set(w.wx,0.25,w.wz).normalize().applyQuaternion(inv); if(w.k>0.25&&a.type!=='flee'&&this.canBeStartled()) this.startFlee(this.x-w.wx,this.z-w.wz,rand(1.2,2.2)); }
       const lk=W.lightAt(this.x,this.z); if(lk>0.3&&a.type!=='flee'&&this.canBeStartled()){ const c=W.lightCenter(this.x,this.z); if(c) this.startFlee(c.x,c.z,rand(1,1.8)); } }
-    // 모자: 빨리 뛰면 미끄러져 떨어진다
-    if(this.m.hat&&this.speed>0.42){ this.runFast+=dt; if(this.runFast>0.5&&Math.random()<dt*2.5){ this.runFast=0; W.events.hatFall?.(this); } } else this.runFast=Math.max(0,this.runFast-dt);
+    // 모자: 한참 내달리면 미끄러져 떨어진다. 막 꾸몄거나 다시 씌워 준 뒤 한동안은 안 떨어진다
+    if(this.hatGrace>0) this.hatGrace-=dt;
+    if(this.m.hat&&this.speed>0.42&&!(this.hatGrace>0)){ this.runFast+=dt; if(this.runFast>1.2&&Math.random()<dt*1.5){ this.runFast=0; W.events.hatFall?.(this); } } else this.runFast=Math.max(0,this.runFast-dt);
     this.m.animate(dt,T);
     // 표시 위치: 목표로 부드럽게 따라간다 (탈것에 붙어 있을 땐 바로)
     if(this.snap){ this.pos.copy(this.tPos); this.quat.copy(this.tQuat); this.snap=false; }
@@ -446,17 +495,19 @@ export class Pet{
   /** 대화: 묻는 놈은 상대 앞까지 걸어가고, 둘이 마주 보고 선다. 말하는 쪽은 말 꺼낼 때 고개를 살짝 들고 더듬이를 까딱인다 */
   act_talk(dt,a,T){
     const Tk=a.talk, o=a.other;
-    if(!Tk||Tk.over||!o){ this.chooseNext(); return; }
-    if(a.walk&&!a.arrived){
+    if(!Tk||Tk.over||(!o&&!Tk.solo)){ this.chooseNext(); return; }
+    if(a.walk&&!a.arrived&&o){
       const dx=this.x-o.x, dz=this.z-o.z, d=Math.hypot(dx,dz)||1;
       const left=this.stepFloor(dt,o.x+dx/d*0.1,o.z+dz/d*0.1,0.16,T);
       if(left<0.014||d<0.115||this.stuck>1.2){ a.arrived=true; this.stuck=0; }
       return;
     }
     this.speed=damp(this.speed,0,10,dt);
-    const want=Math.atan2(o.x-this.x,o.z-this.z); this.h+=clamp(wrap(want-this.h),-4*dt,4*dt); this.floorPose();
+    if(o){ const want=Math.atan2(o.x-this.x,o.z-this.z); this.h+=clamp(wrap(want-this.h),-4*dt,4*dt); }
+    this.floorPose();
     T.crouch=0.3; T.aim=1;
-    const inv=_q.copy(this.quat).invert(); this.m.aimDir.set(o.x-this.x,0.03,o.z-this.z).normalize().applyQuaternion(inv);
+    if(o){ const inv=_q.copy(this.quat).invert(); this.m.aimDir.set(o.x-this.x,0.03,o.z-this.z).normalize().applyQuaternion(inv); }
+    else this.m.aimDir.set(0,0.42,1).normalize();   // 혼잣말: 앞을 보며 고개를 조금 든다
     // 말하는 동안: 고개를 살짝 들고 글자 박자에 맞춰 더듬이를 까딱인다
     const mine=Tk.phase==='talk'&&Tk.i>=0&&((Tk.i%2===0)===(a.role==='a'));
     const tt=mine?Math.max(0.9,typeTime(Tk.lines[Tk.i],this.voice?.speed||1)):0, e=Tk.lineT;
@@ -630,7 +681,7 @@ export class Pet{
   act_drop(dt,a,T){
     if(a.v===undefined){ a.v=0; a.y=a.y0??0.5; a.spin=rand(-3,3); }
     a.v-=dt*2.4; a.y+=a.v*dt; this.h+=a.spin*dt; this.mode='slot'; T.flail=1;
-    if(a.y<=0){ a.y=0; this.world.sfx.drop?.(this.pos); if(Math.random()<0.4){ this.floorPose(); this.setAct({type:'onback',dur:rand(0.8,1.6)}); } else { this.floorPose(); this.setAct({type:'flee',h:rand(TAU),dur:rand(0.8,1.4)}); } return; }
+    if(a.y<=0){ a.y=0; this.world.sfx.drop?.(this.pos); if(a.calm){ this.floorPose(); this.setAct({type:'rest',dur:rand(4,8)}); return; } if(Math.random()<0.4){ this.floorPose(); this.setAct({type:'onback',dur:rand(0.8,1.6)}); } else { this.floorPose(); this.setAct({type:'flee',h:rand(TAU),dur:rand(0.8,1.4)}); } return; }
     this.tPos.set(this.x,a.y,this.z); this.tQuat.setFromAxisAngle(_up,this.h);
     const r=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.sin(a.t*5)*0.4); this.tQuat.multiply(r);
   }

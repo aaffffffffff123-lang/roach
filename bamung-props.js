@@ -26,7 +26,7 @@ function box(w,h,d,mat,x,y,z,parent){ return mesh(new THREE.BoxGeometry(w,h,d),m
 function cyl(rt,rb,h,mat,x,y,z,parent,seg=20,open=false){ return mesh(new THREE.CylinderGeometry(rt,rb,h,seg,1,open),mat,x,y,z,parent); }
 function sph(r,mat,x,y,z,parent,ws=16,hs=12){ return mesh(new THREE.SphereGeometry(r,ws,hs),mat,x,y,z,parent); }
 function tubeAlong(pts,r,mat,parent,seg=48,rad=8,closed=false){ const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)),closed); return mesh(new THREE.TubeGeometry(c,seg,r,rad,closed),mat,0,0,0,parent); }
-function ctex(w,h,draw,{repeat=null,srgb=true,aniso=4}={}){ const c=document.createElement('canvas'); c.width=w; c.height=h; draw(c.getContext('2d'),w,h); const t=new THREE.CanvasTexture(c); if(srgb) t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=aniso; if(repeat){ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(repeat[0],repeat[1]); } return t; }
+function ctex(w,h,draw,{repeat=null,srgb=true,aniso=4}={}){ const c=document.createElement('canvas'); c.width=w; c.height=h; draw(c.getContext('2d',{willReadFrequently:true}),w,h); const t=new THREE.CanvasTexture(c); if(srgb) t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=aniso; if(repeat){ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(repeat[0],repeat[1]); } return t; }
 const noiseFill=(g,w,h,amt,alpha=1)=>{ const id=g.getImageData(0,0,w,h), d=id.data; for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*amt; d[i]=clamp(d[i]+n,0,255); d[i+1]=clamp(d[i+1]+n,0,255); d[i+2]=clamp(d[i+2]+n,0,255); } g.putImageData(id,0,0); };
 
 // ───────── 공통 텍스처 ─────────

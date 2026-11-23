@@ -324,9 +324,26 @@ let killBurst=[], deathPending=0;
 // 편지 소리 (이 창에서 낸다)
 let MA=null;
 function mailAudio(){
+  if(MA&&MA.state==='closed')MA=null;
   if(!MA){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;try{MA=new C();}catch(e){return null;}}
-  if(MA.state==='suspended')MA.resume().catch(()=>{});
+  if(MA.state!=='running')MA.resume().catch(()=>{});
   return MA;
+}
+// 편지 소리 깨우기: 게임·테라리움·실험실 어느 창이든 누를 때마다 편지 소리를 미리 깨워 둔다.
+// 안드로이드 크롬은 누른 직후 몇 초 안에만 꺼진 소리를 켤 수 있어서, 테라리움 족집게로 집고 실험실이 뜰 즈음엔 이미 늦었다
+function wakeMailAudio(){try{mailAudio();}catch(e){}}
+function hookMailWake(win){
+  try{
+    if(!win||win.__mailWake)return;
+    win.__mailWake=true;
+    for(const ev of ['pointerdown','touchend','keydown'])win.addEventListener(ev,wakeMailAudio,{capture:true,passive:true});
+  }catch(e){}
+}
+hookMailWake(window);
+for(const fr of [gameFrame,labFrame,document.getElementById('petFrame')]){
+  if(!fr)continue;
+  fr.addEventListener('load',()=>hookMailWake(fr.contentWindow));
+  try{if(fr.contentDocument?.readyState==='complete')hookMailWake(fr.contentWindow);}catch(e){}
 }
 function mTone(f,t,dur,gain,type='triangle'){
   const c=MA,t0=c.currentTime+t,o=c.createOscillator(),g=c.createGain();

@@ -36,7 +36,7 @@ export function makeFoodBait(THREE, kind) {
     );
     plane.rotation.x = -Math.PI / 2;
     plane.castShadow = false;
-    return { canvas, ctx: canvas.getContext('2d'), texture };
+    return { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }), texture };
   }
 
   function dispose() {
@@ -248,7 +248,7 @@ export function makeFoodBait(THREE, kind) {
     const ctx = surface.ctx, N = surface.canvas.width;
     const wet = document.createElement('canvas');
     wet.width = wet.height = N;
-    const w = wet.getContext('2d'), ppm = N / .86;
+    const w = wet.getContext('2d', { willReadFrequently: true }), ppm = N / .86;
     const bites = [], droplets = [], bubbles = [];
     const phase = random(0, TAU), p2 = random(0, TAU), p5 = random(0, TAU);
     const flow = a => Math.atan2(

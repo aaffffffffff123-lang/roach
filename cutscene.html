@@ -57,7 +57,11 @@ renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=0.98; renderer.outputColorSpace=THREE.SRGBColorSpace;
 const scene=new THREE.Scene(); scene.background=new THREE.Color(0xefe6d2);
-const pmrem=new THREE.PMREMGenerator(renderer); scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture; scene.environmentIntensity=0.42;
+// 창을 내렸다 올릴 때 그래픽 문맥을 잃으면 환경 맵이 비어 버린다: 되찾으면 다시 만든다
+let envRT=null;
+function buildEnv(){ try{ const pm=new THREE.PMREMGenerator(renderer); const old=envRT; envRT=pm.fromScene(new RoomEnvironment(),0.04); scene.environment=envRT.texture; pm.dispose(); old?.dispose(); }catch(e){ console.warn(e); } }
+buildEnv(); scene.environmentIntensity=0.42;
+renderer.domElement.addEventListener('webglcontextrestored',()=>buildEnv());
 const camera=new THREE.PerspectiveCamera(30,1,0.01,10);
 
 // 결 무늬에 픽셀을 한 번 읽어 와 잡티를 섞으므로, 처음부터 읽기 쉬운 캔버스로 만든다 (안 그러면 읽어 올 때 화면이 멈칫한다)
@@ -129,6 +133,9 @@ function frameCam(){
   const d=Math.min(devicePixelRatio||1,2); ui.width=Math.round(w*d); ui.height=Math.round(h*d); ug.setTransform(d,0,0,d,0,0);
 }
 const ui=document.getElementById('ui'), ug=ui.getContext('2d');
+// 말풍선 판: 창을 내렸다 올리면 그림판이 처음 상태(배율 1)로 돌아갈 수 있어서, 그릴 때마다 배율을 다시 맞춘다
+function uiPrep(){ const sx=ui.width/Math.max(1,innerWidth), sy=ui.height/Math.max(1,innerHeight); ug.setTransform(sx,0,0,sy,0,0); ug.clearRect(0,0,innerWidth,innerHeight); }
+ui.addEventListener('contextrestored',()=>{ if(!raf) render(0); });
 addEventListener('resize',()=>{ frameCam(); if(!raf) render(0); });
 
 // ───────── 몸짓 ─────────
@@ -175,7 +182,7 @@ function update(dt,tdt=dt){
 function render(dt,tdt=dt){
   update(dt,tdt);
   renderer.render(scene,camera);
-  ug.clearRect(0,0,innerWidth,innerHeight); view.draw(ug);
+  uiPrep(); view.draw(ug);
 }
 function loop(ts){
   raf=requestAnimationFrame(loop);
@@ -205,8 +212,8 @@ function advance(){
   if(!finished){ finished=true; }
   endAt=clock;
 }
-function stop(){ playing=false; voice?.stop(); voice=null; if(raf){ cancelAnimationFrame(raf); raf=0; } shown=0; view.clear(); ug.clearRect(0,0,innerWidth,innerHeight); }
-window.Cut={play,advance,stop,get playing(){ return playing; },_debug:{R,camera,get shown(){ return shown; },get clock(){ return clock; },get raf(){ return raf; },freeze(){ frozen=true; if(raf){ cancelAnimationFrame(raf); raf=0; } },step(sec,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++) update(dt); renderer.render(scene,camera); ug.clearRect(0,0,innerWidth,innerHeight); view.draw(ug); return shown; }}};
+function stop(){ playing=false; voice?.stop(); voice=null; if(raf){ cancelAnimationFrame(raf); raf=0; } shown=0; view.clear(); uiPrep(); }
+window.Cut={play,advance,stop,get playing(){ return playing; },_debug:{R,camera,get shown(){ return shown; },get clock(){ return clock; },get raf(){ return raf; },freeze(){ frozen=true; if(raf){ cancelAnimationFrame(raf); raf=0; } },step(sec,dt=1/30){ const n=Math.max(1,Math.round(sec/dt)); for(let i=0;i<n;i++) update(dt); renderer.render(scene,camera); uiPrep(); view.draw(ug); return shown; }}};
 
 // 따로 열었을 때(확인용): 누르면 소리를 켜고 다시 튼다
 function ensureOwnAudio(){ if(ownAudio||EMBED) return; try{ const C=window.AudioContext||window.webkitAudioContext; const ctx=new C(); const m=ctx.createGain(); m.gain.value=0.85; const c=ctx.createDynamicsCompressor(); c.threshold.value=-14; c.ratio.value=5; m.connect(c); c.connect(ctx.destination); ownAudio={ctx,dest:m}; if(!audio) audio=ownAudio; }catch(e){} }

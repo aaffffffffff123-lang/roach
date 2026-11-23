@@ -303,7 +303,7 @@ const fill=new THREE.DirectionalLight(0xbfd6ff,.78);fill.position.set(5,4,-2);sc
 const warm=new THREE.PointLight(0xff9f56,.42,8);warm.position.set(-3,2.6,-2);scene.add(warm);
 
 function makeWoodTexture(){
-  const size=IS_SMALL?512:768,c=document.createElement('canvas');c.width=c.height=size;const g=c.getContext('2d');
+  const size=IS_SMALL?512:768,c=document.createElement('canvas');c.width=c.height=size;const g=c.getContext('2d',{willReadFrequently:true});
   const gr=g.createLinearGradient(0,0,size,0);gr.addColorStop(0,'#61422c');gr.addColorStop(.5,'#8a5d38');gr.addColorStop(1,'#5b3b29');g.fillStyle=gr;g.fillRect(0,0,size,size);
   for(let i=0;i<(IS_SMALL?145:220);i++){const y=rand(size);g.strokeStyle=`rgba(${rand(45,90)|0},${rand(20,50)|0},${rand(10,30)|0},${rand(.035,.12)})`;g.lineWidth=rand(.5,2.2);g.beginPath();g.moveTo(0,y);for(let x=0;x<=size;x+=48)g.lineTo(x,y+Math.sin(x*.015+i)*rand(3,14)+rand(-4,4));g.stroke()}
   for(let x=0;x<size;x+=size/4){g.fillStyle='rgba(30,14,7,.18)';g.fillRect(x,0,3,size);g.fillStyle='rgba(255,220,160,.08)';g.fillRect(x+3,0,2,size)}
