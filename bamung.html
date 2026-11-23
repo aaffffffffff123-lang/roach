@@ -239,7 +239,7 @@ function loadStore(){
   for(const g of Array.isArray(d.graves)?d.graves:[]) if(g&&g.name) S.graves.push(g);
   if(Array.isArray(d.props)) S.props=d.props.filter(p=>p&&PROPS[p.k]&&isFinite(p.x)&&isFinite(p.z));
   for(const f of Array.isArray(d.fallen)?d.fallen:[]) if(f&&f.petId) S.fallen.push(f);
-  for(const m of Array.isArray(d.missing)?d.missing:[]) if(m&&m.name&&m.at>0) S.missing.push({name:String(m.name),at:+m.at,knew:Array.isArray(m.knew)?m.knew:[],said:m.said&&typeof m.said==='object'?m.said:{}});
+  for(const m of Array.isArray(d.missing)?d.missing:[]) if(m&&m.name&&m.at>0) S.missing.push({id:m.id,name:String(m.name),at:+m.at,knew:Array.isArray(m.knew)?m.knew:[],said:m.said&&typeof m.said==='object'?m.said:{}});
   for(const p of S.pets) S.nextNo=Math.max(S.nextNo,(p.no|0)+1);
   for(const g of S.graves) S.nextNo=Math.max(S.nextNo,(g.no|0)+1);
   return S;
@@ -533,7 +533,7 @@ function updateLoops(dt){
 const EV={};
 const world=new World({sfx:S,events:EV});
 world.missing=store.missing;   // 사라진 놈을 찾는 혼잣말 기록 (하루 동안)
-EV.missingSaid=()=>saveSoon(2);
+EV.memoryChanged=save;
 const PCTX={sfx:S};
 
 // ───────── 물결·물방울 ─────────
