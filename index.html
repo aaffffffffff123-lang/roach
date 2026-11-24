@@ -126,7 +126,7 @@ html #intro .box,html #mail .card,html #slimeDone .card,html #petName .card{marg
 
 <dialog id="petPlaque" aria-label="테라리움 표어">
   <button type="button" aria-label="표어 닫기" aria-describedby="petMotto"><span class="motto">
-    <span class="words" id="petMotto">누구나 바퀴벌레의 삶을 감당할 수 있다면<br>나는 결코 바퀴벌레를 선택하지 않았을 것이다.</span>
+    <span class="words" id="petMotto">누구나 바퀴벌레의 삶을 감당할 수 있다면<br>나는 결코 바퀴벌레로 태어나지 않았을 것이다.</span>
     <img width="2188" height="283" alt="">
   </span></button>
 </dialog>
@@ -237,7 +237,7 @@ const petPlaque=document.getElementById('petPlaque');
 if(PET_ON){
   const ink=petPlaque.querySelector('img');
   ink.addEventListener('load',()=>petPlaque.classList.add('ink'),{once:true});
-  ink.src='pet-plaque.webp';
+  ink.src='pet-plaque.webp?v=2';
 }
 const pet=PET_ON?createPetMode({
   gameFrame,
