@@ -34,7 +34,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   let env=null, wrapped=null;
   let cupMesh=null, cap=null, naming=null;
   let tankOpen=false, tankState='none', pendingEnter=false, pendingArrive=null, closeBusy=false, pausedBefore=false, namePaused=false;
-  let info=readStore(), hintShown=false, signDue=true, signTimer=0, lastPointer=null, press=null;
+  let info=readStore(), hintShown=false, signTimer=0, lastPointer=null, press=null;
   const TMP={};
 
   // ───────── 겉면: 테라리움 레이어 · 돌아가기 · 이름 카드 ─────────
@@ -99,18 +99,16 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   const tankApi=()=>{ try{ return frame.contentWindow?.Bamung||null; }catch(err){ return null; } };
   function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1'; }
   function enterTank(){
-    const L=tankApi(); if(!L) return;
+    const L=tankApi(); if(!L||!tankOpen||!pendingEnter) return;
     const a=pendingArrive; pendingArrive=null; pendingEnter=false;
-    let added=null;
-    try{ added=L.enter(a?{arrive:a}:{}); }catch(err){ console.error(err); }
-    if(added&&signDue){
-      clearTimeout(signTimer);
-      signTimer=setTimeout(()=>{
-        signTimer=0;
-        if(!tankOpen||!signDue) return;
-        if(onEnter?.(()=>{ if(tankOpen) L.resume(); })){ signDue=false; L.pause(); }
-      },2400);
+    try{ L.enter(a?{arrive:a}:{}); }catch(err){ console.error(err); return; }
+    function showEntrySign(){
+      signTimer=0;
+      if(!tankOpen) return;
+      if(isBlocked()){ signTimer=setTimeout(showEntrySign,250); return; }
+      if(onEnter?.(()=>{ if(tankOpen) L.resume(); })) L.pause();
     }
+    signTimer=setTimeout(showEntrySign,2400);
     info=readStore(); updateSlot();
   }
   function openTank(arrive=null){
