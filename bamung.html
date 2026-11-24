@@ -201,7 +201,7 @@ import { PROPS, PROP_CATS, makePoke, animatePoke } from './bamung-props.js';
 import { World, Pet, TANK, hasDeco } from './bamung-life.js?v=spacing1';
 import { BubbleView, layoutBubbles, drawBubbles, typeTime } from './talk-bubble.js';
 import { ALL_LINES } from './bamung-talk.js';
-import { speak } from './roach-voice.js';
+import { speak } from './roach-voice.js?v=voice1';
 
 // ══════════════════════════════════════════════════════════════════
 // 바멍 — 1라운드에서 「컵」으로 데려온 바퀴들이 사는 테라리움
@@ -470,11 +470,12 @@ buildSalon();
 // 소리 (전부 즉석에서 합성한다)
 // ══════════════════════════════════════════════════════════════════
 const SFX={ctx:null,out:null,nb:null,loops:{},stepAt:0,stepN:0,on:true,
-  ensure(){
+  ensure(resumeNow=false){
+    if(this.ctx?.state==='closed'){ this.ctx=null; this.loops={}; }
     if(!this.ctx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; try{ this.ctx=new C(); }catch(e){ return null; }
       this.out=this.ctx.createGain(); this.out.gain.value=0.9; this.out.connect(this.ctx.destination);
       const n=this.ctx.sampleRate*2, b=this.ctx.createBuffer(1,n,this.ctx.sampleRate), d=b.getChannelData(0); for(let i=0;i<n;i++) d[i]=Math.random()*2-1; this.nb=b; }
-    if(this.ctx.state==='suspended'&&this.on) this.ctx.resume().catch(()=>{});
+    if(this.on&&(resumeNow||this.ctx.state!=='running')) this.ctx.resume().catch(()=>{});
     return this.ctx;
   },
   ok(){ return this.ctx&&this.ctx.state==='running'&&this.on; },
@@ -491,7 +492,7 @@ const SFX={ctx:null,out:null,nb:null,loops:{},stepAt:0,stepN:0,on:true,
   setLoop(name,v,freq){ if(!this.ok()){ return; } const L=this.loop(name); if(!L) return; const c=this.ctx; if(Math.abs(L.v-v)>0.002||v===0){ L.g.gain.setTargetAtTime(v,c.currentTime,0.08); L.v=v; } if(freq) L.f.frequency.setTargetAtTime(freq,c.currentTime,0.1); },
   stopLoops(){ for(const k in this.loops){ const L=this.loops[k]; try{ L.g.gain.setTargetAtTime(0,this.ctx.currentTime,0.05); }catch(e){} L.v=0; } },
   suspend(){ this.stopLoops(); if(this.ctx&&this.ctx.state==='running') this.ctx.suspend().catch(()=>{}); },
-  resume(){ if(this.ctx&&this.on) this.ctx.resume().catch(()=>{}); },
+  resume(){ if(this.on) this.ensure(true); },
 };
 /** 카메라에서 멀수록 작게 */
 function near(pos){ if(!pos) return 1; return clamp(1.35-camera.position.distanceTo(pos)/Math.max(1,cam.fit*1.15),0.22,1); }
@@ -570,8 +571,25 @@ function updateFx(dt){
 }
 EV.splash=(p,at)=>splash(at);
 // 대화: 동물의 숲처럼 글자마다 「미미미」 하는 목소리 (바퀴마다 높낮이·빠르기가 다르다). 멀리 있으면 작게
+// 창을 여는 탭에서 오디오를 깨운다. 재개가 늦으면 지금 찍히는 음절부터 잇는다.
+function bubbleVoice(text,p,gain,elapsed){
+  const ctx=SFX.on&&SFX.ensure();
+  if(!ctx) return null;
+  let voice=null;
+  function start(){
+    if(!SFX.ok()||paused||document.hidden) return;
+    ctx.removeEventListener('statechange',start);
+    voice=speak(ctx,SFX.out,text,p.voice,{gain,elapsed:elapsed()});
+  }
+  ctx.addEventListener('statechange',start);
+  start();
+  return {stop(){ ctx.removeEventListener('statechange',start); voice?.stop(); }};
+}
 let talkVoice=null;
-EV.talkLine=(T,p)=>{ talkVoice?.stop(); talkVoice=null; if(!SFX.ok()) return; talkVoice=speak(SFX.ctx,SFX.out,T.lines[T.i],p.voice,{gain:0.13*near(p.pos)}); };
+EV.talkLine=(T,p)=>{
+  talkVoice?.stop();
+  talkVoice=bubbleVoice(T.lines[T.i],p,0.13*near(p.pos),()=>T.lineT);
+};
 EV.talkStop=()=>{ talkVoice?.stop(); talkVoice=null; };
 EV.talkDone=()=>{ saveSoon(1); };
 EV.ripple=(pos)=>{ ripple(pos.x,pos.y+0.004,pos.z,0.03,1.0); };
@@ -1484,12 +1502,12 @@ function updateDecoLine(dt){
     if(!text){ stopDecoLine(); return; }
     L.text=text; L.phase='talk'; L.t=0;
     world.rememberLine(text);
-    if(SFX.ok()) L.voice=speak(SFX.ctx,SFX.out,text,L.p.voice,{gain:0.13});
+    L.voice=bubbleVoice(text,L.p,0.13,()=>L.t);
     return;
   }
   L.t+=dt;
   if(L.phase==='talk'&&L.t>typeTime(L.text,L.p.voice?.speed||1)+2.6){ L.phase='fade'; L.fade=0; }
-  if(L.phase==='fade'){ L.fade=Math.min(1,L.fade+dt/0.5); if(L.fade>=1){ L.phase='none'; L.p=null; L.voice=null; } }
+  if(L.phase==='fade'){ L.fade=Math.min(1,L.fade+dt/0.5); if(L.fade>=1) stopDecoLine(); }
 }
 // 발톱·종아리 가시의 가장 낮은 점을 방석에 맞춘다. 더듬이를 손질하는 발은 들어 올릴 수 있다.
 const salonContact=new THREE.Vector3(), salonAxis=new THREE.Vector3();
@@ -1792,6 +1810,9 @@ function sleep(){
   return api;
 }
 let paused=false;
+for(const event of ['pointerup','keydown']){
+  window.addEventListener(event,()=>{ if(awake&&!paused&&!document.hidden&&!SFX.ok()) SFX.resume(); },{capture:true,passive:true});
+}
 function pause(){ if(!awake||paused) return api; paused=true; if(raf){ cancelAnimationFrame(raf); raf=0; } SFX.suspend(); return api; }
 function resume(){ if(!paused) return api; paused=false; if(awake){ last=0; SFX.resume(); if(!raf) raf=requestAnimationFrame(frame); } return api; }
 /** o.arrive={name}: 새로 데려온 놈을 넣는다 */

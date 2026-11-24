@@ -30,7 +30,7 @@ export function voiceOf(seed,size=1){
 
 /**
  * text를 한 글자씩 소리 낸다. ctx: AudioContext, dest: 이어 붙일 노드(소리 크기·압축은 그쪽이 맡는다)
- * o: {gain 전체 크기, when 시작 시각(ctx 시간, 없으면 바로)}
+ * o: {gain 전체 크기, when 시작 시각(ctx 시간, 없으면 바로), elapsed 이미 지나간 글자 시간(초)}
  * 돌려주는 값: {stop()} — 도중에 끊을 때 (말풍선 글자를 한 번에 다 띄울 때)
  */
 export function speak(ctx,dest,text,voice,o={}){
@@ -38,19 +38,22 @@ export function speak(ctx,dest,text,voice,o={}){
   try{ if(ctx.state==='suspended') ctx.resume().catch(()=>{}); }catch(e){}
   const V=voice||{pitch:480,formant:1.25,speed:1};
   const t0=Math.max(ctx.currentTime+0.01,o.when||0);
+  const elapsed=o.elapsed||0;
+  const steps=typeSteps(text,V.speed).steps.filter(s=>s.kind==='syl');
+  if(!steps.length||steps[steps.length-1].t+0.035<elapsed) return {end:t0,stop(){}};
   const out=ctx.createGain(); out.gain.value=o.gain??0.1; out.connect(dest);
   const srcs=[];
-  const steps=typeSteps(text,V.speed).steps.filter(s=>s.kind==='syl');
   const last=steps.length-1, ask=/\?\s*$/.test(String(text)), dur=0.072/V.speed;
   steps.forEach((st,k)=>{
+    if(st.t+0.035<elapsed) return;
     const S=sound(st.ch), F=VOWEL[S.v];
     // 억양: 살짝 오르내리다가, 끝에서 말하는 문장은 내려앉고 묻는 문장은 올라간다
     let pm=1+0.045*Math.sin(k*1.9+V.pitch*0.013)+(Math.random()-0.5)*0.05;
     if(S.v==='i') pm*=1.05; else if(S.v==='o'||S.v==='u') pm*=0.96;
     if(k===last) pm*=ask?1.2:0.9; else if(k===last-1&&ask) pm*=1.08;
-    blip(ctx,out,srcs,t0+st.t,dur*(S.coda?0.7:0.84),V.pitch*pm,F[0]*V.formant,F[1]*V.formant,S.on);
+    blip(ctx,out,srcs,t0+Math.max(0,st.t-elapsed),dur*(S.coda?0.7:0.84),V.pitch*pm,F[0]*V.formant,F[1]*V.formant,S.on);
   });
-  const end=t0+(steps.length?steps[last].t+dur:0);
+  const end=t0+Math.max(0,steps[last].t-elapsed)+dur;
   return {end,stop(){ const n=ctx.currentTime; try{ out.gain.cancelScheduledValues(n); out.gain.setValueAtTime(out.gain.value,n); out.gain.linearRampToValueAtTime(0,n+0.03); }catch(e){} for(const s of srcs){ try{ s.stop(n+0.04); }catch(e){} } }};
 }
 
