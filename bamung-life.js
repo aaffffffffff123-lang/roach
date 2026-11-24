@@ -23,7 +23,35 @@ const pick=a=>a[Math.floor(Math.random()*a.length)];
 export const TANK={hw:0.46,hd:0.78,h:0.72,band:0.58};   // 안쪽 반폭·반깊이·높이, 바셀린 띠 높이(이 위로는 못 올라감)
 const PR=0.036;          // 바퀴 몸 반지름 (부딪힘 판정)
 const WALL=0.05;         // 유리 벽에서 몸 가운데까지: 다리가 유리를 뚫고 나가 보이지 않게
+// 등껍질을 감싸는 캡슐. 다리와 더듬이 끝은 스칠 수 있다.
+const BODY_SPINE=ROACH_L*0.37, BODY_RADIUS=ROACH_L*0.32;
+const talkDistance=(a,b)=>ROACH_L*0.83*(a.m.size+b.m.size);
+const onFloor=p=>p.mode==='floor'&&!p.away&&!p.buried&&!p.hidden&&p.act?.type!=='drop';
 const DAY=86400000;
+
+// 중심을 잇는 축과 두 몸의 옆축으로 간격을 검사한다. 가장 적게 옮겨도
+// 두 껍질을 분리할 수 있는 방향을 택해, 나란히 걷는 바퀴 사이로도 지나갈 수 있다.
+function bodyContact(a,b,dx,dz,out){
+  const size=a.m.size+b.m.size, reach=(BODY_SPINE+BODY_RADIUS)*size;
+  const d2=dx*dx+dz*dz;
+  if(d2>=reach*reach) return false;
+  const d=Math.sqrt(d2);
+  let depth=Infinity, nx=1, nz=0;
+  for(let axis=0;axis<3;axis++){
+    let x,z;
+    if(axis===0){ if(d<1e-7) continue; x=dx/d; z=dz/d; }
+    else { const p=axis===1?a:b; x=p.bodyCos; z=-p.bodySin; }
+    const projection=dx*x+dz*z;
+    const span=BODY_RADIUS*size+BODY_SPINE*(
+      a.m.size*Math.abs(a.bodySin*x+a.bodyCos*z)+b.m.size*Math.abs(b.bodySin*x+b.bodyCos*z));
+    const overlap=span-Math.abs(projection);
+    if(overlap<=0) return false;
+    if(overlap<depth){ const side=projection<0?-1:1; depth=overlap; nx=side*x; nz=side*z; }
+  }
+  out.depth=depth; out.nx=nx; out.nz=nz;
+  return true;
+}
+const contact={depth:0,nx:0,nz:0};
 // 한마디가 떠 있다가 다음 말이 나올 때까지: 글자가 다 찍히는(목소리가 나는) 동안 + 읽을 틈
 const readingPause=text=>Math.min(3,1.25+0.05*text.replace(/\s/g,'').length);
 /** 꾸민 게 하나라도 있나 */
@@ -98,7 +126,7 @@ export class World{
     const c=Math.cos(prop.rot), s=Math.sin(prop.rot), dx=x-prop.x, dz=z-prop.z; const lx=dx*c-dz*s, lz=dx*s+dz*c;
     let best=null;
     for(const f of prop.foot){
-      if(f.r!==undefined){ const ex=lx-f.x, ez=lz-f.z, d=Math.hypot(ex,ez), R=f.r+inf; if(d<R){ const k=d>1e-6?1/d:0; const o={nx:ex*k||1,nz:ez*k,pen:R-d}; if(!best||o.pen<best.pen) best=o; } }
+      if(f.r!==undefined){ const ex=lx-f.x, ez=lz-f.z, d=Math.hypot(ex,ez), R=f.r+inf; if(d<R){ const k=d>1e-6?1/d:0; const o={nx:k?ex*k:1,nz:ez*k,pen:R-d}; if(!best||o.pen<best.pen) best=o; } }
       else { const ex=lx-f.x, ez=lz-f.z, ax=f.hw+inf-Math.abs(ex), az=f.hd+inf-Math.abs(ez); if(ax>0&&az>0){ const o=ax<az?{nx:Math.sign(ex)||1,nz:0,pen:ax}:{nx:0,nz:Math.sign(ez)||1,pen:az}; if(!best||o.pen<best.pen) best=o; } }
     }
     if(!best) return null;
@@ -111,7 +139,7 @@ export class World{
     if(x<-TANK.hw+m){ x=-TANK.hw+m; hit={nx:1,nz:0}; } if(x>TANK.hw-m){ x=TANK.hw-m; hit={nx:-1,nz:0}; }
     if(z<-TANK.hd+m){ z=-TANK.hd+m; hit={nx:0,nz:1}; } if(z>TANK.hd-m){ z=TANK.hd-m; hit={nx:0,nz:-1}; }
     for(let it=0;it<2;it++) for(const p of this.props){ if(pet&&pet.ignore===p) continue; const o=this.inFoot(p,x,z,PR*0.6); if(o){ x+=o.nx*o.pen; z+=o.nz*o.pen; hit=o; } }
-    return {x,z,hit};
+    return {x:clamp(x,-TANK.hw+m,TANK.hw-m),z:clamp(z,-TANK.hd+m,TANK.hd-m),hit};
   }
   freeAt(x,z,r=PR){ const wm=Math.max(r,WALL); if(Math.abs(x)>TANK.hw-wm||Math.abs(z)>TANK.hd-wm) return false; return this.propFree(x,z,r); }
   /** 소품만 본다 (유리 벽 바로 앞 자리를 볼 때) */
@@ -120,6 +148,69 @@ export class World{
     for(let i=0;i<tries;i++){ let x,z; if(nearWall){ const side=Math.floor(rand(4)); const t=rand(-1,1); const m=WALL+0.004; x=side<2?(side?TANK.hw-m:-TANK.hw+m):t*(TANK.hw-m); z=side<2?t*(TANK.hd-m):(side===2?TANK.hd-m:-TANK.hd+m); } else { x=rand(-TANK.hw+0.06,TANK.hw-0.06); z=rand(-TANK.hd+0.06,TANK.hd-0.06); }
       if(this.freeAt(x,z,PR+0.01)) return {x,z}; }
     return {x:rand(-0.3,0.3),z:rand(-0.2,0.2)};
+  }
+  // 저장된 자리나 착지할 자리가 차 있으면 가장 가까운 빈 바닥부터 찾는다.
+  placeOnFloor(p,maxRadius=1.7){
+    const origin=this.resolve(p.x,p.z,p);
+    const free=(x,z)=>this.freeAt(x,z,PR*0.6)&&!this.pets.some(o=>o!==p&&(onFloor(o)||o.act?.type==='drop')&&bodyContact(p,o,o.x-x,o.z-z,contact));
+    if(free(origin.x,origin.z)) return origin;
+    for(let r=0.012;r<=maxRadius;r+=Math.min(r,0.032)){
+      const count=Math.max(8,Math.ceil(r*170));
+      for(let i=0;i<count;i++){
+        const h=p.h+i*TAU/count, x=origin.x+r*Math.sin(h), z=origin.z+r*Math.cos(h);
+        if(free(x,z)) return {x,z};
+      }
+    }
+    return null;
+  }
+  // 빈틈이 없는 골목으로 새로 들어가거나, 제자리 회전으로 옆 몸을 가르지 않는다.
+  // 회전과 전진 중 가능한 쪽만 허용하면 먼저 서 있던 개체도 떠밀리지 않는다.
+  fitFloorStep(p,oldX,oldZ,oldH){
+    p.bodySin=Math.sin(p.h); p.bodyCos=Math.cos(p.h);
+    const fits=(x,z)=>!this.pets.some(o=>o!==p&&onFloor(o)&&bodyContact(p,o,o.x-x,o.z-z,contact)&&contact.depth>0.009);
+    if(fits(p.x,p.z)) return;
+    if(fits(oldX,oldZ)){ p.x=oldX; p.z=oldZ; }
+    else {
+      p.h=oldH; p.bodySin=Math.sin(oldH); p.bodyCos=Math.cos(oldH);
+      if(!fits(p.x,p.z)){ p.x=oldX; p.z=oldZ; }
+    }
+    p.floorPose();
+  }
+  separateFloorPets(){
+    const floor=this.pets.filter(onFloor);
+    if(floor.length<2) return;
+    for(const p of floor){ p.bodySin=Math.sin(p.h); p.bodyCos=Math.cos(p.h); }
+    for(let pass=0;pass<5;pass++){
+      let moved=false;
+      for(let i=0;i<floor.length;i++) for(let j=i+1;j<floor.length;j++){
+        const a=floor[i], b=floor[j];
+        if(!bodyContact(a,b,b.x-a.x,b.z-a.z,contact)||contact.depth<0.0002) continue;
+        const {nx,nz,depth}=contact;
+        // 다가오는 놈이 주로 비킨다. 벽에 막힌 쪽의 몫은 반대쪽에 넘긴다.
+        const wa=a.floorMobility(), wb=b.floorMobility();
+        if(wa+wb===0) continue;
+        const want=depth*wa/(wa+wb);
+        const left=a.shiftFloor(-nx,-nz,want);
+        const right=b.shiftFloor(nx,nz,depth-left);
+        if(wa&&depth-left-right>0.0002) a.shiftFloor(-nx,-nz,depth-left-right);
+        moved=true;
+      }
+      if(!moved) return;
+    }
+    // 벽·소품 사이에서 양쪽 모두 막혔을 때만, 가까운 빈 옆자리로 빠져나온다.
+    for(let i=0;i<floor.length;i++) for(let j=i+1;j<floor.length;j++){
+      const a=floor[i], b=floor[j];
+      if(!bodyContact(a,b,b.x-a.x,b.z-a.z,contact)||contact.depth<0.003) continue;
+      const first=a.floorMobility()>=b.floorMobility()?a:b;
+      for(const p of [first,first===a?b:a]){
+        if(p.dead) continue;
+        const spot=this.placeOnFloor(p,0.16);
+        if(!spot) continue;
+        p.x=p.tPos.x=spot.x; p.z=p.tPos.z=spot.z;
+        if(p.act.type==='walk'||p.act.type==='queue') p.goWander();
+        break;
+      }
+    }
   }
   /** 바람(선풍기)과 불빛(스탠드) */
   windAt(x,z){ let wx=0,wz=0,k=0; for(const p of this.props){ const f=p.field?.(); if(!f||f.type!=='wind') continue; const o=this.lp(p,f.x,0,f.z), h=this.lh(p,f.h); const dx=x-o.x, dz=z-o.z, d=Math.hypot(dx,dz); if(d>f.range||d<1e-4) continue; const a=Math.abs(wrap(Math.atan2(dx,dz)-h)); if(a>f.cone) continue; const s=f.k*(1-d/f.range)*(1-a/f.cone*0.6); wx+=Math.sin(h)*s; wz+=Math.cos(h)*s; k=Math.max(k,s); } return {wx,wz,k}; }
@@ -201,19 +292,19 @@ export class World{
     const lines=this.bagPick(c.pool,now);
     return {pool:c.pool,a:c.a,b:c.b,lines};
   }
-  /** 대화를 건다. 먼저 말하는 놈(a)이 walk면 상대 앞까지 걸어간다. pk를 주면 그 말로 한다 */
+  /** 둘이 적당한 거리에 마주 선 뒤 첫 대사를 시작한다. */
   startTalk(p,q,walk=false,pk=null){
     if(this.talk) this.endTalk();
     pk=pk||this.pickFor(p,q); if(!pk||!pk.lines.length) return false;
     const {a,b,lines,pool}=pk;
-    const T={id:++this.talkSeq,a,b,lines,pool,i:-1,lineT:0,next:walk?0:0.6,phase:walk?'approach':'talk',fade:0,t:0,over:false,done:false,cut:false};
+    const T={id:++this.talkSeq,a,b,lines,pool,i:-1,lineT:0,next:walk?0.45:0.6,phase:'approach',fade:0,t:0,over:false,done:false,cut:false};
     this.talk=T; this.talkCD=rand(15,30); a.stuck=0; b.stuck=0;
-    a.setAct({type:'talk',talk:T,other:b,role:'a',walk});
-    b.setAct({type:'talk',talk:T,other:a,role:'b',walk:false});
+    a.setAct({type:'talk',talk:T,other:b,role:'a'});
+    b.setAct({type:'talk',talk:T,other:a,role:'b'});
     return true;
   }
   /** 걷다가 마주친 둘: 지난 대화에서 조금 지났으면 가끔 그대로 말을 건다 */
-  meetTalk(p,q){ if(this.talk||!this.talkOn||this.talkCD>8||Math.random()<0.4) return false; if(!this.canTalk(p)||!this.canTalk(q)) return false; return this.startTalk(p,q,false); }
+  meetTalk(p,q){ if(this.talk||!this.talkOn||this.talkCD>8||Math.random()<0.4) return false; if(!this.canTalk(p)||!this.canTalk(q)) return false; return this.startTalk(p,q); }
   /** 끝까지 다 한 대화의 효과: 인사를 했다, 위로를 들었다, 꾸밈 대사를 한 번 했다 */
   talkDone(T){
     const ra=T.a.rec, rb=T.b?.rec;
@@ -237,7 +328,7 @@ export class World{
       let q=null, d=1e9; for(const o of this.pets){ if(o===n||!this.canTalk(o)) continue; const e=Math.hypot(o.x-n.x,o.z-n.z); if(e<d){ d=e; q=o; } }
       if(!q) continue;
       const lines=this.bagPick('greet'); if(!lines.length) return false;
-      return this.startTalk(n,q,d>0.15,{pool:'greet',a:n,b:q,lines});
+      return this.startTalk(n,q,d>talkDistance(n,q),{pool:'greet',a:n,b:q,lines});
     }
     return false;
   }
@@ -293,12 +384,18 @@ export class World{
       const alone=this.pets.filter(p=>!p.dead&&!p.away);
       if(alone.length===1){ const p=alone[0]; if(L.includes(p)) this.startSolo(p,this.bagPick(moodOf(p)===0?'soloBlue':'soloBright')[0],'solo'); else this.nudgeHider(); return; }
       if(L.length<2){ this.nudgeHider(); return; }
-      // 가장 가까운 둘 (멀면 말 거는 놈이 걸어간다)
-      let p=null, q=null, d=1e9;
-      for(let i=0;i<L.length;i++) for(let j=i+1;j<L.length;j++){ const e=Math.hypot(L[i].x-L[j].x,L[i].z-L[j].z)*(0.85+Math.random()*0.3); if(e<d){ d=e; p=L[i]; q=L[j]; } }
-      if(!q||d>1.25){ this.nudgeHider(); return; }
+      // 몸을 돌릴 여유가 있고 대화 간격에 가까운 짝을 먼저 고른다.
+      let p=null,q=null,d=Infinity,best=Infinity;
+      for(let i=0;i<L.length;i++) for(let j=i+1;j<L.length;j++){
+        const a=L[i],b=L[j],e=Math.hypot(a.x-b.x,a.z-b.z);
+        if(e>1.25) continue;
+        const score=Math.abs(e-talkDistance(a,b))*(0.85+Math.random()*0.3);
+        if(score>=best||!this.propFree((a.x+b.x)/2,(a.z+b.z)/2,0.009)) continue;
+        best=score; d=e; p=a; q=b;
+      }
+      if(!q){ this.nudgeHider(); return; }
       const pk=this.pickFor(p,q); if(!pk) return;
-      this.startTalk(pk.a,pk.b,d>0.15,pk);
+      this.startTalk(pk.a,pk.b,d>talkDistance(pk.a,pk.b),pk);
       return;
     }
     // 끊긴 대화: 말풍선은 멈춘 글자 그대로 잠깐 떠 있다가 사라진다
@@ -306,7 +403,13 @@ export class World{
     const live=x=>x.act?.type==='talk'&&x.act.talk===T&&!x.dead&&!x.away;
     if(!on||!live(T.a)||(T.b&&!live(T.b))){ this.endTalk(); return; }
     T.t+=dt;
-    if(T.phase==='approach'){ if(T.a.act.arrived){ T.phase='talk'; T.next=0.45; } else if(T.t>13/Math.max(0.45,T.a.slowK)) this.endTalk(); return; }   // 늙어 느린 놈은 더 기다린다
+    if(T.phase==='approach'){
+      const a=T.a,b=T.b,dx=b.x-a.x,dz=b.z-a.z,d=Math.hypot(dx,dz),h=Math.atan2(dx,dz);
+      if(Math.abs(d-talkDistance(a,b))<0.016&&Math.cos(a.h-h)>0.96&&Math.cos(b.h-h)<-0.96&&this.propFree((a.x+b.x)/2,(a.z+b.z)/2,0.009)){
+        T.phase='talk';
+      } else if(T.t>13/Math.max(0.45,a.slowK)) this.endTalk();
+      return;
+    }
     T.lineT+=dt; T.next-=dt;
     if(T.missing&&T.i>=0&&!T.heard&&T.lineT>=T.typeEnd){
       T.heard=true;
@@ -339,7 +442,7 @@ export class Pet{
     this.voice=voiceOf(rec.id,rec.size||1);   // 대화할 때 목소리 (바퀴마다 늘 같다)
     applyDeco(this.m,rec.deco);
     const p=world.randomFree(40,Math.random()<0.6); this.x=rec.x??p.x; this.z=rec.z??p.z; this.h=rec.h??rand(TAU);
-    this.mode='floor'; this.ignore=null;
+    this.mode='floor'; this.ignore=null; this.bodySin=Math.sin(this.h); this.bodyCos=Math.cos(this.h);
     this.pos=new THREE.Vector3(this.x,0,this.z); this.quat=new THREE.Quaternion().setFromAxisAngle(_up,this.h);
     this.tPos=this.pos.clone(); this.tQuat=this.quat.clone(); this.snap=true;
     this.T={}; this.act=null; this.hunger=rand(0.2,0.8); this.thirst=rand(0.2,0.8); this.speed=0;
@@ -396,7 +499,7 @@ export class Pet{
     // 벽이나 다른 놈 옆에 붙어 쉬는 걸 좋아한다
     let spot=null;
     const buddies=W.pets.filter(p=>p!==this&&!p.dead&&p.mode==='floor'&&p.act?.type==='rest');
-    if(buddies.length&&Math.random()<0.45){ const b=pick(buddies); const a=rand(TAU); const x=b.x+Math.sin(a)*0.075, z=b.z+Math.cos(a)*0.075; if(W.freeAt(x,z)) spot={x,z}; }
+    if(buddies.length&&Math.random()<0.45){ const b=pick(buddies); const a=rand(TAU); const gap=talkDistance(this,b)*0.85; const x=b.x+Math.sin(a)*gap, z=b.z+Math.cos(a)*gap; if(W.freeAt(x,z)) spot={x,z}; }
     if(!spot&&Math.random()<0.6) spot=W.randomFree(20,true);
     if(spot) this.setAct({type:'walk',tx:spot.x,tz:spot.z,spd:rand(0.08,0.15),then:()=>this.setAct({type:'rest',dur:rand(6,22)*(1+this.age01)})});
     else this.setAct({type:'rest',dur:rand(6,20)});
@@ -447,8 +550,10 @@ export class Pet{
       this.hunger=Math.min(1.2,this.hunger+dt/240); this.thirst=Math.min(1.2,this.thirst+dt/200);
       if(this.inspectT>0){ this.inspectT-=dt; }
     }
+    const ground=onFloor(this),oldX=this.x,oldZ=this.z,oldH=this.h;
     a.t+=dt;
     const fn=this['act_'+a.type]; if(fn) fn.call(this,dt,a,T); else this.chooseNext();
+    if(ground&&onFloor(this)&&(this.x!==oldX||this.z!==oldZ||this.h!==oldH)) W.fitFloorStep(this,oldX,oldZ,oldH);
     // 눌렀을 때: 하던 걸 멈추고 더듬이를 들어 사람 쪽을 본다
     if(this.lookT>0&&!this.dead){ this.lookT-=dt; if(this.mode==='floor'&&(a.type==='rest'||a.type==='groom'||a.type==='feed'||a.type==='meet'||a.type==='investigate')){ T.aim=1; T.groom=0; T.legGroom=0; this.m.aimDir.copy(this.lookDir); } }
     // 꾸민 것 신경 쓰기: 한동안 더듬이로 등을 더듬는다
@@ -460,9 +565,14 @@ export class Pet{
     if(this.hatGrace>0) this.hatGrace-=dt;
     if(this.m.hat&&this.speed>0.42&&!(this.hatGrace>0)){ this.runFast+=dt; if(this.runFast>1.2&&Math.random()<dt*1.5){ this.runFast=0; W.events.hatFall?.(this); } } else this.runFast=Math.max(0,this.runFast-dt);
     this.m.animate(dt,T);
-    // 표시 위치: 목표로 부드럽게 따라간다 (탈것에 붙어 있을 땐 바로)
-    if(this.snap){ this.pos.copy(this.tPos); this.quat.copy(this.tQuat); this.snap=false; }
-    else { const k=this.mode==='attach'?1:1-Math.exp(-22*dt), kq=this.mode==='attach'?1:1-Math.exp(-16*dt); this.pos.lerp(this.tPos,k); this.quat.slerp(this.tQuat,kq); }
+  }
+  syncPose(dt){
+    // 바닥에서는 충돌을 푼 위치·방향을 그대로 그린다. 길과 공중에서는 포즈를 부드럽게 잇는다.
+    if(this.snap||this.mode==='floor'||this.mode==='attach'){
+      this.pos.copy(this.tPos); this.quat.copy(this.tQuat); this.snap=false;
+    } else {
+      this.pos.lerp(this.tPos,1-Math.exp(-22*dt)); this.quat.slerp(this.tQuat,1-Math.exp(-16*dt));
+    }
     this.m.g.position.copy(this.pos); this.m.g.quaternion.copy(this.quat);
   }
   /** 쓰던 소품이 사라졌다: 바닥으로 내려와(높은 데 있었으면 떨어져) 도망간다 */
@@ -480,19 +590,38 @@ export class Pet{
   startFlee(ax,az,dur){ const h=Math.atan2(this.x-ax,this.z-az)+rand(-0.5,0.5); this.setAct({type:'flee',h,dur}); }
   // 바닥 자세
   floorPose(){ this.tPos.set(this.x,0,this.z); this.tQuat.setFromAxisAngle(_up,this.h); this.mode='floor'; }
+  floorMobility(){
+    if(this.dead) return 0;
+    if(this.act.type==='walk'||this.act.type==='flee'||this.act.type==='queue') return 1;
+    return this.act.type==='talk'||this.act.type==='feed'?0.08:0.25;
+  }
+  shiftFloor(nx,nz,amount){
+    if(amount<=0||this.dead) return 0;
+    const r=this.world.resolve(this.x+nx*amount,this.z+nz*amount,this);
+    const dx=r.x-this.x,dz=r.z-this.z;
+    this.x=this.tPos.x=r.x; this.z=this.tPos.z=r.z;
+    return clamp(dx*nx+dz*nz,0,amount);
+  }
   /** 바닥에서 (tx,tz) 쪽으로 한 걸음. 막히면 벽을 따라 미끄러진다. 남은 거리를 돌려준다 */
   stepFloor(dt,tx,tz,spd,T){
     const dx=tx-this.x, dz=tz-this.z, d=Math.hypot(dx,dz);
     if(d<0.004){ this.speed=damp(this.speed,0,10,dt); this.floorPose(); return d; }
-    const want=Math.atan2(dx,dz); const diff=wrap(want-this.h);
+    // 앞을 가로막은 이웃의 옆으로 방향을 튼다. 서로 정면이면 각자 오른쪽으로 비킨다.
+    const fx=dx/d,fz=dz/d;
+    let steer=0, nearest=0.23;
+    for(const o of this.world.pets){
+      if(o===this||o===this.act.other||!onFloor(o)) continue;
+      const ex=o.x-this.x,ez=o.z-this.z,along=ex*fx+ez*fz,side=ex*fz-ez*fx;
+      if(along<=0||along>=nearest||along>d+0.035||Math.abs(side)>0.105) continue;
+      nearest=along; steer=(side>0.008?-1:1)*(1-along/0.23)*(1-Math.abs(side)/0.105)*1.6;
+    }
+    const want=Math.atan2(dx,dz)+steer; const diff=wrap(want-this.h);
     const turn=(4+spd*10)*dt; this.h+=clamp(diff,-turn,turn);
     const align=Math.cos(diff); const v=Math.min(spd*clamp(align,0.15,1)*this.slowK,d/Math.max(dt,1e-4));
     this.speed=damp(this.speed,v,12,dt);
     let nx=this.x+Math.sin(this.h)*this.speed*dt, nz=this.z+Math.cos(this.h)*this.speed*dt;
     // 죽은 놈 근처는 피해 간다
     for(const c of this.world.corpses()){ if(c===this) continue; const ex=nx-c.x, ez=nz-c.z, e=Math.hypot(ex,ez); if(e<0.13&&e>1e-4){ nx+=ex/e*(0.13-e)*0.5; nz+=ez/e*(0.13-e)*0.5; } }
-    // 다른 놈과 겹치지 않게 살짝 밀기
-    for(const o of this.world.pets){ if(o===this||o.mode!=='floor'||o.dead) continue; const ex=nx-o.x, ez=nz-o.z, e=Math.hypot(ex,ez); if(e<0.06&&e>1e-4){ const k=(0.06-e)*0.5; nx+=ex/e*k; nz+=ez/e*k; } }
     const r=this.world.resolve(nx,nz,this);
     if(r.hit){ // 벽에 닿으면 벽을 따라 돌아 나간다
       const tan=Math.atan2(-r.hit.nz,r.hit.nx); const t1=tan, t2=tan+PI; const pickT=Math.abs(wrap(t1-want))<Math.abs(wrap(t2-want))?t1:t2; this.h+=clamp(wrap(pickT-this.h),-turn*1.5,turn*1.5); this.stuck=(this.stuck||0)+dt; }
@@ -517,15 +646,18 @@ export class Pet{
     if(a.pause&&!a.pauseAt) a.pauseAt=rand(1,3);
     if(a.pause&&a.t>a.pauseAt&&a.t<a.pauseAt+0.8){ this.speed=0; T.crouch=0.3; this.floorPose(); return; }
     const d=this.stepFloor(dt,a.tx,a.tz,a.spd,T);
-    this.checkMeet(a);
+    this.checkMeet(a,dt);
+    if(this.act!==a) return;
+    if(a.best===undefined||d<a.best-0.012){ a.best=d; a.progressAt=a.t; }
+    else if(d>0.03&&a.t-a.progressAt>2.5){ this.goWander(); return; }
     if(d<0.012||(this.stuck>1.4)){
       if(this.stuck>1.4&&d>0.03){ this.stuck=0; if(a.slot&&a.keepSlot){ a.slot.busy=null; a.slot=null; } this.goWander(); return; }
       if(a.face!==undefined){ const diff=wrap(a.face-this.h); this.h+=clamp(diff,-6*dt,6*dt); this.floorPose(); if(Math.abs(diff)>0.08) return; }
       const then=a.then; if(a.keepSlot) a.slot=null; then?then():this.chooseNext(); }
   }
-  checkMeet(a){
-    if(a.slot||this.meetCD>0){ this.meetCD-=1/60; return; }
-    for(const o of this.world.pets){ if(o===this||o.dead||o.mode!=='floor'||o.act?.type!=='walk'||o.act.slot) continue; const d=Math.hypot(o.x-this.x,o.z-this.z); if(d<0.13&&d>0.04){ const face=Math.cos(wrap(Math.atan2(o.x-this.x,o.z-this.z)-this.h)); if(face>0.6&&Math.random()<0.5){ if(this.world.meetTalk(this,o)) return; this.meetCD=rand(6,14); o.meetCD=rand(6,14); this.setAct({type:'meet',other:o,dur:rand(1.2,2.6)}); o.setAct({type:'meet',other:this,dur:rand(1.2,2.6)}); return; } } }
+  checkMeet(a,dt){
+    if(a.slot||this.meetCD>0){ this.meetCD-=dt; return; }
+    for(const o of this.world.pets){ if(o===this||o.dead||o.mode!=='floor'||o.act?.type!=='walk'||o.act.slot) continue; const d=Math.hypot(o.x-this.x,o.z-this.z); if(d<talkDistance(this,o)+0.015&&d>0.04){ const face=Math.cos(wrap(Math.atan2(o.x-this.x,o.z-this.z)-this.h)); if(face>0.6&&Math.random()<0.5){ if(this.world.meetTalk(this,o)) return; this.meetCD=rand(6,14); o.meetCD=rand(6,14); this.setAct({type:'meet',other:o,dur:rand(1.2,2.6)}); o.setAct({type:'meet',other:this,dur:rand(1.2,2.6)}); return; } } }
   }
   act_meet(dt,a,T){ const o=a.other; this.speed=0; const want=Math.atan2(o.x-this.x,o.z-this.z); this.h+=clamp(wrap(want-this.h),-5*dt,5*dt); this.floorPose();
     T.aim=1; const inv=_q.copy(this.quat).invert(); this.m.aimDir.set(o.x-this.x,0.02,o.z-this.z).normalize().applyQuaternion(inv);
@@ -534,11 +666,17 @@ export class Pet{
   act_talk(dt,a,T){
     const Tk=a.talk, o=a.other;
     if(!Tk||Tk.over||(!o&&!Tk.solo)){ this.chooseNext(); return; }
-    if(a.walk&&!a.arrived&&o){
-      const dx=this.x-o.x, dz=this.z-o.z, d=Math.hypot(dx,dz)||1;
-      const left=this.stepFloor(dt,o.x+dx/d*0.1,o.z+dz/d*0.1,0.16,T);
-      if(left<0.014||d<0.115||this.stuck>1.2){ a.arrived=true; this.stuck=0; }
-      return;
+    if(o&&!Tk.cut){
+      const dx=this.x-o.x, dz=this.z-o.z, d=Math.hypot(dx,dz), gap=talkDistance(this,o);
+      const nx=d>1e-7?dx/d:Math.sin(this.h), nz=d>1e-7?dz/d:Math.cos(this.h);
+      if(d<gap-0.005){
+        const back=Math.min((gap-d)*0.55,0.15*dt);
+        const r=this.world.resolve(this.x+nx*back,this.z+nz*back,this);
+        this.x=r.x; this.z=r.z; T.back=1; T.speed=0.28;
+      } else if(d>gap+0.010&&a.role==='a'){
+        this.stepFloor(dt,o.x+nx*gap,o.z+nz*gap,0.16,T);
+        return;
+      }
     }
     this.speed=damp(this.speed,0,10,dt);
     if(o){ const want=Math.atan2(o.x-this.x,o.z-this.z); this.h+=clamp(wrap(want-this.h),-4*dt,4*dt); }
@@ -629,7 +767,8 @@ export class Pet{
   act_queue(dt,a,T){
     const W=this.world, s=a.slot, p=s.prop; s.cabinBusy=s.cabinBusy||new Set();
     const idx=s.queue.indexOf(this); if(idx<0){ this.chooseNext(); return; }
-    const b=W.lp(p,s.board.x,0,s.board.z+idx*0.1+0.0), h=W.lh(p,s.board.h);
+    const b=W.lp(p,s.board.x,0,s.board.z+idx*ROACH_L*1.55), h=W.lh(p,s.board.h);
+    if(idx>0&&!W.freeAt(b.x,b.z,PR)){ this.goWander(); return; }
     const d=this.stepFloor(dt,b.x,b.z,0.13,T);
     if(d<0.015){ this.speed=0; const diff=wrap(h-this.h); this.h+=clamp(diff,-5*dt,5*dt); this.floorPose(); T.crouch=0.4;
       T.aim=1; this.m.aimDir.set(0,0.6,1).normalize();

@@ -198,7 +198,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { applyDeco, worldHitToBody, ROACH_L, POLISH_COLORS, POLISH_STYLES, STICKERS, stickerCanvas, GEMS, HAT_COLORS, hatMesh, bowMesh } from './bamung-roach.js';
 import { PROPS, PROP_CATS, makePoke, animatePoke } from './bamung-props.js';
-import { World, Pet, TANK, hasDeco } from './bamung-life.js?v=landing1';
+import { World, Pet, TANK, hasDeco } from './bamung-life.js?v=spacing1';
 import { BubbleView, layoutBubbles, drawBubbles, typeTime } from './talk-bubble.js';
 import { ALL_LINES } from './bamung-talk.js';
 import { speak } from './roach-voice.js';
@@ -760,8 +760,9 @@ function clipToTank(p,on){ const want=on?GLASS_CLIP:null;
   p.m.g.traverse(o=>{ if(!o.isMesh) return; for(const m of Array.isArray(o.material)?o.material:[o.material]){ if(!m||m.clippingPlanes===want) continue; m.clippingPlanes=want; m.clipShadows=!!on; m.needsUpdate=true; } }); }
 function spawnPet(rec){
   const p=new Pet(rec,world); clipToTank(p,true);
-  const r=world.resolve(p.x,p.z,null); p.x=r.x; p.z=r.z;
-  if(!p.dead) p.floorPose();
+  const r=world.placeOnFloor(p)||world.resolve(p.x,p.z,p); p.x=r.x; p.z=r.z;
+  if(p.dead) p.act_dead(0,p.act,p.T); else p.floorPose();
+  p.syncPose(0);
   p.snap=true; p.labelT=0; p.away=false;
   petRoot.add(p.m.g); world.pets.push(p);
   if(!limbShadows) for(const lg of p.m.legs){ lg.fem.children[0].castShadow=false; lg.knee.children[0].castShadow=false; }
@@ -1727,6 +1728,8 @@ function step(dt){
   try{ updateTweezer(dt); }catch(e){ console.error(e); cancelGrab(); }   // 집힌 놈의 자리를 먼저 정한다
   for(const p of world.pets){ if(p.away) continue; try{ p.update(dt); }catch(e){ console.error(e); p.snap=true; try{ p.setAct({type:'rest',dur:3}); p.floorPose(); }catch(_){} } }
   pushOut();
+  world.separateFloorPets();
+  for(const p of world.pets) if(!p.away) p.syncPose(dt);
   world.updateTalk(dt,talkMode());
   updateDecoLine(dt);
   for(const p of world.pets) if(p.labelT>0) p.labelT=Math.max(0,p.labelT-dt);

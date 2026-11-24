@@ -97,7 +97,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   function tell(msg){ try{ frame.contentWindow?.postMessage(msg,location.origin); }catch(err){} }
 
   const tankApi=()=>{ try{ return frame.contentWindow?.Bamung||null; }catch(err){ return null; } };
-  function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1&v=landing1'; }
+  function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1&v=spacing1'; }
   function enterTank(){
     const L=tankApi(); if(!L||!tankOpen||!pendingEnter) return;
     const a=pendingArrive; pendingArrive=null; pendingEnter=false;
