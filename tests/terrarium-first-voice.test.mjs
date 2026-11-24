@@ -40,7 +40,7 @@ function tankSession() {
   const scope = {
     window: { AudioContext: Audio, addEventListener: noop }, document: { hidden: false },
     EV: {}, frame: noop, requestAnimationFrame: () => 1, cancelAnimationFrame: noop,
-    wakeUi: noop, resize: noop, camAway: () => true, checkAges: noop, refreshHud: noop,
+    refreshResidents: noop, wakeUi: noop, resize: noop, camAway: () => true, checkAges: noop, refreshHud: noop,
     stopFollow: noop, holdScreen: noop, arrive: () => ({id:'p',rec:{no:1},name:'첫째'}),
     mailOpen: false, petPlaque: plaque, playPetDrums: noop, performance, near: () => 1,
     speak(ctx, out, text, voice, opts) {

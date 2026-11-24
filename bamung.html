@@ -198,9 +198,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { applyDeco, worldHitToBody, ROACH_L, POLISH_COLORS, POLISH_STYLES, STICKERS, stickerCanvas, GEMS, HAT_COLORS, hatMesh, bowMesh } from './bamung-roach.js';
 import { PROPS, PROP_CATS, makePoke, animatePoke } from './bamung-props.js';
-import { World, Pet, TANK, hasDeco } from './bamung-life.js?v=spacing1';
+import { World, Pet, TANK, hasDeco } from './bamung-life.js?v=tank2';
 import { BubbleView, layoutBubbles, drawBubbles, typeTime } from './talk-bubble.js';
 import { ALL_LINES } from './bamung-talk.js';
+import { TANK_KEY, CAP, readTank, pickPetName, makeResident, sceneChanges, applyChanges, persistChanges } from './bamung-store.js';
 import { speak } from './roach-voice.js?v=voice1';
 
 // ══════════════════════════════════════════════════════════════════
@@ -210,7 +211,7 @@ import { speak } from './roach-voice.js?v=voice1';
 // ══════════════════════════════════════════════════════════════════
 const QS=new URLSearchParams(location.search);
 const EMBED=QS.has('embed')&&window.parent!==window;
-const KEY='roach_pets_v1', CAP=30, DAY=86400000, NAME_MAX=8, PROP_TOTAL=14;
+const DAY=86400000, NAME_MAX=8, PROP_TOTAL=14;
 const PI=Math.PI, TAU=PI*2;
 const clamp=(v,a=0,b=1)=>v<a?a:v>b?b:v;
 const lerp=(a,b,t)=>a+(b-a)*t;
@@ -226,25 +227,12 @@ if(!EMBED) document.body.classList.add('solo');
 /** 받침: 이름 끝 글자에 받침이 있으면 앞, 없으면 뒤 ('을/를', '이/가', '와/과', '은/는') */
 function jo(word,pair){ const [a,b]=pair.split('/'); const ch=String(word).trim().slice(-1); const c=ch.charCodeAt(0); if(c>=0xAC00&&c<=0xD7A3) return ((c-0xAC00)%28)?a:b; if(/[0-9]/.test(ch)) return '013678'.includes(ch)?a:b; return b; }
 function cleanName(s){ const t=Array.from(String(s||'').replace(/\s+/g,' ').trim()); return t.slice(0,NAME_MAX).join(''); }
-const PET_NAMES=[
-  '콩이','깨알이','쫑긋이','꼬물이','토리','알밤이','땅콩이','보리',
-  '단추','밤톨','도토리','마루','솜이','두부','모찌','호두',
-  '후추','참깨','팥알이','좁쌀이','먼지','뭉치','오디','자두',
-  '꼬미','송이','방울이','몽실이','구름이','달콩이','쪼리','포동이',
-  '소보로','고물이','까망이','밤비','반디','쑥이','찹쌀이','조약돌',
-];
-function pickPetName(pets){
-  const used=new Set(pets.map(p=>p.name));
-  const free=PET_NAMES.filter(name=>!used.has(name));
-  return free[Math.floor(Math.random()*free.length)];
-}
 const showError=t=>{ const e=$('err'); e.textContent=t; e.classList.add('show'); };
 
 // ══════════════════════════════════════════════════════════════════
 // 저장
 // ══════════════════════════════════════════════════════════════════
-function loadStore(){
-  let d=null; try{ d=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
+function loadStore(d){
   if(!d||typeof d!=='object') d={};
   const S={v:1,nextNo:Math.max(1,d.nextNo|0),pets:[],graves:[],props:null,fallen:[],missing:[],recentLines:d.recentLines};
   for(const p of Array.isArray(d.pets)?d.pets:[]){ if(!p||!p.id||!(p.born>0)) continue; if(!p.deco||typeof p.deco!=='object') p.deco={}; p.life=+p.life||30; if(!(p.no>0)) p.no=S.nextNo++; S.pets.push(p); }
@@ -257,19 +245,30 @@ function loadStore(){
   const unnamed=S.pets.filter(p=>!cleanName(p.name));
   if(unnamed.length){
     for(const p of unnamed) p.name=pickPetName(S.pets);
-    try{ localStorage.setItem(KEY,JSON.stringify({...d,pets:S.pets})); }catch(e){}
   }
   return S;
 }
-let store=loadStore();
+function readScene(){
+  try{ return readTank(); }catch(e){ return null; }
+}
+let previous=readScene()||{};
+let store=loadStore(structuredClone(previous));
 let saveIn=0;
-function save(){ saveIn=0; try{ syncStore(); localStorage.setItem(KEY,JSON.stringify(store)); }catch(e){} }
+function save(){
+  saveIn=0; syncStore();
+  const next=structuredClone(store);
+  try{
+    const pending=persistChanges(sceneChanges(previous,next));
+    previous=next;
+    pending?.catch(err=>console.warn('테라리움 저장 대기',err));
+  }catch(err){ console.warn('테라리움 저장 실패',err); }
+}
 function saveSoon(s=0.7){ saveIn=saveIn?Math.min(saveIn,s):s; }
 function syncStore(){
   for(const p of world.pets){ if(p.away) continue; const r=p.rec; r.x=r4(p.x); r.z=r4(p.z); r.h=r4(wrapA(p.h)); }
   store.missing=world.missing;
   store.recentLines=world.recentLines;
-  store.props=world.props.map(i=>{ const o=(edit.inst===i&&edit.orig)?edit.orig:i; return {k:i.k,x:r4(o.x),z:r4(o.z),rot:r4(o.rot),on:!!i.on}; });
+  store.props=world.props.map(i=>{ const o=(edit.inst===i&&edit.orig)?edit.orig:i; return {id:i.id,k:i.k,x:r4(o.x),z:r4(o.z),rot:r4(o.rot),on:!!i.on}; });
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -712,11 +711,11 @@ function removeProp(inst){
 }
 function loadProps(){
   if(store.props===null){ // 처음: 바퀴박스 · 먹이 접시 · 분수 · 쳇바퀴. 가운데는 큰 놀이기구 자리로 비워 둔다
-    for(const [k,x,z,r] of [['box',-0.24,-0.56,0],['fountain',0.27,-0.58,0],['dish',0.25,0.6,0],['wheel',-0.22,0.36,0]]){ const inst=makeProp(k); if(!inst) continue; let s=placeOK(inst,x,z,r)?{x,z,r}:findSpot(inst); if(s){ inst.x=s.x; inst.z=s.z; inst.rot=s.r; addProp(inst); } }
-    store.props=[]; syncStore();
+    for(const [k,x,z,r] of [['box',-0.24,-0.56,0],['fountain',0.27,-0.58,0],['dish',0.25,0.6,0],['wheel',-0.22,0.36,0]]){ const inst=makeProp(k); if(!inst) continue; let s=placeOK(inst,x,z,r)?{x,z,r}:findSpot(inst); if(s){ inst.id='default-'+k; inst.x=s.x; inst.z=s.z; inst.rot=s.r; addProp(inst); } }
+    store.props=[]; save();
     return;
   }
-  for(const r of store.props){ const inst=makeProp(r.k); if(!inst) continue; inst.x=r.x; inst.z=r.z; inst.rot=r.rot||0; if(inst.toggle) inst.on=!!r.on;
+  for(const [i,r] of store.props.entries()){ const inst=makeProp(r.k); if(!inst) continue; inst.id=r.id||'legacy-'+r.k+'-'+i; inst.x=r.x; inst.z=r.z; inst.rot=r.rot||0; if(inst.toggle) inst.on=!!r.on;
     if(!placeOK(inst,inst.x,inst.z,inst.rot)){ const n=nudgeSpot(inst); if(n){ inst.x=n.x; inst.z=n.z; } else { const f=findSpot(inst); if(!f) continue; inst.x=f.x; inst.z=f.z; inst.rot=f.r; } }
     addProp(inst); }
 }
@@ -790,17 +789,77 @@ function spawnPet(rec){
 function loadPets(){
   const now=Date.now(); const goneNow=[];
   for(const r of store.pets){ if(!r.dead&&now>r.born+r.life*DAY){ r.dead=true; r.diedAt=Math.round(r.born+r.life*DAY); } if(r.dead&&!r.toldDead){ goneNow.push(r); } }
-  for(const r of store.pets) spawnPet(r);
+  for(const r of store.pets){
+    const p=spawnPet(r);
+    if(needsGreeting(r)) world.queueGreet(p);
+  }
   return goneNow;
+}
+function needsGreeting(r){
+  // Old saves omitted greeted while a new resident was waiting.
+  return !r.dead && (r.greeted===0 || (!r.greeted && Date.now()-r.arrived<300000));
+}
+function refreshResidents(){
+  const latest=readScene(); if(!latest) return;
+  const base=Array.isArray(latest.pets)?latest.pets.filter(r=>r?.id&&r.born>0):[];
+  // Keep current edits, while admitting other tabs' arrivals and respecting removals.
+  const delta=sceneChanges({pets:previous.pets},{pets:store.pets});
+  const merged=applyChanges({pets:structuredClone(base)},delta).pets;
+  const byId=new Map(merged.filter(r=>r?.id&&r.born>0).map(r=>[r.id,r]));
+  for(const p of [...world.pets]){
+    const r=byId.get(p.id);
+    if(r){
+      byId.delete(p.id);
+      const changedDeco=JSON.stringify(p.rec.deco)!==JSON.stringify(r.deco);
+      // While the scene is running it owns the current pose and placement.
+      const {x,z,h,deco:appearance,...fields}=r; Object.assign(p.rec,fields);
+      if(changedDeco){
+        p.rec.deco=appearance||{}; applyDeco(p.m,p.rec.deco); clipToTank(p,!p.away);
+        if(deco.pet===p) renderDeco();
+      }
+      if(r.dead&&!p.dead){
+        if(deco.pet===p){
+          stopDecoLine(); deco.pet=null; leaveSalonView(); setMode('watch');
+          p.away=false; p.mode='floor'; clipToTank(p,true);
+        }
+        world.cutTalk(p); p.startDeadPose();
+      }
+      continue;
+    }
+    if(grab?.p===p) cancelGrab();
+    if(cam.follow===p) stopFollow();
+    if(card.pet===p) closeSheets();
+    if(deco.pet===p){ stopDecoLine(); deco.pet=null; leaveSalonView(); setMode('watch'); }
+    if(arrivingPet===p) arrivingPet=null;
+    if(world.talk?.a===p||world.talk?.b===p) world.endTalk();
+    if(p.act) p.endAct(p.act);
+    p.buried=true; petRoot.remove(p.m.g);
+    world.pets.splice(world.pets.indexOf(p),1); removeFallenOf(p.id);
+  }
+  for(const rec of byId.values()){
+    const p=spawnPet(rec);
+    if(needsGreeting(rec)) world.queueGreet(p);
+  }
+  store.pets=world.pets.map(p=>p.rec);
+  previous.pets=structuredClone(base);
+  previous.nextNo=latest.nextNo||1;
+  store.nextNo=Math.max(store.nextNo,previous.nextNo);
+  updateShadowBudget(); refreshHud(); postCount();
 }
 let arrivingPet=null, onEntryDrawn=null;
 /** 새 식구: 위에서 떨어뜨려 넣는다 */
 function arrive(opts={}){
-  if(store.pets.length>=CAP){ toast('테라리움이 꽉 찼어요.'); return null; }
-  const rec={id:'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),no:store.nextNo++,name:cleanName(opts.name)||pickPetName(store.pets),born:Date.now(),arrived:Date.now(),life:r4(rand(27,33)),size:r4(rand(0.95,1.06)),deco:{}};
-  const spot=world.randomFree(40,false); rec.x=spot.x; rec.z=spot.z; rec.h=rand(TAU);
-  store.pets.push(rec);
-  const p=spawnPet(rec);
+  let p;
+  if(opts.id){
+    p=world.pets.find(p=>p.id===opts.id);
+    if(!p||p.dead) return null;
+    if(world.talk?.a===p||world.talk?.b===p) world.endTalk();
+  }else{
+    if(store.pets.length>=CAP){ toast('테라리움이 꽉 찼어요.'); return null; }
+    const rec=makeResident(store.pets,store.nextNo++,cleanName(opts.name));
+    const spot=world.randomFree(40,false); rec.x=spot.x; rec.z=spot.z; rec.h=rand(TAU);
+    store.pets.push(rec); p=spawnPet(rec);
+  }
   arrivingPet=p;
   p.setAct({type:'drop',y0:0.95,onLand(){ if(arrivingPet===p) arrivingPet=null; }});
   p.tPos.set(p.x,0.95,p.z); p.snap=true; p.labelT=7;
@@ -1067,7 +1126,7 @@ function spawnFallen(f,fromY){ const obj=makeFallenObj(f); const e={f,obj,y0:fro
 function loadFallen(){ for(const f of store.fallen){ if(!world.pets.some(p=>p.id===f.petId)) continue; const obj=makeFallenObj(f); obj.userData.baseY=obj.position.y; fallen.push({f,obj,t:9}); } store.fallen=fallen.map(e=>e.f); }
 function disposeTree(o){ o.traverse(m=>{ if(!m.isMesh) return; m.geometry?.dispose?.(); for(const mt of Array.isArray(m.material)?m.material:[m.material]){ if(mt?.userData?.disposeMap) mt.map?.dispose(); mt?.dispose?.(); } }); }
 function removeFallen(e){ scene.remove(e.obj); disposeTree(e.obj); const i=fallen.indexOf(e); if(i>=0) fallen.splice(i,1); store.fallen=fallen.map(x=>x.f); }
-function removeFallenOf(id){ for(const e of fallen.filter(x=>x.f.petId===id)) removeFallen(e); }
+function removeFallenOf(id,type=null){ for(const e of fallen.filter(x=>x.f.petId===id&&(!type||x.f.type===type))) removeFallen(e); }
 function updateFallen(dt){ for(const e of fallen){ if(e.t>=0.6) continue; e.t+=dt; const k=Math.min(1,e.t/0.6); const b=e.obj.userData.baseY; e.obj.position.y=b+Math.max(0,(e.y0??b)-b)*(1-k*k)+Math.sin(k*PI)*0.012*(1-k); } }
 EV.hatFall=(p)=>{ const D=p.rec.deco; if(!D?.hat||D.hat.on===false||p.away) return; D.hat.on=false; applyDeco(p.m,D); clipToTank(p,true);
   const a=p.h+PI+rand(-0.6,0.6); spawnFallen({type:'hat',petId:p.id,c:D.hat.c,x:clamp(p.x+Math.sin(a)*0.05,-TANK.hw+0.02,TANK.hw-0.02),z:clamp(p.z+Math.cos(a)*0.05,-TANK.hd+0.02,TANK.hd-0.02),r:rand(TAU)},p.pos.y+0.03); S.pop(); };
@@ -1282,7 +1341,13 @@ function shotTalk(g,PW,PH){
   drawBubbles(g,layoutBubbles(g,talkItems(T,r.aLeft),r.anchors,{px,maxW:PW*0.34,lift:px*0.9,bounds:{l:PW*0.02,t:PH*0.03,r:PW*0.98,b:PH*0.97}}),talkView.alpha);
 }
 function onLabel(ids){ if(!ids||!ids.length||mode==='deco'||grab) return; wakeUi();
-  if(mode==='tweezer'){ if(ids.length===1&&grabbable(ids[0])) startGrab(ids[0]); return; }   // 족집게를 들고 이름표를 누르면 그 놈을 집는다
+  if(mode==='tweezer'){
+    const choices=ids.filter(grabbable);
+    if(choices.length===1) startGrab(choices[0]);
+    else if(choices.length) openChooser(choices);
+    else toast('지금 집을 수 있는 바퀴가 없어요.');
+    return;
+  }   // 족집게를 들고 이름표를 누르면 그 놈을 집는다
   S.ui();
   if(ids.length===1){ if(mode==='pick'){ if(!ids[0].dead) startDeco(ids[0]); return; } openCard(ids[0]); return; }
   openChooser(ids); }
@@ -1363,7 +1428,7 @@ function openCard(p,view='info'){
   if(view==='rename'){
     const inp=document.createElement('input'); inp.className='field'; inp.maxLength=NAME_MAX*2; inp.placeholder='비우면 자동 작명'; inp.value=r.name; inp.setAttribute('enterkeyhint','done'); inp.autocomplete='off';
     cardEl.appendChild(inp);
-    const done=()=>{ r.name=cleanName(inp.value)||pickPetName(store.pets); save(); p.labelT=3; openCard(p); };
+    const done=()=>{ r.name=cleanName(inp.value)||pickPetName(store.pets); save(); p.labelT=3; refreshHud(); openCard(p); };
     inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); done(); } });
     btn('바꾸기',done,'main'); btn('취소',()=>openCard(p));
     cardEl.appendChild(row); cardEl.classList.add('open'); cardEl.setAttribute('aria-hidden','false');
@@ -1384,7 +1449,11 @@ function openChooser(ids){
   const head=document.createElement('div'); head.className='head'; const h=document.createElement('h3'); h.textContent=`여기 ${ids.length}마리`; const x=document.createElement('button'); x.className='x'; x.type='button'; x.textContent='닫기'; x.addEventListener('click',e=>{ e.stopPropagation(); closeSheets(); });
   head.append(h,x); cardEl.appendChild(head);
   const box=document.createElement('div'); box.className='names';
-  for(const p of ids){ const b=document.createElement('button'); b.type='button'; b.className='chip'; b.textContent=p.name; b.addEventListener('click',e=>{ e.stopPropagation(); S.ui(); if(mode==='pick'){ closeSheets(); if(!p.dead) startDeco(p); } else openCard(p); }); box.appendChild(b); }
+  for(const p of ids){ const b=document.createElement('button'); b.type='button'; b.className='chip'; b.textContent=p.name; b.addEventListener('click',e=>{ e.stopPropagation(); S.ui(); if(mode==='tweezer'){
+      closeSheets();
+      if(world.pets.includes(p)&&grabbable(p)) startGrab(p);
+      else toast('지금 집을 수 있는 바퀴가 없어요.');
+    } else if(mode==='pick'){ closeSheets(); if(!p.dead) startDeco(p); } else openCard(p); }); box.appendChild(b); }
   cardEl.appendChild(box); cardEl.classList.add('open'); cardEl.setAttribute('aria-hidden','false');
 }
 for(const el of [sheet,cardEl,$('deco'),$('bar'),$('editBar'),$('photo')]){ el.addEventListener('pointerdown',e=>{ e.stopPropagation(); wakeUi(); SFX.ensure(); }); }
@@ -1408,7 +1477,7 @@ function gemIcon(k){ if(iconCache[k]) return iconCache[k]; const c=document.crea
   return iconCache[k]=c.toDataURL(); }
 function stickerIcon(k){ const id='s_'+k; if(!iconCache[id]) iconCache[id]=stickerCanvas(k).toDataURL(); return iconCache[id]; }
 function decoOf(p){ const D=p.rec.deco||(p.rec.deco={}); return D; }
-function pushUndo(){ const p=deco.pet; if(!p) return; deco.undo.push(JSON.stringify(decoOf(p))); if(deco.undo.length>40) deco.undo.shift(); }
+function pushUndo(){ const p=deco.pet; if(!p) return; deco.undo.push({deco:structuredClone(decoOf(p)),fallen:fallen.filter(e=>e.f.petId===p.id).map(e=>({...e.f}))}); if(deco.undo.length>40) deco.undo.shift(); }
 function applyNow(react=true){ const p=deco.pet; if(!p) return; applyDeco(p.m,decoOf(p)); if(react){ p.m.flick=1; p.m.flickSide=Math.random()<0.5?1:-1; deco.lookAt=2.2; } }
 function startDeco(p){
   if(!p||p.dead||!world.pets.includes(p)) return;
@@ -1471,10 +1540,10 @@ function renderDeco(){
     const g=el('div','thumbs'); for(const [k,t] of GEMS){ const b=el('button',k===deco.gem?'on':''); b.type='button'; b.title=t; const im=new Image(); im.src=gemIcon(k); im.alt=t; b.appendChild(im); b.addEventListener('click',e=>{ e.stopPropagation(); deco.gem=k; renderDeco(); S.ui(); }); g.appendChild(b); }
     body.append(g, el('p','hint','몸을 눌러 붙여 주세요.'));
   } else if(deco.tab==='hat'){
-    body.append(el('div','lbl','털모자'), swatches(HAT_COLORS,D.hat&&D.hat.on!==false?D.hat.c:null,c=>{ pushUndo(); D.hat={c,on:true}; removeFallenOf(p.id); applyNow(); S.hat(); renderDeco(); }));
-    if(D.hat){ const o=el('div','opt'); const b=el('button','','모자 벗기기'); b.type='button'; b.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); delete D.hat; applyNow(); S.pop(); renderDeco(); }); o.appendChild(b); body.append(o); }
-    body.append(el('div','lbl',''), el('div','lbl','더듬이 리본'), swatches(BOW_COLORS,D.abow&&D.abow.on!==false?D.abow.c:null,c=>{ pushUndo(); D.abow={side:D.abow?.side||1,c,on:true}; applyNow(); S.sticker(); renderDeco(); }));
-    if(D.abow){ const o=el('div','opt'); const b1=el('button','',D.abow.side===-1?'오른쪽 더듬이로':'왼쪽 더듬이로'); b1.type='button'; b1.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); D.abow.side=D.abow.side===-1?1:-1; applyNow(); renderDeco(); }); const b2=el('button','','리본 떼기'); b2.type='button'; b2.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); delete D.abow; applyNow(); S.pop(); renderDeco(); }); o.append(b1,b2); body.append(o); }
+    body.append(el('div','lbl','털모자'), swatches(HAT_COLORS,D.hat&&D.hat.on!==false?D.hat.c:null,c=>{ pushUndo(); D.hat={c,on:true}; removeFallenOf(p.id,'hat'); applyNow(); S.hat(); renderDeco(); }));
+    if(D.hat){ const o=el('div','opt'); const b=el('button','','모자 벗기기'); b.type='button'; b.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); delete D.hat; removeFallenOf(p.id,'hat'); applyNow(); S.pop(); renderDeco(); }); o.appendChild(b); body.append(o); }
+    body.append(el('div','lbl',''), el('div','lbl','더듬이 리본'), swatches(BOW_COLORS,D.abow&&D.abow.on!==false?D.abow.c:null,c=>{ pushUndo(); D.abow={side:D.abow?.side||1,c,on:true}; removeFallenOf(p.id,'bow'); applyNow(); S.sticker(); renderDeco(); }));
+    if(D.abow){ const o=el('div','opt'); const b1=el('button','',D.abow.side===-1?'오른쪽 더듬이로':'왼쪽 더듬이로'); b1.type='button'; b1.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); D.abow.side=D.abow.side===-1?1:-1; applyNow(); renderDeco(); }); const b2=el('button','','리본 떼기'); b2.type='button'; b2.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); delete D.abow; removeFallenOf(p.id,'bow'); applyNow(); S.pop(); renderDeco(); }); o.append(b1,b2); body.append(o); }
   } else if(deco.tab==='text'){
     const line=el('div','line'); const inp=el('input','field'); inp.maxLength=12; inp.placeholder='등에 쓸 글씨'; inp.value=D.text?.t||p.name; inp.setAttribute('enterkeyhint','done'); inp.autocomplete='off';
     const go=el('button','','쓰기'); go.type='button';
@@ -1487,7 +1556,7 @@ function renderDeco(){
   }
 }
 $('decoTabs').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; e.stopPropagation(); deco.tab=b.dataset.t; renderDeco(); S.ui(); });
-$('deco').querySelector('[data-a="undo"]').addEventListener('click',e=>{ e.stopPropagation(); const p=deco.pet; if(!p) return; const s=deco.undo.pop(); if(s===undefined){ toast('되돌릴 게 없어요.'); return; } p.rec.deco=JSON.parse(s); applyNow(false); renderDeco(); S.pop(); });
+$('deco').querySelector('[data-a="undo"]').addEventListener('click',e=>{ e.stopPropagation(); const p=deco.pet; if(!p) return; const s=deco.undo.pop(); if(s===undefined){ toast('되돌릴 게 없어요.'); return; } p.rec.deco=s.deco; removeFallenOf(p.id); for(const f of s.fallen) spawnFallen(f,0); applyNow(false); renderDeco(); S.pop(); });
 $('deco').querySelector('[data-a="decoDone"]').addEventListener('click',e=>{ e.stopPropagation(); S.ui(); finishDeco(); });
 // ───────── 꾸미기를 시작하면 꾸며지는 놈이 혼자 한마디 한다 (bamung-talk.js의 DECO_START) ─────────
 const decoLine={p:null,text:'',t:0,wait:0,phase:'none',fade:0,id:0,voice:null};
@@ -1551,7 +1620,14 @@ function animateSalon(dt){
 // ══════════════════════════════════════════════════════════════════
 // 사진: 지금 보이는 테라리움을 즉석 사진처럼 편지지 위에
 // ══════════════════════════════════════════════════════════════════
-let photoBlob=null, photoUrl='';
+let photoBlob=null, photoUrl='', photoRequest=0;
+function closePhoto(){
+  photoRequest++;
+  $('photo').classList.remove('show'); $('photo').setAttribute('aria-hidden','true');
+  $('photoImg').removeAttribute('src');
+  if(photoUrl) URL.revokeObjectURL(photoUrl);
+  photoUrl=''; photoBlob=null;
+}
 function renderShot(PW,PH){
   const pr=renderer.getPixelRatio();
   const none={top:PH*0.04,bottom:PH*0.04,left:PW*0.03,right:PW*0.03};
@@ -1569,7 +1645,9 @@ function renderShot(PW,PH){
 }
 function paperBg(g,W,H){ g.fillStyle='#fffaf0'; g.fillRect(0,0,W,H); for(let y=0;y<H+68;y+=68) for(let x=0;x<W+68;x+=68){ g.fillStyle='rgba(255,170,150,.3)'; g.beginPath(); g.arc(x+24,y+24,6.4,0,TAU); g.fill(); g.fillStyle='rgba(120,190,230,.26)'; g.beginPath(); g.arc(x+58,y+58,5.2,0,TAU); g.fill(); } }
 async function takePhoto(){
+  const request=++photoRequest;
   closeSheets(); try{ await document.fonts?.load?.('700 60px Gaegu'); }catch(e){}
+  if(request!==photoRequest||!awake) return;
   S.shutter(); const fl=$('flash'); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
   const wide=innerWidth>innerHeight*1.15;   // 가로 화면이면 와이드 즉석 사진
   const pw=wide?1040:780, ph=wide?780:1040, shot=renderShot(pw,ph);
@@ -1593,8 +1671,10 @@ async function takePhoto(){
   // 하트 스티커
   g.save(); g.translate(W/2+fw/2-70,H/2-24+fh/2-160); g.rotate(0.22); g.drawImage(stickerCanvas('heart'),-85,-85,170,170); g.restore();
   g.font='700 34px Gaegu, "Noto Sans KR", sans-serif'; g.fillStyle='rgba(138,106,74,.75)'; g.textAlign='center'; g.fillText('바퀴벌레와 친해지기',W/2,H-36);
+  const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.92));
+  if(request!==photoRequest||!awake) return;
   if(photoUrl) URL.revokeObjectURL(photoUrl);
-  photoBlob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.92));
+  photoBlob=blob;
   photoUrl=photoBlob?URL.createObjectURL(photoBlob):c.toDataURL('image/jpeg',0.92);
   $('photoImg').src=photoUrl; $('photo').classList.add('show'); $('photo').setAttribute('aria-hidden','false');
 }
@@ -1605,7 +1685,7 @@ async function savePhoto(){
   const a=document.createElement('a'); a.href=photoUrl; a.download=name; document.body.appendChild(a); a.click(); a.remove();
   toast('사진을 저장했어요.');
 }
-$('photo').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; e.stopPropagation(); S.ui(); if(b.dataset.a==='photoSave') savePhoto(); else { $('photo').classList.remove('show'); $('photo').setAttribute('aria-hidden','true'); } });
+$('photo').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; e.stopPropagation(); S.ui(); if(b.dataset.a==='photoSave') savePhoto(); else closePhoto(); });
 
 // ══════════════════════════════════════════════════════════════════
 // 누르기
@@ -1659,7 +1739,7 @@ function endPtr(e,cancel){
 canvas.addEventListener('pointerup',e=>endPtr(e,false));
 canvas.addEventListener('pointercancel',e=>endPtr(e,true));
 canvas.addEventListener('wheel',e=>{ e.preventDefault(); wakeUi(); zoomBy(Math.exp(clamp(e.deltaY,-120,120)*0.0016)); },{passive:false});
-window.addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(e.target?.tagName==='INPUT'){ e.target.blur(); return; } if($('photo').classList.contains('show')) $('photo').classList.remove('show'); else if(anySheet()) closeSheets(); else if(mode==='edit') finishEdit(true); else if(mode==='pick'||mode==='tweezer'){ if(!grab) setMode('watch'); } else if(mode==='deco') finishDeco(); else if(EMBED) try{ parent.postMessage({type:'bamung-close'},location.origin); }catch(err){} } });
+window.addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(e.target?.tagName==='INPUT'){ e.target.blur(); return; } if($('photo').classList.contains('show')) closePhoto(); else if(anySheet()) closeSheets(); else if(mode==='edit') finishEdit(true); else if(mode==='pick'||mode==='tweezer'){ if(!grab) setMode('watch'); } else if(mode==='deco') finishDeco(); else if(EMBED) try{ parent.postMessage({type:'bamung-close'},location.origin); }catch(err){} } });
 
 function startPick(){ closeSheets(); const L=alive(); if(!L.length){ toast(world.pets.length?'꾸밀 수 있는 바퀴가 없어요.':'아직 꾸밀 바퀴가 없어요.'); return; } if(L.length===1){ startDeco(L[0]); return; } setMode('pick'); toast('꾸밀 바퀴를 눌러 주세요.'); S.ui(); }
 function tap(x,y,mouse){
@@ -1740,7 +1820,7 @@ function pushOut(){
       if(!p.dead&&a.type!=='dying'){ p.floorPose(); if(a.type!=='flee'&&a.type!=='onback') p.startFlee(pr.x,pr.z,rand(0.8,1.4)); } }
   }
 }
-function step(dt){
+function step(dt,speechDt=dt){
   world.time+=dt;
   for(const inst of world.props){ try{ inst.update?.(dt,world.time,PCTX); }catch(e){} updatePokes(inst,dt); }
   try{ updateTweezer(dt); }catch(e){ console.error(e); cancelGrab(); }   // 집힌 놈의 자리를 먼저 정한다
@@ -1748,8 +1828,8 @@ function step(dt){
   pushOut();
   world.separateFloorPets();
   for(const p of world.pets) if(!p.away) p.syncPose(dt);
-  world.updateTalk(dt,talkMode());
-  updateDecoLine(dt);
+  world.updateTalk(dt,talkMode(),speechDt);
+  updateDecoLine(speechDt);
   for(const p of world.pets) if(p.labelT>0) p.labelT=Math.max(0,p.labelT-dt);
   for(const t of transient) t.t-=dt;
   updateEdit(dt); updateFallen(dt); updateFx(dt); animateSalon(dt);
@@ -1764,9 +1844,10 @@ function step(dt){
 function draw(dt){ updateCamera(dt); updateLabels(dt); renderer.render(scene,camera); drawTalk(dt); }
 function frame(ts){
   raf=requestAnimationFrame(frame);
+  if(document.hidden){ last=0; return; }
   const t=ts/1000; let dt=last?t-last:1/60; last=t;
   const d=Math.min(Math.max(dt,0),0.05);
-  step(d); draw(d);
+  step(d,Math.max(0,dt)); draw(d);
   if(onEntryDrawn&&!arrivingPet){
     const notify=onEntryDrawn; onEntryDrawn=null;
     notify();
@@ -1778,7 +1859,15 @@ function frame(ts){
 let wakeLock=null;
 async function holdScreen(){ try{ if(awake&&!wakeLock&&navigator.wakeLock&&document.visibilityState==='visible'){ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener?.('release',()=>{ wakeLock=null; }); } }catch(e){ wakeLock=null; } }
 function releaseScreen(){ try{ wakeLock?.release?.(); }catch(e){} wakeLock=null; }
-document.addEventListener('visibilitychange',()=>{ if(document.hidden){ save(); SFX.suspend(); releaseScreen(); } else if(awake){ last=0; if(!paused) SFX.resume(); holdScreen(); checkAges(); } });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden){ save(); SFX.suspend(); releaseScreen(); } else if(awake){ last=0; refreshResidents(); if(!paused) SFX.resume(); holdScreen(); checkAges(); } });
+window.addEventListener('storage',e=>{
+  if(e.key!==TANK_KEY||!awake||document.hidden) return;
+  const residents=readScene()?.pets;
+  if(Array.isArray(residents) && (residents.length!==store.pets.length || residents.some((r,i)=>{
+    const p=store.pets[i];
+    return !r||!p||p.id!==r.id||p.name!==r.name||!!p.dead!==!!r.dead;
+  }))) refreshResidents();
+});
 window.addEventListener('pagehide',()=>save());
 
 // ══════════════════════════════════════════════════════════════════
@@ -1788,6 +1877,7 @@ function countInfo(){ const n=alive().length; return {alive:n,total:store.pets.l
 function postCount(){ if(EMBED) try{ parent.postMessage({type:'bamung-count',...countInfo()},location.origin); }catch(e){} }
 let toldGone=null;
 function wake(){
+  refreshResidents();
   paused=false;
   if(awake){ if(!raf) raf=requestAnimationFrame(frame); return api; } awake=true; last=0; wakeUi();
   resize(true); if(!camAway()) goHome(true);
@@ -1801,7 +1891,7 @@ function sleep(){
   if(deco.pet) finishDeco();
   if(edit.inst) finishEdit(true);
   cancelGrab();
-  closeSheets(); $('photo').classList.remove('show'); if(mode==='pick'||mode==='tweezer') setMode('watch');
+  closeSheets(); closePhoto(); if(mode==='pick'||mode==='tweezer') setMode('watch');
   world.endTalk(); talkView.clear(); talkG.clearRect(0,0,innerWidth,innerHeight);
   paused=false;
   if(!awake) return api; awake=false;

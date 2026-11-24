@@ -3,8 +3,7 @@
 // 몇 번이든 한 마리씩 데려올 수 있고(최대 30마리), 컵을 고르면 옆에 뜨는 「테라리움 보기」로 언제든 구경하러 간다.
 // 족집게·슬라임과 같은 방식: 게임 창의 three.js로 컵을 만들어 게임 장면에 넣고, 입력은 게임 Input 앞에서 가로챈다.
 
-const KEY='roach_pets_v1';       // 테라리움 기록 (bamung.html과 같은 자리)
-const CAP=30;                    // 테라리움에 둘 수 있는 마릿수 (살아 있는 놈 + 아직 안 묻은 놈)
+import { TANK_KEY, CAP, readTank, admitResident } from './bamung-store.js';
 const NAME_MAX=8;
 const CUP_R=0.15;                // 컵 입구 반지름 (바퀴 길이 0.13의 두 배 남짓)
 const CUP_H=0.2;
@@ -14,7 +13,7 @@ const ease=t=>t*t*(3-2*t);
 const PI=Math.PI, TAU=PI*2;
 
 function readStore(){
-  try{ const d=JSON.parse(localStorage.getItem(KEY)||'null'); if(!d||typeof d!=='object') return {total:0,nextNo:1};
+  try{ const d=readTank(); if(!d||typeof d!=='object') return {total:0,nextNo:1};
     const pets=Array.isArray(d.pets)?d.pets.filter(p=>p&&p.id):[];
     let next=Math.max(1,d.nextNo|0); for(const p of pets) next=Math.max(next,(p.no|0)+1); for(const g of Array.isArray(d.graves)?d.graves:[]) next=Math.max(next,(g?.no|0)+1);
     return {total:pets.length,nextNo:next}; }
@@ -78,12 +77,15 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   goBtn.addEventListener('click',e=>{ e.preventDefault(); confirmName(); });
   nameIn.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); confirmName(); } });
   window.addEventListener('keydown',e=>{ if(e.code==='Escape'&&tankOpen&&!naming&&!isBlocked()){ e.preventDefault(); closeTank(); } });
+  window.addEventListener('storage',e=>{
+    if(e.key===TANK_KEY){ info=readStore(); updateSlot(); }
+  });
   window.addEventListener('message',e=>{
     if(e.source!==frame.contentWindow) return;
     const d=e.data||{};
     if(d.type==='bamung-ready'){ tankState='ready'; layer.classList.remove('loading'); if(typeof d.total==='number') setInfo(d);
       if(tankOpen){ if(pendingEnter) enterTank(); }
-      else { const L=tankApi(); if(pendingArrive&&L){ const a=pendingArrive; pendingArrive=null; try{ L.enter({arrive:a}); }catch(err){ console.error(err); } } try{ L?.sleep?.(); }catch(err){} info=readStore(); updateSlot(); } }
+      else { try{ tankApi()?.sleep?.(); }catch(err){} info=readStore(); updateSlot(); } }
     if(d.type==='bamung-count') setInfo(d);
     if(d.type==='bamung-ui') layer.classList.toggle('calm',!d.show);
     if(d.type==='bamung-close') closeTank();
@@ -97,7 +99,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   function tell(msg){ try{ frame.contentWindow?.postMessage(msg,location.origin); }catch(err){} }
 
   const tankApi=()=>{ try{ return frame.contentWindow?.Bamung||null; }catch(err){ return null; } };
-  function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1&v=voice1'; }
+  function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1&v=tank2'; }
   function enterTank(){
     const L=tankApi(); if(!L||!tankOpen||!pendingEnter) return;
     const a=pendingArrive; pendingArrive=null; pendingEnter=false;
@@ -126,7 +128,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     G.r1.cancel?.(); G.input.reset?.();
     if(cupMesh) cupMesh.visible=false;
     layer.classList.add('open'); layer.classList.remove('calm'); layer.setAttribute('aria-hidden','false'); gameFrame.classList.add('covered');
-    if(arrive) pendingArrive=arrive;
+    pendingArrive=arrive;
     pendingEnter=true;
     preloadTank();
     if(tankState==='ready') enterTank(); else layer.classList.add('loading');
@@ -134,7 +136,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   function closeTank(force=false){
     if(!tankOpen||(!force&&(closeBusy||isBlocked()))) return;
     cancelAnimationFrame(signFrame);
-    closeBusy=true; pendingEnter=false;
+    closeBusy=true; pendingEnter=false; pendingArrive=null;
     try{ tankApi()?.sleep?.(); }catch(err){}
     layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered');
     tankOpen=false; namePaused=false;
@@ -144,8 +146,8 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   }
 
   // ───────── 이름 짓기 ─────────
-  function showName(){
-    const {G}=env; naming={};
+  function showName(capture){
+    const {G}=env; naming={capture}; goBtn.disabled=false;
     namePaused=true; pausedBefore=!!G.paused; G.paused=true; G.r1.cancel?.(); G.input.reset?.();
     info=readStore();
     nameIn.value=''; nameIn.placeholder='이름 (선택)';
@@ -154,13 +156,34 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     sfx.card();
     setTimeout(()=>{ if(naming) try{ nameIn.focus({preventScroll:true}); }catch(err){} },420);
   }
-  function confirmName(){
-    if(!naming) return;
+  async function confirmName(){
+    const request=naming;
+    if(!request||request.saving) return;
+    request.saving=true; goBtn.disabled=true;
     const name=Array.from(nameIn.value.replace(/\s+/g,' ').trim()).slice(0,NAME_MAX).join('');
-    naming=null; try{ nameIn.blur(); }catch(err){}
+    let resident, message;
+    try{
+      resident=await admitResident(name);
+      if(!resident) message='테라리움이 꽉 차서 바퀴를 다시 놓아줬어요.';
+    }catch(err){
+      console.warn(err);
+      message='이 기기에 저장할 수 없어 바퀴를 다시 놓아줬어요.';
+    }
+    if(request!==naming) return;
+    naming=null; goBtn.disabled=false; try{ nameIn.blur(); }catch(err){}
     nameEl.classList.remove('show'); nameEl.setAttribute('aria-hidden','true');
-    sfx.go();
-    openTank({name});
+    if(!resident){
+      const {G}=env, c=request.capture;
+      if(c?.r){
+        const r=c.r; r.gone=false; r.captured=false; r.m.g.visible=true;
+        r.m.g.position.set(r.x,0,r.z); r.m.g.rotation.set(0,r.h,0);
+        G.r1.grp.add(r.m.g); G.r1.roaches.push(r); G.r1.flee?.(r,c.x,c.z);
+      }
+      namePaused=false; G.paused=pausedBefore; G.ui.hint?.(message,2.4,0,true);
+      info=readStore(); updateSlot(); return;
+    }
+    info=readStore(); updateSlot(); sfx.go();
+    openTank({id:resident.id});
   }
 
   // ───────── 게임 쪽 칸 · 「테라리움 보기」 ─────────
@@ -291,7 +314,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     const {G}=env; const r=c.r;
     if(r){ r.gone=true; if(r.m?.g){ r.m.g.visible=false; G.r1.grp.remove(r.m.g); } }
     if(cupMesh) cupMesh.visible=false;
-    showName();
+    showName(c);
   }
   function cancelCapture(silent){
     const c=cap; if(!c) return; cap=null;
@@ -344,7 +367,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     cap=null; cupMesh=null; wrapped=null; hintShown=false; tankBtn=null;
     if(naming){ naming=null; nameEl.classList.remove('show'); nameEl.setAttribute('aria-hidden','true'); }
     if(tankOpen){ try{ tankApi()?.sleep?.(); }catch(err){} layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered'); tankOpen=false; closeBusy=false; }
-    pendingEnter=false; namePaused=false; press=null;
+    pendingEnter=false; pendingArrive=null; namePaused=false; press=null;
   }
   return {install,reset,select,open:()=>openTank(null),
     /** 실험실이 다 떴다 (게임 창이 알려 준다) → 테라리움 족집게가 들고 있던 바퀴를 넘길 수 있다 */

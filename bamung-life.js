@@ -321,7 +321,7 @@ export class World{
   queueGreet(p){ if(p&&!this.greetQ.some(g=>g.p===p)) this.greetQ.push({p,t:0}); }
   tryGreet(dt){
     for(const g of this.greetQ) g.t+=dt;
-    this.greetQ=this.greetQ.filter(g=>{ const p=g.p; if(!this.pets.includes(p)||p.dead||p.rec.greeted) return false; if(!this.pets.some(o=>o!==p&&!o.dead)){ p.rec.greeted=1; return false; } return g.t<45; });
+    this.greetQ=this.greetQ.filter(g=>{ const p=g.p; if(!this.pets.includes(p)||p.dead||p.rec.greeted) return false; if(!this.pets.some(o=>o!==p&&!o.dead)){ p.rec.greeted=1; return false; } return true; });
     if(this.talk||!this.talkOn) return false;
     for(const g of this.greetQ){
       const n=g.p; if(!this.canTalk(n,true)) continue;
@@ -365,7 +365,7 @@ export class World{
   /** 남은 놈들이 다시 우울해진다 (누가 족집게에 집혀 나가거나 늙어 죽었을 때) */
   relapse(gone=null){ for(const p of this.pets){ if(p===gone||p.dead) continue; p.rec.mood=0; p.rec.comfort=0; p.rec.decoFresh=0; } }
   /** 매 프레임. on=false(꾸미는 중·소품 옮기는 중)면 하던 대화를 끊고 새로 걸지 않는다 */
-  updateTalk(dt,on=true){
+  updateTalk(dt,on=true,speechDt=dt){
     this.talkOn=on;
     const T=this.talk;
     if(!T){
@@ -373,7 +373,7 @@ export class World{
       if(this.greetQ.length&&this.tryGreet(dt)) return;
       this.talkCD-=dt; if(this.talkCD>0) return;
       this.talkCD=rand(2.5,5);  // 짝이 없으면 조금 있다 다시 본다
-      const L=this.pets.filter(p=>this.canTalk(p)&&!this.greetQ.some(g=>g.p===p));
+      const L=this.pets.filter(p=>this.canTalk(p)&&!this.greetQ.some(g=>g.p===p&&g.t<45));
       // 사라진 놈을 찾는 혼잣말: 옆에 누가 있어도 혼자 한다
       const ms=this.pickMissing(L);
       if(ms){
@@ -410,7 +410,10 @@ export class World{
       } else if(T.t>13/Math.max(0.45,a.slowK)) this.endTalk();
       return;
     }
-    T.lineT+=dt; T.next-=dt;
+    T.lineT+=speechDt; T.next-=speechDt;
+    if(T.pool==='greet'&&T.i>=0&&!T.a.rec.greeted&&T.lineT>=T.typeEnd){
+      T.a.rec.greeted=1; this.events.memoryChanged?.();
+    }
     if(T.missing&&T.i>=0&&!T.heard&&T.lineT>=T.typeEnd){
       T.heard=true;
       const said=T.missing.said;

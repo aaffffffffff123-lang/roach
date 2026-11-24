@@ -190,7 +190,7 @@ html #intro .box,html #mail .card,html #slimeDone .card,html #petName .card{marg
 // 족집게 모델은 반드시 게임 창의 three.js로 만들어야 한다.
 // 이 창에서 따로 불러온 three.js로 만든 도형은 게임 렌더러가 읽지 못해 매 프레임 렌더 에러가 나고 화면이 멈춘다.
 let THREE=null;
-import {createSlimeMode} from './slime-mode.js'; import {createPetMode} from './pet-mode.js?v=voice1'; import {createCutscene} from './cutscene.js';
+import {createSlimeMode} from './slime-mode.js'; import {createPetMode} from './pet-mode.js?v=tank2'; import {createCutscene} from './cutscene.js';
 import {installTallyHud} from './tally.js';
 import {createCareMode} from './care-mode.js';
 
@@ -260,7 +260,7 @@ const showError=text=>{
 
 function forwardedGameUrl(){
   const q=new URLSearchParams(location.search);
-  q.delete('lab');
+  q.delete('lab'); q.set('v','tank2');
   const query=q.toString();
   return `game.html${query?`?${query}`:''}${location.hash||''}`;
 }
@@ -271,6 +271,11 @@ async function waitForGame(){
   for(let i=0;i<500;i++){
     try{
       const w=gameFrame.contentWindow;
+      if(w?.__roachBootError){
+        boot.classList.add('done');
+        showError(w.__roachBootError);
+        return;
+      }
       if(w?.__g?.r1?.roaches&&w.__g.ui?.slotEls&&w.__THREE){
         gameWindow=w;
         G=w.__g;
@@ -290,7 +295,7 @@ async function waitForGame(){
     await delay(20);
   }
   boot.classList.add('done');
-  showError('게임 연결에 실패했습니다. game.html과 index.html이 같은 폴더에 있는지 확인해 주세요.');
+  showError('게임을 불러오지 못했어요. 연결을 확인한 뒤 새로고침해 주세요.');
 }
 
 gameFrame.addEventListener('load',()=>{
