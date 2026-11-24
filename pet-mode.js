@@ -34,7 +34,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   let env=null, wrapped=null;
   let cupMesh=null, cap=null, naming=null;
   let tankOpen=false, tankState='none', pendingEnter=false, pendingArrive=null, closeBusy=false, pausedBefore=false, namePaused=false;
-  let info=readStore(), hintShown=false, signTimer=0, lastPointer=null, press=null;
+  let info=readStore(), hintShown=false, signTimer=0, resumeAfterSign=null, lastPointer=null, press=null;
   const TMP={};
 
   // ───────── 겉면: 테라리움 레이어 · 돌아가기 · 이름 카드 ─────────
@@ -102,14 +102,22 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     const L=tankApi(); if(!L||!tankOpen||!pendingEnter) return;
     const a=pendingArrive; pendingArrive=null; pendingEnter=false;
     try{ L.enter(a?{arrive:a}:{}); }catch(err){ console.error(err); return; }
-    function showEntrySign(){
-      signTimer=0;
-      if(!tankOpen) return;
-      if(isBlocked()){ signTimer=setTimeout(showEntrySign,250); return; }
-      if(onEnter?.(()=>{ if(tankOpen) L.resume(); })) L.pause();
-    }
-    signTimer=setTimeout(showEntrySign,2400);
+    if(resumeAfterSign) L.pause();
     info=readStore(); updateSlot();
+  }
+  function showEntrySign(){
+    signTimer=0;
+    if(!tankOpen) return;
+    if(isBlocked()){ signTimer=setTimeout(showEntrySign,250); return; }
+    const resume=()=>{
+      if(resumeAfterSign!==resume) return;
+      resumeAfterSign=null;
+      if(tankOpen&&!pendingEnter) tankApi()?.resume();
+    };
+    if(onEnter?.(resume)){
+      resumeAfterSign=resume;
+      if(!pendingEnter) tankApi()?.pause();
+    }
   }
   function openTank(arrive=null){
     if(tankOpen||!env||cap) return;
@@ -120,12 +128,14 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     layer.classList.add('open'); layer.classList.remove('calm'); layer.setAttribute('aria-hidden','false'); gameFrame.classList.add('covered');
     if(arrive) pendingArrive=arrive;
     pendingEnter=true;
+    showEntrySign();
     preloadTank();
     if(tankState==='ready') enterTank(); else layer.classList.add('loading');
   }
   function closeTank(force=false){
     if(!tankOpen||(!force&&(closeBusy||isBlocked()))) return;
     clearTimeout(signTimer);
+    resumeAfterSign=null;
     closeBusy=true; pendingEnter=false;
     try{ tankApi()?.sleep?.(); }catch(err){}
     layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered');
@@ -333,6 +343,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   /** 게임을 새로 시작할 때 (gameFrame이 다시 로드될 때) */
   function reset(){
     clearTimeout(signTimer);
+    resumeAfterSign=null;
     cap=null; cupMesh=null; wrapped=null; hintShown=false; tankBtn=null;
     if(naming){ naming=null; nameEl.classList.remove('show'); nameEl.setAttribute('aria-hidden','true'); }
     if(tankOpen){ try{ tankApi()?.sleep?.(); }catch(err){} layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered'); tankOpen=false; closeBusy=false; }
