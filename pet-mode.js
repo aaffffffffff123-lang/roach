@@ -34,7 +34,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   let env=null, wrapped=null;
   let cupMesh=null, cap=null, naming=null;
   let tankOpen=false, tankState='none', pendingEnter=false, pendingArrive=null, closeBusy=false, pausedBefore=false, namePaused=false;
-  let info=readStore(), hintShown=false, signTimer=0, resumeAfterSign=null, lastPointer=null, press=null;
+  let info=readStore(), hintShown=false, signFrame=0, lastPointer=null, press=null;
   const TMP={};
 
   // ───────── 겉면: 테라리움 레이어 · 돌아가기 · 이름 카드 ─────────
@@ -97,27 +97,27 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   function tell(msg){ try{ frame.contentWindow?.postMessage(msg,location.origin); }catch(err){} }
 
   const tankApi=()=>{ try{ return frame.contentWindow?.Bamung||null; }catch(err){ return null; } };
-  function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1'; }
+  function preloadTank(){ if(tankState!=='none') return; tankState='loading'; frame.src='bamung.html?embed=1&v=landing1'; }
   function enterTank(){
     const L=tankApi(); if(!L||!tankOpen||!pendingEnter) return;
     const a=pendingArrive; pendingArrive=null; pendingEnter=false;
-    try{ L.enter(a?{arrive:a}:{}); }catch(err){ console.error(err); return; }
-    if(resumeAfterSign) L.pause();
+    try{ L.enter({arrive:a,onPresented:waitForTankPaint}); }catch(err){ console.error(err); return; }
     info=readStore(); updateSlot();
   }
-  function showEntrySign(){
-    signTimer=0;
+  function waitForTankPaint(){
     if(!tankOpen) return;
-    if(isBlocked()){ signTimer=setTimeout(showEntrySign,250); return; }
-    const resume=()=>{
-      if(resumeAfterSign!==resume) return;
-      resumeAfterSign=null;
-      if(tankOpen&&!pendingEnter) tankApi()?.resume();
-    };
-    if(onEnter?.(resume)){
-      resumeAfterSign=resume;
-      if(!pendingEnter) tankApi()?.pause();
-    }
+    // 어항이 그려져도 바깥 레이어는 아직 페이드 중일 수 있다.
+    // 완전히 보이는 프레임을 한 번 내보낸 뒤에만 표어를 올린다.
+    signFrame=requestAnimationFrame(
+      getComputedStyle(layer).opacity==='1' ? showEntrySign : waitForTankPaint
+    );
+  }
+  function showEntrySign(){
+    signFrame=0;
+    if(!tankOpen) return;
+    if(isBlocked()){ signFrame=requestAnimationFrame(showEntrySign); return; }
+    const L=tankApi();
+    if(onEnter?.(()=>{ if(tankOpen) L.resume(); })) L.pause();
   }
   function openTank(arrive=null){
     if(tankOpen||!env||cap) return;
@@ -128,14 +128,12 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     layer.classList.add('open'); layer.classList.remove('calm'); layer.setAttribute('aria-hidden','false'); gameFrame.classList.add('covered');
     if(arrive) pendingArrive=arrive;
     pendingEnter=true;
-    showEntrySign();
     preloadTank();
     if(tankState==='ready') enterTank(); else layer.classList.add('loading');
   }
   function closeTank(force=false){
     if(!tankOpen||(!force&&(closeBusy||isBlocked()))) return;
-    clearTimeout(signTimer);
-    resumeAfterSign=null;
+    cancelAnimationFrame(signFrame);
     closeBusy=true; pendingEnter=false;
     try{ tankApi()?.sleep?.(); }catch(err){}
     layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered');
@@ -184,7 +182,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
     col.insertBefore(slot,after?.nextSibling||col.firstChild);
     G.ui.slotEls.cup=slot;
     tankBtn=doc.createElement('div'); tankBtn.id='pet-tank'; tankBtn.innerHTML='테라리움 보기 <i></i>';
-    tankBtn.addEventListener('pointerdown',e=>{ e.stopPropagation(); e.preventDefault(); env.GSFX?.ensure?.(); sfx.go(); openTank(null); });
+    tankBtn.addEventListener('click',e=>{ e.stopPropagation(); e.preventDefault(); env.GSFX?.ensure?.(); sfx.go(); openTank(null); });
     (col.parentElement||doc.body).appendChild(tankBtn);
     updateSlot();
   }
@@ -342,8 +340,7 @@ export function createPetMode({gameFrame,onEnter=null,isBlocked=()=>false,onLab=
   }
   /** 게임을 새로 시작할 때 (gameFrame이 다시 로드될 때) */
   function reset(){
-    clearTimeout(signTimer);
-    resumeAfterSign=null;
+    cancelAnimationFrame(signFrame);
     cap=null; cupMesh=null; wrapped=null; hintShown=false; tankBtn=null;
     if(naming){ naming=null; nameEl.classList.remove('show'); nameEl.setAttribute('aria-hidden','true'); }
     if(tankOpen){ try{ tankApi()?.sleep?.(); }catch(err){} layer.classList.remove('open','loading'); layer.setAttribute('aria-hidden','true'); gameFrame.classList.remove('covered'); tankOpen=false; closeBusy=false; }

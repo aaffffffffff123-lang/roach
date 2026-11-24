@@ -719,7 +719,14 @@ export class Pet{
   act_drop(dt,a,T){
     if(a.v===undefined){ a.v=0; a.y=a.y0??0.5; a.spin=rand(-3,3); }
     a.v-=dt*2.4; a.y+=a.v*dt; this.h+=a.spin*dt; this.mode='slot'; T.flail=1;
-    if(a.y<=0){ a.y=0; this.world.sfx.drop?.(this.pos); if(a.calm){ this.floorPose(); this.setAct({type:'rest',dur:rand(4,8)}); return; } if(Math.random()<0.4){ this.floorPose(); this.setAct({type:'onback',dur:rand(0.8,1.6)}); } else { this.floorPose(); this.setAct({type:'flee',h:rand(TAU),dur:rand(0.8,1.4)}); } return; }
+    if(a.y<=0){
+      a.y=0; this.floorPose(); this.world.sfx.drop?.(this.tPos);
+      if(a.onLand){ this.snap=true; a.onLand(); }
+      if(a.calm) this.setAct({type:'rest',dur:rand(4,8)});
+      else if(Math.random()<0.4) this.setAct({type:'onback',dur:rand(0.8,1.6)});
+      else this.setAct({type:'flee',h:rand(TAU),dur:rand(0.8,1.4)});
+      return;
+    }
     this.tPos.set(this.x,a.y,this.z); this.tQuat.setFromAxisAngle(_up,this.h);
     const r=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.sin(a.t*5)*0.4); this.tQuat.multiply(r);
   }

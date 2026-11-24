@@ -198,7 +198,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { applyDeco, worldHitToBody, ROACH_L, POLISH_COLORS, POLISH_STYLES, STICKERS, stickerCanvas, GEMS, HAT_COLORS, hatMesh, bowMesh } from './bamung-roach.js';
 import { PROPS, PROP_CATS, makePoke, animatePoke } from './bamung-props.js';
-import { World, Pet, TANK, hasDeco } from './bamung-life.js';
+import { World, Pet, TANK, hasDeco } from './bamung-life.js?v=landing1';
 import { BubbleView, layoutBubbles, drawBubbles, typeTime } from './talk-bubble.js';
 import { ALL_LINES } from './bamung-talk.js';
 import { speak } from './roach-voice.js';
@@ -774,6 +774,7 @@ function loadPets(){
   for(const r of store.pets) spawnPet(r);
   return goneNow;
 }
+let arrivingPet=null, onEntryDrawn=null;
 /** 새 식구: 위에서 떨어뜨려 넣는다 */
 function arrive(opts={}){
   if(store.pets.length>=CAP){ toast('테라리움이 꽉 찼어요.'); return null; }
@@ -781,7 +782,9 @@ function arrive(opts={}){
   const spot=world.randomFree(40,false); rec.x=spot.x; rec.z=spot.z; rec.h=rand(TAU);
   store.pets.push(rec);
   const p=spawnPet(rec);
-  p.setAct({type:'drop',y0:0.95}); p.tPos.set(p.x,0.95,p.z); p.snap=true; p.labelT=7;
+  arrivingPet=p;
+  p.setAct({type:'drop',y0:0.95,onLand(){ if(arrivingPet===p) arrivingPet=null; }});
+  p.tPos.set(p.x,0.95,p.z); p.snap=true; p.labelT=7;
   world.queueGreet(p);
   save(); postCount(); refreshHud();
   return p;
@@ -1390,6 +1393,7 @@ function pushUndo(){ const p=deco.pet; if(!p) return; deco.undo.push(JSON.string
 function applyNow(react=true){ const p=deco.pet; if(!p) return; applyDeco(p.m,decoOf(p)); if(react){ p.m.flick=1; p.m.flickSide=Math.random()<0.5?1:-1; deco.lookAt=2.2; } }
 function startDeco(p){
   if(!p||p.dead||!world.pets.includes(p)) return;
+  if(p===arrivingPet) return;
   if(p.act?.type==='dying'){ toast(`${p.name}${jo(p.name,'은/는')} 지금 기운이 없어요.`); return; }
   if(deco.pet===p) return;
   if(deco.pet) finishDeco();
@@ -1742,6 +1746,10 @@ function frame(ts){
   const t=ts/1000; let dt=last?t-last:1/60; last=t;
   const d=Math.min(Math.max(dt,0),0.05);
   step(d); draw(d);
+  if(onEntryDrawn&&!arrivingPet){
+    const notify=onEntryDrawn; onEntryDrawn=null;
+    notify();
+  }
   // 느린 기기: 해상도를 조금씩 낮춘다
   perfT+=dt; perfSum+=dt; perfN++;
   if(perfT>3){ const avg=perfSum/perfN; perfT=0; perfSum=0; perfN=0; if(avg>0.034&&dprCap>1.01){ dprCap=Math.max(1,dprCap-0.25); resize(true); } }
@@ -1768,6 +1776,7 @@ function wake(){
   return api;
 }
 function sleep(){
+  onEntryDrawn=null;
   if(deco.pet) finishDeco();
   if(edit.inst) finishEdit(true);
   cancelGrab();
@@ -1786,6 +1795,7 @@ function resume(){ if(!paused) return api; paused=false; if(awake){ last=0; SFX.
 function enter(o={}){
   wake(); let added=null;
   if(o.arrive){ const p=arrive(o.arrive); if(p){ added={id:p.id,no:p.rec.no,name:p.name}; stopFollow(); } }
+  onEntryDrawn=(!o.arrive||added) ? o.onPresented : null;
   return added;
 }
 function reset(){ if(deco.pet) finishDeco(); if(edit.inst) finishEdit(true); cancelGrab(); if(mode==='pick'||mode==='tweezer') setMode('watch'); closeSheets(); stopFollow(); goHome(true); return api; }
