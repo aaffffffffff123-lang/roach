@@ -201,7 +201,7 @@ import { PROPS, PROP_CATS, makePoke, animatePoke } from './bamung-props.js';
 import { World, Pet, TANK, hasDeco } from './bamung-life.js?v=tank2';
 import { BubbleView, layoutBubbles, drawBubbles, typeTime } from './talk-bubble.js';
 import { ALL_LINES } from './bamung-talk.js';
-import { TANK_KEY, CAP, readTank, pickPetName, makeResident, sceneChanges, applyChanges, persistChanges } from './bamung-store.js';
+import { TANK_KEY, CAP, DECO_LIMITS, readTank, pickPetName, makeResident, sceneChanges, applyChanges, persistChanges } from './bamung-store.js';
 import { speak } from './roach-voice.js?v=voice1';
 
 // ══════════════════════════════════════════════════════════════════
@@ -258,9 +258,13 @@ function save(){
   saveIn=0; syncStore();
   const next=structuredClone(store);
   try{
-    const pending=persistChanges(sceneChanges(previous,next));
+    const delta=sceneChanges(previous,next);
+    const pending=persistChanges(delta);
     previous=next;
-    pending?.catch(err=>console.warn('테라리움 저장 대기',err));
+    Promise.resolve(pending).then(()=>{
+      // The writer receives no storage event for its own compaction (e.g. the last sticker slot).
+      if(awake && !document.hidden && delta.pets?.some(op=>op.deco)) refreshResidents();
+    }).catch(err=>console.warn('테라리움 저장 대기',err));
   }catch(err){ console.warn('테라리움 저장 실패',err); }
 }
 function saveSoon(s=0.7){ saveIn=saveIn?Math.min(saveIn,s):s; }
@@ -799,12 +803,14 @@ function needsGreeting(r){
   // Old saves omitted greeted while a new resident was waiting.
   return !r.dead && (r.greeted===0 || (!r.greeted && Date.now()-r.arrived<300000));
 }
-function refreshResidents(){
-  const latest=readScene(); if(!latest) return;
+function refreshResidents(latest=readScene()){
+  if(!latest) return;
   const base=Array.isArray(latest.pets)?latest.pets.filter(r=>r?.id&&r.born>0):[];
   // Keep current edits, while admitting other tabs' arrivals and respecting removals.
-  const delta=sceneChanges({pets:previous.pets},{pets:store.pets});
-  const merged=applyChanges({pets:structuredClone(base)},delta).pets;
+  const remoteFallen=Array.isArray(latest.fallen)?latest.fallen:[];
+  const delta=sceneChanges({pets:previous.pets,fallen:previous.fallen},{pets:store.pets,fallen:store.fallen});
+  const mergedScene=applyChanges(structuredClone({pets:base,fallen:remoteFallen}),delta);
+  const merged=mergedScene.pets;
   const byId=new Map(merged.filter(r=>r?.id&&r.born>0).map(r=>[r.id,r]));
   for(const p of [...world.pets]){
     const r=byId.get(p.id);
@@ -814,8 +820,15 @@ function refreshResidents(){
       // While the scene is running it owns the current pose and placement.
       const {x,z,h,deco:appearance,...fields}=r; Object.assign(p.rec,fields);
       if(changedDeco){
-        p.rec.deco=appearance||{}; applyDeco(p.m,p.rec.deco); clipToTank(p,!p.away);
-        if(deco.pet===p) renderDeco();
+        // The text editor's callbacks hold the live object. Keep its input and caret during a remote edit.
+        const typing=deco.pet===p && document.activeElement?.matches('#decoBody input');
+        if(typing){
+          const live=decoOf(p);
+          for(const key of Object.keys(live)) if(!Object.hasOwn(appearance||{},key)) delete live[key];
+          Object.assign(live,appearance);
+        }else p.rec.deco=appearance||{};
+        applyDeco(p.m,p.rec.deco); clipToTank(p,!p.away);
+        if(deco.pet===p && !typing) renderDeco();
       }
       if(r.dead&&!p.dead){
         if(deco.pet===p){
@@ -841,6 +854,8 @@ function refreshResidents(){
     if(needsGreeting(rec)) world.queueGreet(p);
   }
   store.pets=world.pets.map(p=>p.rec);
+  syncFallen(mergedScene.fallen.filter(f=>world.pets.some(p=>p.id===f.petId)));
+  previous.fallen=structuredClone(remoteFallen);
   previous.pets=structuredClone(base);
   previous.nextNo=latest.nextNo||1;
   store.nextNo=Math.max(store.nextNo,previous.nextNo);
@@ -1127,6 +1142,17 @@ function loadFallen(){ for(const f of store.fallen){ if(!world.pets.some(p=>p.id
 function disposeTree(o){ o.traverse(m=>{ if(!m.isMesh) return; m.geometry?.dispose?.(); for(const mt of Array.isArray(m.material)?m.material:[m.material]){ if(mt?.userData?.disposeMap) mt.map?.dispose(); mt?.dispose?.(); } }); }
 function removeFallen(e){ scene.remove(e.obj); disposeTree(e.obj); const i=fallen.indexOf(e); if(i>=0) fallen.splice(i,1); store.fallen=fallen.map(x=>x.f); }
 function removeFallenOf(id,type=null){ for(const e of fallen.filter(x=>x.f.petId===id&&(!type||x.f.type===type))) removeFallen(e); }
+// Reuse unchanged floor models so a remote save or undo does not restart their animation.
+function syncFallen(records){
+  const key=f=>f.petId+'/'+f.type;
+  const wanted=new Map(records.map(f=>[key(f),f]));
+  for(const e of [...fallen]){
+    const id=key(e.f);
+    if(JSON.stringify(e.f)===JSON.stringify(wanted.get(id))) wanted.delete(id);
+    else removeFallen(e);
+  }
+  for(const f of wanted.values()) spawnFallen(f,0);
+}
 function updateFallen(dt){ for(const e of fallen){ if(e.t>=0.6) continue; e.t+=dt; const k=Math.min(1,e.t/0.6); const b=e.obj.userData.baseY; e.obj.position.y=b+Math.max(0,(e.y0??b)-b)*(1-k*k)+Math.sin(k*PI)*0.012*(1-k); } }
 EV.hatFall=(p)=>{ const D=p.rec.deco; if(!D?.hat||D.hat.on===false||p.away) return; D.hat.on=false; applyDeco(p.m,D); clipToTank(p,true);
   const a=p.h+PI+rand(-0.6,0.6); spawnFallen({type:'hat',petId:p.id,c:D.hat.c,x:clamp(p.x+Math.sin(a)*0.05,-TANK.hw+0.02,TANK.hw-0.02),z:clamp(p.z+Math.cos(a)*0.05,-TANK.hd+0.02,TANK.hd-0.02),r:rand(TAU)},p.pos.y+0.03); S.pop(); };
@@ -1477,7 +1503,19 @@ function gemIcon(k){ if(iconCache[k]) return iconCache[k]; const c=document.crea
   return iconCache[k]=c.toDataURL(); }
 function stickerIcon(k){ const id='s_'+k; if(!iconCache[id]) iconCache[id]=stickerCanvas(k).toDataURL(); return iconCache[id]; }
 function decoOf(p){ const D=p.rec.deco||(p.rec.deco={}); return D; }
-function pushUndo(){ const p=deco.pet; if(!p) return; deco.undo.push({deco:structuredClone(decoOf(p)),fallen:fallen.filter(e=>e.f.petId===p.id).map(e=>({...e.f}))}); if(deco.undo.length>40) deco.undo.shift(); }
+function salonSnapshot(p){
+  return structuredClone({pets:[{id:p.id,deco:decoOf(p)}],fallen:store.fallen.filter(f=>f.petId===p.id)});
+}
+function editDeco(change){
+  const p=deco.pet, before=salonSnapshot(p);
+  change();
+  const inverse=sceneChanges(salonSnapshot(p),before);
+  if(Object.keys(inverse).length){
+    deco.undo.push(inverse);
+    if(deco.undo.length>40) deco.undo.shift();
+  }
+  applyNow();
+}
 function applyNow(react=true){ const p=deco.pet; if(!p) return; applyDeco(p.m,decoOf(p)); if(react){ p.m.flick=1; p.m.flickSide=Math.random()<0.5?1:-1; deco.lookAt=2.2; } }
 function startDeco(p){
   if(!p||p.dead||!world.pets.includes(p)) return;
@@ -1518,9 +1556,9 @@ function decoTap(x,y){
   ray.setFromCamera(ndc(x,y),camera); p.m.g.updateMatrixWorld(true);
   const hit=ray.intersectObject(p.m.body,false)[0]; if(!hit){ return; }
   const b=worldHitToBody(p.m,hit);
-  if(deco.tab==='polish'){ const part=partAt(b.p); if(!part) return; pushUndo(); D.polish=D.polish||{}; D.polish[part]={c:deco.color,s:deco.style}; applyNow(); S.brush(); return; }
-  if(deco.tab==='sticker'){ const L=D.stickers||(D.stickers=[]); if(L.length>=14){ toast('스티커는 열네 장까지 붙일 수 있어요.'); return; } pushUndo(); L.push({k:deco.sticker,p:b.p.map(r4),n:b.n.map(r4),r:r4(rand(-0.45,0.45)),s:deco.big?0.34:0.24}); applyNow(); S.sticker(); return; }
-  if(deco.tab==='gem'){ const L=D.gems||(D.gems=[]); if(L.length>=16){ toast('보석은 열여섯 개까지 붙일 수 있어요.'); return; } pushUndo(); L.push({k:deco.gem,p:b.p.map(r4),n:b.n.map(r4),r:r4(rand(TAU))}); applyNow(); S.gem(); return; }
+  if(deco.tab==='polish'){ const part=partAt(b.p); if(!part) return; editDeco(()=>{ D.polish=D.polish||{}; D.polish[part]={c:deco.color,s:deco.style}; }); S.brush(); return; }
+  if(deco.tab==='sticker'){ const L=D.stickers||(D.stickers=[]); if(L.length>=DECO_LIMITS.stickers){ toast('스티커는 열네 장까지 붙일 수 있어요.'); return; } editDeco(()=>{ L.push({id:crypto.randomUUID(),k:deco.sticker,p:b.p.map(r4),n:b.n.map(r4),r:r4(rand(-0.45,0.45)),s:deco.big?0.34:0.24}); }); S.sticker(); return; }
+  if(deco.tab==='gem'){ const L=D.gems||(D.gems=[]); if(L.length>=DECO_LIMITS.gems){ toast('보석은 열여섯 개까지 붙일 수 있어요.'); return; } editDeco(()=>{ L.push({id:crypto.randomUUID(),k:deco.gem,p:b.p.map(r4),n:b.n.map(r4),r:r4(rand(TAU))}); }); S.gem(); return; }
 }
 function renderDeco(){
   const p=deco.pet; if(!p) return; const D=decoOf(p);
@@ -1531,7 +1569,7 @@ function renderDeco(){
   const opts=(list,cur,on)=>{ const w=el('div','opt'); for(const [k,t] of list){ const b=el('button',k===cur?'on':'',t); b.type='button'; b.addEventListener('click',e=>{ e.stopPropagation(); on(k); S.ui(); }); w.appendChild(b); } return w; };
   if(deco.tab==='polish'){
     body.append(swatches(POLISH_COLORS,deco.color,c=>{ deco.color=c; renderDeco(); }));
-    body.append(opts([...POLISH_STYLES,['all','전체 바르기']],deco.style,k=>{ if(k==='all'){ pushUndo(); D.polish=D.polish||{}; for(const part of ['L','R','P']) D.polish[part]={c:deco.color,s:deco.style}; applyNow(); S.brush(); return; } deco.style=k; renderDeco(); }));
+    body.append(opts([...POLISH_STYLES,['all','전체 바르기']],deco.style,k=>{ if(k==='all'){ editDeco(()=>{ D.polish=D.polish||{}; for(const part of ['L','R','P']) D.polish[part]={c:deco.color,s:deco.style}; }); S.brush(); return; } deco.style=k; renderDeco(); }));
     body.append(el('p','hint','날개나 등판을 눌러 칠해 주세요.'));
   } else if(deco.tab==='sticker'){
     const g=el('div','thumbs'); for(const [k,t] of STICKERS){ const b=el('button',k===deco.sticker?'on':''); b.type='button'; b.title=t; const im=new Image(); im.src=stickerIcon(k); im.alt=t; b.appendChild(im); b.addEventListener('click',e=>{ e.stopPropagation(); deco.sticker=k; renderDeco(); S.ui(); }); g.appendChild(b); }
@@ -1540,23 +1578,33 @@ function renderDeco(){
     const g=el('div','thumbs'); for(const [k,t] of GEMS){ const b=el('button',k===deco.gem?'on':''); b.type='button'; b.title=t; const im=new Image(); im.src=gemIcon(k); im.alt=t; b.appendChild(im); b.addEventListener('click',e=>{ e.stopPropagation(); deco.gem=k; renderDeco(); S.ui(); }); g.appendChild(b); }
     body.append(g, el('p','hint','몸을 눌러 붙여 주세요.'));
   } else if(deco.tab==='hat'){
-    body.append(el('div','lbl','털모자'), swatches(HAT_COLORS,D.hat&&D.hat.on!==false?D.hat.c:null,c=>{ pushUndo(); D.hat={c,on:true}; removeFallenOf(p.id,'hat'); applyNow(); S.hat(); renderDeco(); }));
-    if(D.hat){ const o=el('div','opt'); const b=el('button','','모자 벗기기'); b.type='button'; b.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); delete D.hat; removeFallenOf(p.id,'hat'); applyNow(); S.pop(); renderDeco(); }); o.appendChild(b); body.append(o); }
-    body.append(el('div','lbl',''), el('div','lbl','더듬이 리본'), swatches(BOW_COLORS,D.abow&&D.abow.on!==false?D.abow.c:null,c=>{ pushUndo(); D.abow={side:D.abow?.side||1,c,on:true}; removeFallenOf(p.id,'bow'); applyNow(); S.sticker(); renderDeco(); }));
-    if(D.abow){ const o=el('div','opt'); const b1=el('button','',D.abow.side===-1?'오른쪽 더듬이로':'왼쪽 더듬이로'); b1.type='button'; b1.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); D.abow.side=D.abow.side===-1?1:-1; applyNow(); renderDeco(); }); const b2=el('button','','리본 떼기'); b2.type='button'; b2.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); delete D.abow; removeFallenOf(p.id,'bow'); applyNow(); S.pop(); renderDeco(); }); o.append(b1,b2); body.append(o); }
+    body.append(el('div','lbl','털모자'), swatches(HAT_COLORS,D.hat&&D.hat.on!==false?D.hat.c:null,c=>{ editDeco(()=>{ D.hat={c,on:true}; removeFallenOf(p.id,'hat'); }); S.hat(); renderDeco(); }));
+    if(D.hat){ const o=el('div','opt'); const b=el('button','','모자 벗기기'); b.type='button'; b.addEventListener('click',e=>{ e.stopPropagation(); editDeco(()=>{ delete D.hat; removeFallenOf(p.id,'hat'); }); S.pop(); renderDeco(); }); o.appendChild(b); body.append(o); }
+    body.append(el('div','lbl',''), el('div','lbl','더듬이 리본'), swatches(BOW_COLORS,D.abow&&D.abow.on!==false?D.abow.c:null,c=>{ editDeco(()=>{ D.abow={side:D.abow?.side||1,c,on:true}; removeFallenOf(p.id,'bow'); }); S.sticker(); renderDeco(); }));
+    if(D.abow){ const o=el('div','opt'); const b1=el('button','',D.abow.side===-1?'오른쪽 더듬이로':'왼쪽 더듬이로'); b1.type='button'; b1.addEventListener('click',e=>{ e.stopPropagation(); editDeco(()=>{ D.abow.side=D.abow.side===-1?1:-1; }); renderDeco(); }); const b2=el('button','','리본 떼기'); b2.type='button'; b2.addEventListener('click',e=>{ e.stopPropagation(); editDeco(()=>{ delete D.abow; removeFallenOf(p.id,'bow'); }); S.pop(); renderDeco(); }); o.append(b1,b2); body.append(o); }
   } else if(deco.tab==='text'){
     const line=el('div','line'); const inp=el('input','field'); inp.maxLength=12; inp.placeholder='등에 쓸 글씨'; inp.value=D.text?.t||p.name; inp.setAttribute('enterkeyhint','done'); inp.autocomplete='off';
     const go=el('button','','쓰기'); go.type='button';
-    const write=()=>{ const t=Array.from(inp.value.trim()).slice(0,6).join(''); if(!t){ if(D.text){ pushUndo(); delete D.text; applyNow(); } return; } pushUndo(); D.text={t,c:deco.textColor}; applyNow(); S.brush(); try{ inp.blur(); }catch(e){} };
+    const write=()=>{ const t=Array.from(inp.value.trim()).slice(0,6).join(''); if(!t){ if(D.text){ editDeco(()=>{ delete D.text; }); } return; } editDeco(()=>{ D.text={t,c:deco.textColor}; }); S.brush(); try{ inp.blur(); }catch(e){} };
     go.addEventListener('click',e=>{ e.stopPropagation(); write(); }); inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); write(); } });
     line.append(inp,go); body.append(line);
-    const sw=swatches(TEXT_COLORS,deco.textColor,c=>{ deco.textColor=c; if(D.text){ pushUndo(); D.text.c=c; applyNow(); } renderDeco(); }); sw.style.marginTop='10px'; body.append(sw);
-    if(D.text){ const o=el('div','opt'); const b=el('button','','글씨 지우기'); b.type='button'; b.addEventListener('click',e=>{ e.stopPropagation(); pushUndo(); delete D.text; applyNow(); renderDeco(); }); o.appendChild(b); body.append(o); }
+    const sw=swatches(TEXT_COLORS,deco.textColor,c=>{ deco.textColor=c; if(D.text){ editDeco(()=>{ D.text.c=c; }); } renderDeco(); }); sw.style.marginTop='10px'; body.append(sw);
+    if(D.text){ const o=el('div','opt'); const b=el('button','','글씨 지우기'); b.type='button'; b.addEventListener('click',e=>{ e.stopPropagation(); editDeco(()=>{ delete D.text; }); renderDeco(); }); o.appendChild(b); body.append(o); }
     else body.append(el('p','hint','여섯 글자까지 등에 써 줄 수 있어요.'));
   }
 }
 $('decoTabs').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; e.stopPropagation(); deco.tab=b.dataset.t; renderDeco(); S.ui(); });
-$('deco').querySelector('[data-a="undo"]').addEventListener('click',e=>{ e.stopPropagation(); const p=deco.pet; if(!p) return; const s=deco.undo.pop(); if(s===undefined){ toast('되돌릴 게 없어요.'); return; } p.rec.deco=s.deco; removeFallenOf(p.id); for(const f of s.fallen) spawnFallen(f,0); applyNow(false); renderDeco(); S.pop(); });
+$('deco').querySelector('[data-a="undo"]').addEventListener('click',e=>{
+  e.stopPropagation();
+  const p=deco.pet;
+  if(!p) return;
+  const inverse=deco.undo.pop();
+  if(!inverse){ toast('되돌릴 게 없어요.'); return; }
+  const restored=applyChanges(salonSnapshot(p),inverse);
+  p.rec.deco=restored.pets[0].deco;
+  if(inverse.fallen) syncFallen([...store.fallen.filter(f=>f.petId!==p.id),...restored.fallen]);
+  applyNow(false); renderDeco(); S.pop();
+});
 $('deco').querySelector('[data-a="decoDone"]').addEventListener('click',e=>{ e.stopPropagation(); S.ui(); finishDeco(); });
 // ───────── 꾸미기를 시작하면 꾸며지는 놈이 혼자 한마디 한다 (bamung-talk.js의 DECO_START) ─────────
 const decoLine={p:null,text:'',t:0,wait:0,phase:'none',fade:0,id:0,voice:null};
@@ -1862,11 +1910,14 @@ function releaseScreen(){ try{ wakeLock?.release?.(); }catch(e){} wakeLock=null;
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){ save(); SFX.suspend(); releaseScreen(); } else if(awake){ last=0; refreshResidents(); if(!paused) SFX.resume(); holdScreen(); checkAges(); } });
 window.addEventListener('storage',e=>{
   if(e.key!==TANK_KEY||!awake||document.hidden) return;
-  const residents=readScene()?.pets;
-  if(Array.isArray(residents) && (residents.length!==store.pets.length || residents.some((r,i)=>{
-    const p=store.pets[i];
-    return !r||!p||p.id!==r.id||p.name!==r.name||!!p.dead!==!!r.dead;
-  }))) refreshResidents();
+  const latest=readScene(), residents=latest?.pets;
+  if(Array.isArray(residents) && (residents.length!==store.pets.length ||
+    JSON.stringify(latest.fallen||[])!==JSON.stringify(previous.fallen||[]) ||
+    residents.some((r,i)=>{
+      const p=store.pets[i], seen=previous.pets?.[i];
+      return !r||!p||p.id!==r.id||p.name!==r.name||!!p.dead!==!!r.dead||
+        JSON.stringify(seen?.deco||{})!==JSON.stringify(r.deco||{});
+    }))) refreshResidents(latest);
 });
 window.addEventListener('pagehide',()=>save());
 
